@@ -18,7 +18,7 @@ export function Sidebar({
   return (
     <aside className="w-64 bg-gray-900 border-r border-gray-700 flex flex-col h-full shrink-0">
       <div className="p-4 border-b border-gray-700">
-        <h1 className="text-white font-bold text-lg tracking-tight">KindleManager</h1>
+        <h1 className="text-white font-bold text-lg tracking-tight">Kindle Manager</h1>
         <p className="text-gray-400 text-xs mt-0.5">La tua libreria Kindle</p>
       </div>
 

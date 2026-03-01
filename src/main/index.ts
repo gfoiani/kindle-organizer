@@ -11,7 +11,7 @@ function createWindow(): BrowserWindow {
     height: WINDOW_HEIGHT,
     minWidth: 800,
     minHeight: 600,
-    title: 'KindleManager',
+    title: 'Kindle Manager',
     backgroundColor: '#1a1a2e',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),

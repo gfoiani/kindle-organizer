@@ -24,6 +24,9 @@ function BookCard({ book }: { book: KindleBook }) {
       <h3 className="text-white text-sm font-medium leading-tight line-clamp-2 group-hover:text-indigo-300 transition-colors">
         {book.title}
       </h3>
+      {book.author && (
+        <p className="text-gray-500 text-xs mt-1 truncate">{book.author}</p>
+      )}
     </div>
   )
 }

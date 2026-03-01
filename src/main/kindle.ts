@@ -14,6 +14,7 @@ export interface KindleDrive {
 export interface KindleBook {
   filename: string
   title: string
+  author?: string
   extension: string
   size: number
   path: string
@@ -53,6 +54,40 @@ export async function detectKindleDrives(): Promise<KindleDrive[]> {
     }))
 }
 
+const JUNK_EXTENSIONS = ['.sdr']
+
+async function scanBooks(dirPath: string, author?: string): Promise<KindleBook[]> {
+  const entries = await fs.readdir(dirPath, { withFileTypes: true })
+  const books: KindleBook[] = []
+
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
+
+    if (entry.isDirectory()) {
+      if (JUNK_EXTENSIONS.includes(path.extname(entry.name).toLowerCase())) continue
+      const subBooks = await scanBooks(path.join(dirPath, entry.name), entry.name)
+      books.push(...subBooks)
+    } else if (entry.isFile()) {
+      const ext = path.extname(entry.name).toLowerCase()
+      if (!SUPPORTED_EXTENSIONS.includes(ext)) continue
+
+      const filePath = path.join(dirPath, entry.name)
+      const stats = await fs.stat(filePath)
+
+      books.push({
+        filename: entry.name,
+        title: path.basename(entry.name, ext),
+        author,
+        extension: ext.replace('.', '').toUpperCase(),
+        size: stats.size,
+        path: filePath
+      })
+    }
+  }
+
+  return books
+}
+
 export async function readDocuments(kindleMountpoint: string): Promise<KindleBook[]> {
   const documentsPath = path.join(kindleMountpoint, 'documents')
 
@@ -61,27 +96,7 @@ export async function readDocuments(kindleMountpoint: string): Promise<KindleBoo
     return []
   }
 
-  const entries = await fs.readdir(documentsPath, { withFileTypes: true })
-  const books: KindleBook[] = []
-
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-
-    const ext = path.extname(entry.name).toLowerCase()
-    if (!SUPPORTED_EXTENSIONS.includes(ext)) continue
-
-    const filePath = path.join(documentsPath, entry.name)
-    const stats = await fs.stat(filePath)
-
-    books.push({
-      filename: entry.name,
-      title: path.basename(entry.name, ext),
-      extension: ext.replace('.', '').toUpperCase(),
-      size: stats.size,
-      path: filePath
-    })
-  }
-
+  const books = await scanBooks(documentsPath)
   return books.sort((a, b) => a.title.localeCompare(b.title))
 }
 

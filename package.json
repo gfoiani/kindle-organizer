@@ -37,8 +37,8 @@
     "vite": "^7.3.1"
   },
   "build": {
-    "appId": "com.kindlemanager.app",
-    "productName": "KindleManager",
+    "appId": "com.kindleorganizer.app",
+    "productName": "Kindle Manager",
     "npmRebuild": true,
     "asar": true,
     "asarUnpack": [
