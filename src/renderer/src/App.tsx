@@ -84,6 +84,14 @@ export function App() {
   }, [loadKindle])
 
   useEffect(() => {
+    window.kindleAPI.onShowAbout(() => {
+      setIsShowingAbout(true)
+      setIsShowingSettings(false)
+      setSelectedCollectionId(null)
+    })
+  }, [])
+
+  useEffect(() => {
     if (selectedCollectionId === null) {
       setCollectionBookPaths(new Set())
       return

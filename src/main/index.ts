@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import path from 'path'
 import { registerIpcHandlers } from './ipc'
+import { setupMenu } from './menu'
 
 const WINDOW_WIDTH = 1200
 const WINDOW_HEIGHT = 780
@@ -20,6 +21,9 @@ function createWindow(): BrowserWindow {
       sandbox: false
     }
   })
+
+  // Set up the system menu
+  setupMenu(win)
 
   // Open external links in the browser instead of the app
   win.webContents.setWindowOpenHandler(({ url }) => {
