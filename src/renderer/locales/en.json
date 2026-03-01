@@ -1,0 +1,77 @@
+{
+  "app": {
+    "title": "Kindle Organizer"
+  },
+  "sidebar": {
+    "title": "Kindle Organizer",
+    "subtitle": "Your Kindle library",
+    "library": "Library",
+    "allBooks": "All books",
+    "collections": "Collections",
+    "newCollection": "New collection",
+    "collectionPlaceholder": "Collection name...",
+    "noCollections": "No collections. Use the {{symbol}} button to create one, or connect a Kindle with Calibre to import them automatically.",
+    "rename": "Rename",
+    "delete": "Delete",
+    "settings": "Settings",
+    "about": "About"
+  },
+  "header": {
+    "collection": "Collection",
+    "writeToKindle": "Write collections to metadata.calibre on Kindle",
+    "writingToKindle": "Saving...",
+    "saved": "Saved",
+    "error": "Error",
+    "writeKindle": "Write to Kindle",
+    "refresh": "Refresh",
+    "refreshLoading": "Refreshing..."
+  },
+  "settings": {
+    "title": "Settings",
+    "coverCache": "Cover cache",
+    "cacheCoverDescription": "Book covers are downloaded from Google Books and Open Library and stored in a local cache for better performance. You can clear the cache to reload all covers.",
+    "clearCache": "Clear cache",
+    "clearingCache": "Clearing cache...",
+    "cacheCleared": "Cache cleared",
+    "cacheError": "Error",
+    "cacheInfo": "After clearing the cache, covers will be reloaded on the next library refresh.",
+    "language": "Language",
+    "selectLanguage": "Select language"
+  },
+  "books": {
+    "addToCollection": "Add to collection",
+    "removeFromCollection": "Remove from collection",
+    "noBooks": "No books found",
+    "loadingBooks": "Loading books...",
+    "book": "book",
+    "books": "books"
+  },
+  "collectionPicker": {
+    "loading": "Loading...",
+    "noCollections": "No collections available"
+  },
+  "emptyState": {
+    "noKindleDetected": "No Kindle detected",
+    "connectKindle": "Connect your Kindle via USB to see your books",
+    "noBooks": "No books found",
+    "emptyDocuments": "The Kindle's documents folder appears to be empty"
+  },
+  "about": {
+    "title": "About",
+    "appName": "Kindle Organizer",
+    "version": "Version {{version}}",
+    "description": "Manage and organize your Kindle library with ease",
+    "descriptionLong": "Kindle Organizer is a desktop tool that allows you to organize your Kindle books into collections, manage covers, and sync data with your device.",
+    "features": "Features",
+    "feature1": "Collection Management - Create, modify, and delete collections to organize your books",
+    "feature2": "Cover Download - Automatically from Google Books and Open Library",
+    "feature3": "Kindle Sync - Write your collections directly to your device",
+    "feature4": "Multi-language Support - Available in Italian and English",
+    "feature5": "Local Cache - Superior speed with intelligent caching",
+    "technologies": "Technologies",
+    "credits": "Credits",
+    "builtWith": "Built with",
+    "github": "Project on GitHub",
+    "license": "MIT License"
+  }
+}
