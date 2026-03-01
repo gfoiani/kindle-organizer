@@ -16,6 +16,7 @@ export interface KindleAPI {
   deleteCollection: (id: string) => Promise<void>
   addBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   removeBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
+  getCover: (title: string, author?: string) => Promise<string | null>
 }
 
 export const kindleAPI: KindleAPI = {
@@ -47,5 +48,8 @@ export const kindleAPI: KindleAPI = {
     ipcRenderer.invoke('kindle:add-book-to-collection', collectionId, bookRelpath),
 
   removeBookFromCollection: (collectionId: string, bookRelpath: string) =>
-    ipcRenderer.invoke('kindle:remove-book-from-collection', collectionId, bookRelpath)
+    ipcRenderer.invoke('kindle:remove-book-from-collection', collectionId, bookRelpath),
+
+  getCover: (title: string, author?: string) =>
+    ipcRenderer.invoke('kindle:get-cover', title, author)
 }

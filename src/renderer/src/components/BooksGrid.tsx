@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { KindleBook, Collection } from '../../../preload/api'
 import { CollectionPicker } from './CollectionPicker'
 
@@ -32,38 +32,73 @@ function BookCard({
   onRemoveFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [cover, setCover] = useState<string | null>(null)
+  const [coverLoading, setCoverLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    window.kindleAPI
+      .getCover(book.title, book.author)
+      .then((dataUrl) => { if (!cancelled) setCover(dataUrl) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setCoverLoading(false) })
+    return () => { cancelled = true }
+  }, [book.title, book.author])
 
   return (
-    <div className="relative bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-indigo-500 transition-colors cursor-pointer group">
-      <div className="flex items-start justify-between mb-3">
-        <div className="w-10 h-12 bg-indigo-900 rounded flex items-center justify-center shrink-0">
-          <span className="text-indigo-300 text-xs font-bold">{book.extension}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="text-gray-500 text-xs">{formatSize(book.size)}</span>
-          {collections.length > 0 && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setPickerOpen((v) => !v)
-              }}
-              title="Gestisci collezioni"
-              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-gray-500 hover:text-indigo-400 hover:bg-gray-700"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-              </svg>
-            </button>
-          )}
-        </div>
+    <div className="relative bg-gray-800 border border-gray-700 rounded-lg overflow-hidden hover:border-indigo-500 transition-colors cursor-pointer group flex flex-col">
+      {/* Cover area — 2:3 book aspect ratio */}
+      <div className="relative w-full aspect-[2/3] bg-gray-900 flex items-center justify-center overflow-hidden shrink-0">
+        {coverLoading ? (
+          <div className="absolute inset-0 bg-gray-800 animate-pulse" />
+        ) : cover ? (
+          <img
+            src={cover}
+            alt={book.title}
+            onError={() => setCover(null)}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        ) : (
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-indigo-300 text-xl font-bold">{book.extension}</span>
+          </div>
+        )}
+
+        {/* Format badge */}
+        {!coverLoading && (
+          <span className="absolute top-2 left-2 bg-black/60 text-indigo-300 text-[10px] font-bold px-1.5 py-0.5 rounded">
+            {book.extension}
+          </span>
+        )}
+
+        {/* Collection tag button */}
+        {collections.length > 0 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setPickerOpen((v) => !v)
+            }}
+            title="Gestisci collezioni"
+            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-black/60 text-gray-300 hover:text-indigo-300"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+          </button>
+        )}
+
       </div>
 
-      <h3 className="text-white text-sm font-medium leading-tight line-clamp-2 group-hover:text-indigo-300 transition-colors">
-        {book.title}
-      </h3>
-      {book.author && (
-        <p className="text-gray-500 text-xs mt-1 truncate">{book.author}</p>
-      )}
+      {/* Info area */}
+      <div className="p-3 flex flex-col gap-0.5">
+        <h3 className="text-white text-xs font-medium leading-tight line-clamp-2 group-hover:text-indigo-300 transition-colors">
+          {book.title}
+        </h3>
+        {book.author && (
+          <p className="text-gray-500 text-[11px] truncate">{book.author}</p>
+        )}
+        <p className="text-gray-600 text-[10px] mt-0.5">{formatSize(book.size)}</p>
+      </div>
 
       {pickerOpen && (
         <CollectionPicker

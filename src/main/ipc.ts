@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { detectKindleDrives, readDocuments } from './kindle'
 import { readCalibreMetadata, writeCalibreMetadata } from './calibre'
+import { getCover } from './covers'
 import {
   getCollections,
   getCollectionBooks,
@@ -70,4 +71,8 @@ export function registerIpcHandlers(): void {
       removeBookFromCollection(collectionId, bookRelpath)
     }
   )
+
+  ipcMain.handle('kindle:get-cover', async (_, title: string, author?: string) => {
+    return getCover(title, author)
+  })
 }
