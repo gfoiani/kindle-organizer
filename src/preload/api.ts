@@ -18,6 +18,7 @@ export interface KindleAPI {
   removeBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   getCover: (title: string, author?: string) => Promise<string | null>
   clearCoverCache: () => Promise<void>
+  onShowAbout: (callback: () => void) => void
 }
 
 export const kindleAPI: KindleAPI = {
@@ -54,5 +55,10 @@ export const kindleAPI: KindleAPI = {
   getCover: (title: string, author?: string) =>
     ipcRenderer.invoke('kindle:get-cover', title, author),
 
-  clearCoverCache: () => ipcRenderer.invoke('kindle:clear-cover-cache')
+  clearCoverCache: () => ipcRenderer.invoke('kindle:clear-cover-cache'),
+
+  onShowAbout: (callback: () => void) => {
+    ipcRenderer.removeAllListeners('show-about')
+    ipcRenderer.on('show-about', () => callback())
+  }
 }
