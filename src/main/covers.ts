@@ -110,16 +110,29 @@ async function searchGoogleBooks(
   if (author) query += `+inauthor:${encodeURIComponent(author)}`
   const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1&fields=items(volumeInfo/imageLinks)`
 
-  const body = await fetchUrlWithRetry(url)
-  const json = JSON.parse(body.toString('utf-8')) as unknown
-  if (typeof json !== 'object' || json === null) return null
+  try {
+    const body = await fetchUrlWithRetry(url)
+    const json = JSON.parse(body.toString('utf-8')) as unknown
+    if (typeof json !== 'object' || json === null) {
+      console.log(`[searchGoogleBooks] Invalid JSON response`)
+      return null
+    }
 
-  const thumbnail = (
-    json as { items?: [{ volumeInfo?: { imageLinks?: { thumbnail?: string } } }] }
-  )?.items?.[0]?.volumeInfo?.imageLinks?.thumbnail
-  if (typeof thumbnail !== 'string') return null
+    const thumbnail = (
+      json as { items?: [{ volumeInfo?: { imageLinks?: { thumbnail?: string } } }] }
+    )?.items?.[0]?.volumeInfo?.imageLinks?.thumbnail
+    if (typeof thumbnail !== 'string') {
+      console.log(`[searchGoogleBooks] No thumbnail found`)
+      return null
+    }
 
-  return thumbnail.replace('http://', 'https://').replace('zoom=1', 'zoom=2')
+    const result = thumbnail.replace('http://', 'https://').replace('zoom=1', 'zoom=2')
+    console.log(`[searchGoogleBooks] Found thumbnail: ${result}`)
+    return result
+  } catch (err) {
+    console.log(`[searchGoogleBooks] Error: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
 }
 
 async function searchOpenLibrary(
@@ -130,24 +143,39 @@ async function searchOpenLibrary(
   if (author) query += `&author=${encodeURIComponent(author)}`
   const url = `https://openlibrary.org/search.json?${query}&limit=1&fields=cover_i`
 
-  const body = await fetchUrlWithRetry(url)
-  const json = JSON.parse(body.toString('utf-8')) as unknown
-  if (typeof json !== 'object' || json === null) return null
+  try {
+    const body = await fetchUrlWithRetry(url)
+    const json = JSON.parse(body.toString('utf-8')) as unknown
+    if (typeof json !== 'object' || json === null) {
+      console.log(`[searchOpenLibrary] Invalid JSON response`)
+      return null
+    }
 
-  const coverId = (json as { docs?: [{ cover_i?: number }] })?.docs?.[0]?.cover_i
-  if (typeof coverId !== 'number') return null
+    const coverId = (json as { docs?: [{ cover_i?: number }] })?.docs?.[0]?.cover_i
+    if (typeof coverId !== 'number') {
+      console.log(`[searchOpenLibrary] No cover_i found`)
+      return null
+    }
 
-  return `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`
+    const result = `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`
+    console.log(`[searchOpenLibrary] Found cover: ${result}`)
+    return result
+  } catch (err) {
+    console.log(`[searchOpenLibrary] Error: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function getCover(title: string, author: string | undefined): Promise<string | null> {
+  console.log(`[getCover] Searching for cover: title="${title}", author="${author}"`)
   const key = getCacheKey(title, author)
   const cachePath = getCachePath(key)
 
   // Cache hit — no slot needed
   if (fs.existsSync(cachePath)) {
+    console.log(`[getCover] Cache hit for key ${key}`)
     const data = fs.readFileSync(cachePath)
     if (data.length === 0) return null // negative cache marker
     return `data:image/jpeg;base64,${data.toString('base64')}`
@@ -161,31 +189,37 @@ export async function getCover(title: string, author: string | undefined): Promi
     let imageUrl: string | null = null
     try {
       imageUrl = await searchGoogleBooks(title, author)
-    } catch {
+    } catch (err) {
       // Google Books failed; try Open Library
+      console.log(`[getCover] Google Books search failed: ${err instanceof Error ? err.message : String(err)}`)
     }
 
     if (!imageUrl) {
       try {
         imageUrl = await searchOpenLibrary(title, author)
-      } catch {
+      } catch (err) {
         // Open Library also failed; give up for this session (no negative cache)
+        console.log(`[getCover] Open Library search failed: ${err instanceof Error ? err.message : String(err)}`)
         return null
       }
     }
 
     if (!imageUrl) {
+      console.log(`[getCover] No image URL found, writing negative cache`)
       fs.writeFileSync(cachePath, Buffer.alloc(0)) // negative cache
       return null
     }
 
+    console.log(`[getCover] Downloading image from ${imageUrl}`)
     const imageData = await fetchUrlWithRetry(imageUrl)
     if (imageData.length < 500) {
       // Too small — likely a placeholder/error image
+      console.log(`[getCover] Image too small (${imageData.length} bytes), writing negative cache`)
       fs.writeFileSync(cachePath, Buffer.alloc(0))
       return null
     }
 
+    console.log(`[getCover] Successfully cached image (${imageData.length} bytes)`)
     fs.writeFileSync(cachePath, imageData)
     // Small courtesy delay after each successful network operation
     await delay(100)
