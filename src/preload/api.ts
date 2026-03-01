@@ -1,18 +1,14 @@
 import { ipcRenderer } from 'electron'
-import type {
-  KindleDrive,
-  KindleBook,
-  Collection,
-  CollectionItem
-} from '../main/kindle'
+import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
 
-export type { KindleDrive, KindleBook, Collection, CollectionItem }
+export type { KindleDrive, KindleBook, Collection }
 
 export interface KindleAPI {
   detectKindleDrives: () => Promise<KindleDrive[]>
   readDocuments: (kindleMountpoint: string) => Promise<KindleBook[]>
-  queryCollections: (dbPath: string) => Promise<Collection[]>
-  queryCollectionItems: (dbPath: string, collectionId: string) => Promise<CollectionItem[]>
+  syncCalibre: (mountpoint: string) => Promise<void>
+  getLocalCollections: () => Promise<Collection[]>
+  getCollectionBooks: (collectionId: string) => Promise<string[]>
 }
 
 export const kindleAPI: KindleAPI = {
@@ -21,9 +17,10 @@ export const kindleAPI: KindleAPI = {
   readDocuments: (kindleMountpoint: string) =>
     ipcRenderer.invoke('kindle:read-documents', kindleMountpoint),
 
-  queryCollections: (dbPath: string) =>
-    ipcRenderer.invoke('kindle:query-collections', dbPath),
+  syncCalibre: (mountpoint: string) => ipcRenderer.invoke('kindle:sync-calibre', mountpoint),
 
-  queryCollectionItems: (dbPath: string, collectionId: string) =>
-    ipcRenderer.invoke('kindle:query-collection-items', { dbPath, collectionId })
+  getLocalCollections: () => ipcRenderer.invoke('kindle:get-local-collections'),
+
+  getCollectionBooks: (collectionId: string) =>
+    ipcRenderer.invoke('kindle:get-collection-books', collectionId)
 }

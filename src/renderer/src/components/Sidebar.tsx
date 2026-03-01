@@ -1,4 +1,4 @@
-import type { Collection } from '../../../../preload/api'
+import type { Collection } from '../../../preload/api'
 
 interface SidebarProps {
   collections: Collection[]
@@ -49,8 +49,9 @@ export function Sidebar({
           )}
 
           {!isLoading && collections.length === 0 && (
-            <div className="px-3 py-2 text-gray-600 text-xs italic">
-              Nessuna collezione trovata
+            <div className="px-3 py-2 text-gray-600 text-xs leading-relaxed">
+              Le collezioni non sono disponibili su questo Kindle. Dalla firmware 5.9+
+              sono gestite solo nel cloud Amazon.
             </div>
           )}
 

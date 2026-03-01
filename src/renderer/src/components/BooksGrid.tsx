@@ -1,4 +1,4 @@
-import type { KindleBook } from '../../../../preload/api'
+import type { KindleBook } from '../../../preload/api'
 
 interface BooksGridProps {
   books: KindleBook[]

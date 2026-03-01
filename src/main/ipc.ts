@@ -1,10 +1,7 @@
 import { ipcMain } from 'electron'
-import {
-  detectKindleDrives,
-  readDocuments,
-  queryCollections,
-  queryCollectionItems
-} from './kindle'
+import { detectKindleDrives, readDocuments } from './kindle'
+import { readCalibreMetadata } from './calibre'
+import { getCollections, getCollectionBooks, importFromCalibre } from './localCollections'
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('kindle:detect-drives', async () => {
@@ -15,14 +12,16 @@ export function registerIpcHandlers(): void {
     return readDocuments(kindleMountpoint)
   })
 
-  ipcMain.handle('kindle:query-collections', async (_, dbPath: string) => {
-    return queryCollections(dbPath)
+  ipcMain.handle('kindle:sync-calibre', async (_, mountpoint: string) => {
+    const calibreBooks = readCalibreMetadata(mountpoint)
+    importFromCalibre(calibreBooks)
   })
 
-  ipcMain.handle(
-    'kindle:query-collection-items',
-    async (_, { dbPath, collectionId }: { dbPath: string; collectionId: string }) => {
-      return queryCollectionItems(dbPath, collectionId)
-    }
-  )
+  ipcMain.handle('kindle:get-local-collections', async () => {
+    return getCollections()
+  })
+
+  ipcMain.handle('kindle:get-collection-books', async (_, collectionId: string) => {
+    return getCollectionBooks(collectionId)
+  })
 }

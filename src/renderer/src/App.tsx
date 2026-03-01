@@ -3,40 +3,15 @@ import { Sidebar } from './components/Sidebar'
 import { BooksGrid } from './components/BooksGrid'
 import type { KindleDrive, KindleBook, Collection } from '../../preload/api'
 
-const COLLECTIONS_DB_RELATIVE = 'system/collections.db'
-
-function joinPath(...parts: string[]): string {
-  return parts.join('/').replace(/\/+/g, '/')
-}
-
 export function App() {
   const [kindle, setKindle] = useState<KindleDrive | null>(null)
   const [books, setBooks] = useState<KindleBook[]>([])
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null)
+  const [collectionBookPaths, setCollectionBookPaths] = useState<Set<string>>(new Set())
   const [isLoadingDrive, setIsLoadingDrive] = useState(true)
   const [isLoadingBooks, setIsLoadingBooks] = useState(false)
   const [isLoadingCollections, setIsLoadingCollections] = useState(false)
-
-  const loadKindle = useCallback(async () => {
-    setIsLoadingDrive(true)
-    try {
-      const drives = await window.kindleAPI.detectKindleDrives()
-      const found = drives[0] ?? null
-      setKindle(found)
-
-      if (found) {
-        await Promise.all([loadBooks(found.mountpoint), loadCollections(found.mountpoint)])
-      } else {
-        setBooks([])
-        setCollections([])
-      }
-    } catch (err) {
-      console.error('Failed to detect Kindle drives:', err)
-    } finally {
-      setIsLoadingDrive(false)
-    }
-  }, [])
 
   const loadBooks = async (mountpoint: string) => {
     setIsLoadingBooks(true)
@@ -52,24 +27,71 @@ export function App() {
   }
 
   const loadCollections = async (mountpoint: string) => {
-    const dbPath = joinPath(mountpoint, COLLECTIONS_DB_RELATIVE)
     setIsLoadingCollections(true)
     try {
-      const result = await window.kindleAPI.queryCollections(dbPath)
+      await window.kindleAPI.syncCalibre(mountpoint)
+      const result = await window.kindleAPI.getLocalCollections()
       setCollections(result)
-    } catch {
-      // Collections DB may not exist on all Kindle models
+    } catch (err) {
+      console.error('Failed to load collections:', err)
       setCollections([])
     } finally {
       setIsLoadingCollections(false)
     }
   }
 
+  const loadKindle = useCallback(async () => {
+    setIsLoadingDrive(true)
+    try {
+      const drives = await window.kindleAPI.detectKindleDrives()
+      const found = drives[0] ?? null
+      setKindle(found)
+      setSelectedCollectionId(null)
+      setCollectionBookPaths(new Set())
+
+      if (found) {
+        await Promise.all([loadBooks(found.mountpoint), loadCollections(found.mountpoint)])
+      } else {
+        setBooks([])
+        setCollections([])
+      }
+    } catch (err) {
+      console.error('Failed to detect Kindle drives:', err)
+    } finally {
+      setIsLoadingDrive(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadKindle()
   }, [loadKindle])
 
-  const filteredBooks = selectedCollectionId === null ? books : books
+  useEffect(() => {
+    if (selectedCollectionId === null) {
+      setCollectionBookPaths(new Set())
+      return
+    }
+
+    window.kindleAPI
+      .getCollectionBooks(selectedCollectionId)
+      .then((paths) => setCollectionBookPaths(new Set(paths)))
+      .catch((err) => {
+        console.error('Failed to load collection books:', err)
+        setCollectionBookPaths(new Set())
+      })
+  }, [selectedCollectionId])
+
+  const documentsBase = kindle ? `${kindle.mountpoint}/documents/` : ''
+
+  const filteredBooks =
+    selectedCollectionId === null
+      ? books
+      : books.filter((book) => {
+          const relPath = book.path.startsWith(documentsBase)
+            ? book.path.slice(documentsBase.length)
+            : book.path
+          return collectionBookPaths.has(relPath)
+        })
 
   return (
     <div className="flex h-screen bg-gray-900 text-white overflow-hidden">
