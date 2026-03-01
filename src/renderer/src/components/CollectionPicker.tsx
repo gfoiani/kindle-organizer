@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Collection } from '../../../preload/api'
 
 interface CollectionPickerProps {
@@ -16,6 +17,7 @@ export function CollectionPicker({
   onRemove,
   onClose
 }: CollectionPickerProps) {
+  const { t } = useTranslation()
   const [memberIds, setMemberIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<string | null>(null)
@@ -67,15 +69,15 @@ export function CollectionPicker({
       className="absolute z-50 right-0 top-full mt-1 w-52 bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1"
     >
       <p className="px-3 py-1.5 text-gray-400 text-xs font-semibold uppercase tracking-wider border-b border-gray-700 mb-1">
-        Aggiungi a collezione
+        {t('books.addToCollection')}
       </p>
 
       {loading && (
-        <div className="px-3 py-2 text-gray-500 text-xs">Caricamento...</div>
+        <div className="px-3 py-2 text-gray-500 text-xs">{t('collectionPicker.loading')}</div>
       )}
 
       {!loading && collections.length === 0 && (
-        <div className="px-3 py-2 text-gray-500 text-xs">Nessuna collezione disponibile</div>
+        <div className="px-3 py-2 text-gray-500 text-xs">{t('collectionPicker.noCollections')}</div>
       )}
 
       {!loading &&

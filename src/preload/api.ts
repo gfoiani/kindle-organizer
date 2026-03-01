@@ -17,6 +17,7 @@ export interface KindleAPI {
   addBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   removeBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   getCover: (title: string, author?: string) => Promise<string | null>
+  clearCoverCache: () => Promise<void>
 }
 
 export const kindleAPI: KindleAPI = {
@@ -51,5 +52,7 @@ export const kindleAPI: KindleAPI = {
     ipcRenderer.invoke('kindle:remove-book-from-collection', collectionId, bookRelpath),
 
   getCover: (title: string, author?: string) =>
-    ipcRenderer.invoke('kindle:get-cover', title, author)
+    ipcRenderer.invoke('kindle:get-cover', title, author),
+
+  clearCoverCache: () => ipcRenderer.invoke('kindle:clear-cover-cache')
 }

@@ -19,9 +19,11 @@
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "fs-extra": "^11.3.3",
-    "systeminformation": "^5.31.1",
+    "i18next": "25.8.13",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-i18next": "16.5.4",
+    "systeminformation": "^5.31.1"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
@@ -41,7 +43,7 @@
   },
   "build": {
     "appId": "com.kindleorganizer.app",
-    "productName": "Kindle Manager",
+    "productName": "Kindle Organizer",
     "npmRebuild": true,
     "asar": true,
     "asarUnpack": [
@@ -56,14 +58,20 @@
       "output": "release"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.utilities"
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "linux": {
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     }
   }
 }

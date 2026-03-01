@@ -197,3 +197,13 @@ export async function getCover(title: string, author: string | undefined): Promi
     releaseSlot()
   }
 }
+
+export async function clearCoverCache(): Promise<void> {
+  const cacheDir = getCoverCacheDir()
+  if (fs.existsSync(cacheDir)) {
+    const files = fs.readdirSync(cacheDir)
+    for (const file of files) {
+      fs.unlinkSync(path.join(cacheDir, file))
+    }
+  }
+}

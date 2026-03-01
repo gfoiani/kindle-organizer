@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { KindleBook, Collection } from '../../../preload/api'
 import { CollectionPicker } from './CollectionPicker'
 
@@ -114,6 +115,8 @@ function BookCard({
 }
 
 function EmptyState({ kindleConnected }: { kindleConnected: boolean }) {
+  const { t } = useTranslation()
+
   return (
     <div className="flex flex-col items-center justify-center h-full text-center p-8">
       <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-4">
@@ -133,16 +136,16 @@ function EmptyState({ kindleConnected }: { kindleConnected: boolean }) {
       </div>
       {kindleConnected ? (
         <>
-          <p className="text-gray-400 font-medium">Nessun libro trovato</p>
+          <p className="text-gray-400 font-medium">{t('emptyState.noBooks')}</p>
           <p className="text-gray-600 text-sm mt-1">
-            La cartella documents del Kindle sembra vuota
+            {t('emptyState.emptyDocuments')}
           </p>
         </>
       ) : (
         <>
-          <p className="text-gray-400 font-medium">Nessun Kindle rilevato</p>
+          <p className="text-gray-400 font-medium">{t('emptyState.noKindleDetected')}</p>
           <p className="text-gray-600 text-sm mt-1">
-            Collega il tuo Kindle via USB per vedere i libri
+            {t('emptyState.connectKindle')}
           </p>
         </>
       )}
@@ -159,10 +162,12 @@ export function BooksGrid({
   onAddBookToCollection,
   onRemoveBookFromCollection
 }: BooksGridProps) {
+  const { t } = useTranslation()
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-gray-500 text-sm">Caricamento libri...</div>
+        <div className="text-gray-500 text-sm">{t('books.noBooks')}</div>
       </div>
     )
   }
@@ -174,7 +179,7 @@ export function BooksGrid({
   return (
     <div className="p-6 overflow-y-auto h-full">
       <p className="text-gray-500 text-sm mb-4">
-        {books.length} {books.length === 1 ? 'libro' : 'libri'}
+        {books.length} {books.length === 1 ? t('books.noBooks') : 'libri'}
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
         {books.map((book) => {

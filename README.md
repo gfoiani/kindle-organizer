@@ -1,4 +1,4 @@
-# Kindle Manager
+# Kindle Organizer
 
 A desktop application for managing and organizing your Kindle library — browse books, create collections, and sync them back to your device.
 

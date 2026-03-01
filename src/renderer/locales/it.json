@@ -1,0 +1,58 @@
+{
+  "app": {
+    "title": "Kindle Organizer"
+  },
+  "sidebar": {
+    "title": "Kindle Organizer",
+    "subtitle": "La tua libreria Kindle",
+    "library": "Libreria",
+    "allBooks": "Tutti i libri",
+    "collections": "Collezioni",
+    "newCollection": "Nuova collezione",
+    "collectionPlaceholder": "Nome collezione...",
+    "noCollections": "Nessuna collezione. Usa il tasto {{symbol}} per crearne una, o connetti un Kindle con Calibre per importarle automaticamente.",
+    "rename": "Rinomina",
+    "delete": "Elimina",
+    "settings": "Impostazioni"
+  },
+  "header": {
+    "collection": "Collezione",
+    "writeToKindle": "Scrivi le collezioni su metadata.calibre nel Kindle",
+    "writingToKindle": "Salvataggio...",
+    "saved": "Salvato",
+    "error": "Errore",
+    "writeKindle": "Scrivi su Kindle",
+    "refresh": "Aggiorna",
+    "refreshLoading": "Aggiornamento..."
+  },
+  "settings": {
+    "title": "Impostazioni",
+    "coverCache": "Cache delle copertine",
+    "cacheCoverDescription": "Le copertine dei libri vengono scaricate da Google Books e Open Library e memorizzate in una cache locale per migliorare le prestazioni. Puoi cancellare la cache per ricaricare tutte le copertine.",
+    "clearCache": "Cancella cache",
+    "clearingCache": "Cancellazione in corso...",
+    "cacheCleared": "Cache cancellata",
+    "cacheError": "Errore",
+    "cacheInfo": "Dopo aver cancellato la cache, le copertine verranno ricaricate al prossimo aggiornamento della libreria.",
+    "language": "Lingua",
+    "selectLanguage": "Seleziona lingua"
+  },
+  "books": {
+    "addToCollection": "Aggiungi a collezione",
+    "removeFromCollection": "Rimuovi dalla collezione",
+    "noBooks": "Nessun libro trovato",
+    "loadingBooks": "Caricamento libri...",
+    "book": "libro",
+    "books": "libri"
+  },
+  "collectionPicker": {
+    "loading": "Caricamento...",
+    "noCollections": "Nessuna collezione disponibile"
+  },
+  "emptyState": {
+    "noKindleDetected": "Nessun Kindle rilevato",
+    "connectKindle": "Collega il tuo Kindle via USB per vedere i libri",
+    "noBooks": "Nessun libro trovato",
+    "emptyDocuments": "La cartella documents del Kindle sembra vuota"
+  }
+}
