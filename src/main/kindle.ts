@@ -24,6 +24,7 @@ export interface Collection {
   id: string
   name: string
   bookCount: number
+  source: 'calibre' | 'local'
 }
 
 export interface CollectionItem {
@@ -126,7 +127,8 @@ export function queryCollections(dbPath: string): Collection[] {
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
-      bookCount: row.bookCount
+      bookCount: row.bookCount,
+      source: 'local' as const
     }))
   } finally {
     db.close()

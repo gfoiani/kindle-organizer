@@ -1,9 +1,15 @@
-import type { KindleBook } from '../../../preload/api'
+import { useState } from 'react'
+import type { KindleBook, Collection } from '../../../preload/api'
+import { CollectionPicker } from './CollectionPicker'
 
 interface BooksGridProps {
   books: KindleBook[]
   isLoading: boolean
   kindleConnected: boolean
+  collections: Collection[]
+  documentsBase: string
+  onAddBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
+  onRemoveBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
 }
 
 function formatSize(bytes: number): string {
@@ -12,20 +18,61 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function BookCard({ book }: { book: KindleBook }) {
+function BookCard({
+  book,
+  bookRelpath,
+  collections,
+  onAddToCollection,
+  onRemoveFromCollection
+}: {
+  book: KindleBook
+  bookRelpath: string
+  collections: Collection[]
+  onAddToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
+  onRemoveFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-indigo-500 hover:bg-gray-750 transition-colors cursor-pointer group">
+    <div className="relative bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-indigo-500 transition-colors cursor-pointer group">
       <div className="flex items-start justify-between mb-3">
         <div className="w-10 h-12 bg-indigo-900 rounded flex items-center justify-center shrink-0">
           <span className="text-indigo-300 text-xs font-bold">{book.extension}</span>
         </div>
-        <span className="text-gray-500 text-xs">{formatSize(book.size)}</span>
+        <div className="flex items-center gap-1">
+          <span className="text-gray-500 text-xs">{formatSize(book.size)}</span>
+          {collections.length > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setPickerOpen((v) => !v)
+              }}
+              title="Gestisci collezioni"
+              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-gray-500 hover:text-indigo-400 hover:bg-gray-700"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
+
       <h3 className="text-white text-sm font-medium leading-tight line-clamp-2 group-hover:text-indigo-300 transition-colors">
         {book.title}
       </h3>
       {book.author && (
         <p className="text-gray-500 text-xs mt-1 truncate">{book.author}</p>
+      )}
+
+      {pickerOpen && (
+        <CollectionPicker
+          bookRelpath={bookRelpath}
+          collections={collections}
+          onAdd={onAddToCollection}
+          onRemove={onRemoveFromCollection}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
     </div>
   )
@@ -68,7 +115,15 @@ function EmptyState({ kindleConnected }: { kindleConnected: boolean }) {
   )
 }
 
-export function BooksGrid({ books, isLoading, kindleConnected }: BooksGridProps) {
+export function BooksGrid({
+  books,
+  isLoading,
+  kindleConnected,
+  collections,
+  documentsBase,
+  onAddBookToCollection,
+  onRemoveBookFromCollection
+}: BooksGridProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -87,9 +142,21 @@ export function BooksGrid({ books, isLoading, kindleConnected }: BooksGridProps)
         {books.length} {books.length === 1 ? 'libro' : 'libri'}
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-        {books.map((book) => (
-          <BookCard key={book.path} book={book} />
-        ))}
+        {books.map((book) => {
+          const bookRelpath = book.path.startsWith(documentsBase)
+            ? book.path.slice(documentsBase.length)
+            : book.path
+          return (
+            <BookCard
+              key={book.path}
+              book={book}
+              bookRelpath={bookRelpath}
+              collections={collections}
+              onAddToCollection={onAddBookToCollection}
+              onRemoveFromCollection={onRemoveBookFromCollection}
+            />
+          )
+        })}
       </div>
     </div>
   )
