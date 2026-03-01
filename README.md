@@ -10,6 +10,7 @@ A desktop application for managing and organizing your Kindle library — browse
 - **Collections** — create, rename, and delete custom collections; assign books to one or more collections
 - **Calibre integration** — on connect, imports tag-based collections from Calibre's `metadata.calibre` file on the Kindle root
 - **Write to Kindle** — saves collection assignments back to `metadata.calibre` so Calibre can read them on the next sync
+- **System menu integration** — custom "About" menu item that opens the internal app section instead of a default dialog
 
 ## Supported formats
 
@@ -33,6 +34,7 @@ src/
 ├── main/
 │   ├── index.ts              # Electron main process bootstrap
 │   ├── ipc.ts                # IPC handler registry
+│   ├── menu.ts               # Custom system menu setup
 │   ├── kindle.ts             # Kindle drive detection + document scanning
 │   ├── calibre.ts            # Read/write metadata.calibre
 │   ├── localCollections.ts   # SQLite collections DB (CRUD)
