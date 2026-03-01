@@ -36,6 +36,7 @@
     "@vitejs/plugin-react": "^5.1.4",
     "electron": "^40.6.1",
     "electron-builder": "^26.8.1",
+    "electron-icon-builder": "^2.0.1",
     "electron-vite": "^5.0.0",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
@@ -61,17 +62,20 @@
       "target": [
         "dmg"
       ],
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "icon": "assets/icons/icons/icon.icns"
     },
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "assets/icons/icons/icon.ico"
     },
     "linux": {
       "target": [
         "AppImage"
-      ]
+      ],
+      "icon": "assets/icons/icons/512x512.png"
     }
   }
 }

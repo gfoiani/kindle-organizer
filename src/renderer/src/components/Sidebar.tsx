@@ -11,6 +11,7 @@ interface SidebarProps {
   onRenameCollection: (id: string, newName: string) => Promise<void>
   onDeleteCollection: (id: string) => Promise<void>
   onSelectSettings: () => void
+  onSelectAbout: () => void
 }
 
 function EditableCollectionRow({
@@ -173,7 +174,8 @@ export function Sidebar({
   onCreateCollection,
   onRenameCollection,
   onDeleteCollection,
-  onSelectSettings
+  onSelectSettings,
+  onSelectAbout
 }: SidebarProps) {
   const { t } = useTranslation()
   const [isCreating, setIsCreating] = useState(false)
@@ -254,7 +256,21 @@ export function Sidebar({
         </div>
       </nav>
 
-      <footer className="px-2 py-3 border-t border-gray-700 shrink-0">
+      <footer className="px-2 py-3 border-t border-gray-700 shrink-0 space-y-2">
+        <button
+          onClick={onSelectAbout}
+          className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          {t('sidebar.about')}
+        </button>
         <button
           onClick={onSelectSettings}
           className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800`}

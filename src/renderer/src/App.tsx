@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Sidebar } from './components/Sidebar'
 import { BooksGrid } from './components/BooksGrid'
 import { Settings } from './components/Settings'
+import { About } from './components/About'
 import type { KindleDrive, KindleBook, Collection } from '../../preload/api'
 
 export function App() {
@@ -18,6 +19,7 @@ export function App() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<'success' | 'error' | null>(null)
   const [isShowingSettings, setIsShowingSettings] = useState(false)
+  const [isShowingAbout, setIsShowingAbout] = useState(false)
 
   const loadBooks = async (mountpoint: string) => {
     setIsLoadingBooks(true)
@@ -169,6 +171,7 @@ export function App() {
         onSelectCollection={(id) => {
           setSelectedCollectionId(id)
           setIsShowingSettings(false)
+          setIsShowingAbout(false)
         }}
         isLoading={isLoadingCollections}
         onCreateCollection={handleCreateCollection}
@@ -176,6 +179,12 @@ export function App() {
         onDeleteCollection={handleDeleteCollection}
         onSelectSettings={() => {
           setIsShowingSettings(true)
+          setIsShowingAbout(false)
+          setSelectedCollectionId(null)
+        }}
+        onSelectAbout={() => {
+          setIsShowingAbout(true)
+          setIsShowingSettings(false)
           setSelectedCollectionId(null)
         }}
       />
@@ -183,6 +192,8 @@ export function App() {
       <main className="flex-1 flex flex-col min-w-0">
         {isShowingSettings ? (
           <Settings />
+        ) : isShowingAbout ? (
+          <About />
         ) : (
           <>
             <header className="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0">

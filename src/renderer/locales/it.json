@@ -13,7 +13,8 @@
     "noCollections": "Nessuna collezione. Usa il tasto {{symbol}} per crearne una, o connetti un Kindle con Calibre per importarle automaticamente.",
     "rename": "Rinomina",
     "delete": "Elimina",
-    "settings": "Impostazioni"
+    "settings": "Impostazioni",
+    "about": "Il Progetto"
   },
   "header": {
     "collection": "Collezione",
@@ -54,5 +55,23 @@
     "connectKindle": "Collega il tuo Kindle via USB per vedere i libri",
     "noBooks": "Nessun libro trovato",
     "emptyDocuments": "La cartella documents del Kindle sembra vuota"
+  },
+  "about": {
+    "title": "Il Progetto",
+    "appName": "Kindle Organizer",
+    "version": "Versione {{version}}",
+    "description": "Gestisci e organizza la tua libreria Kindle con facilità",
+    "descriptionLong": "Kindle Organizer è uno strumento desktop che ti permette di organizzare i tuoi libri Kindle in collezioni, gestire le copertine e sincronizzare i dati con il tuo dispositivo.",
+    "features": "Funzionalità",
+    "feature1": "Gestione collezioni - Crea, modifica e elimina collezioni per organizzare i tuoi libri",
+    "feature2": "Scaricamento copertine - Automaticamente dalle librerie Google Books e Open Library",
+    "feature3": "Sincronizzazione Kindle - Scrivi le tue collezioni direttamente sul dispositivo",
+    "feature4": "Supporto multilingue - Disponibile in italiano e inglese",
+    "feature5": "Cache locale - Velocità superiore con caching intelligente",
+    "technologies": "Tecnologie",
+    "credits": "Crediti",
+    "builtWith": "Costruito con",
+    "github": "Progetto su GitHub",
+    "license": "Licenza MIT"
   }
 }
