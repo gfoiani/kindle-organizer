@@ -57,6 +57,69 @@ export async function detectKindleDrives(): Promise<KindleDrive[]> {
 
 const JUNK_EXTENSIONS = ['.sdr']
 
+// Calibre sort-articles: checked longest-first to avoid partial matches.
+// Calibre inverts articles for sorting: "Gli androidi..." → filename "androidi..., Gli"
+const SORT_ARTICLES = [
+  'Gli', 'Les', 'Une', 'Das', 'Der', 'Die', 'Ein', 'Eine',
+  "L'", "Un'", 'Una', 'Uno', 'The',
+  'La', 'Le', 'Lo', 'Un', 'Il',
+  'An', 'I', 'A',
+]
+
+function sanitizeTitle(filename: string, author?: string): string {
+  let t = filename
+
+  // 1. Replace underscores with spaces
+  t = t.replace(/_/g, ' ')
+
+  // 2. Remove Amazon ASIN at end: space + B + digit + 8 alphanumeric chars
+  t = t.replace(/\s+B[0-9][A-Z0-9]{8}$/i, '')
+
+  // 3. Strip " - Author" suffix (Calibre stores "Title - Author" in filenames)
+  if (author) {
+    const parts = author.split(',').map((s) => s.trim()).filter(Boolean)
+    const variants = [
+      author,                                                  // "Last, First"
+      parts.join(' '),                                         // "Last First"
+      parts.length === 2 ? `${parts[1]} ${parts[0]}` : '',    // "First Last"
+    ].filter(Boolean)
+
+    const lastDash = t.lastIndexOf(' - ')
+    if (lastDash !== -1) {
+      const afterDash = t.slice(lastDash + 3).toLowerCase()
+      for (const variant of variants) {
+        const v = variant.toLowerCase()
+        // Exact match or multi-author prefix ("First Last, CoAuthor")
+        if (afterDash === v || afterDash.startsWith(v + ',')) {
+          t = t.slice(0, lastDash)
+          break
+        }
+      }
+    }
+  }
+
+  // 4. Restore Calibre article inversion: "title, Gli" / "title  Gli" → "Gli title"
+  for (const article of SORT_ARTICLES) {
+    const pattern = new RegExp(`(?:,\\s+|\\s{2,})${article}\\s*$`)
+    if (pattern.test(t)) {
+      const base = t.replace(pattern, '').replace(/[.,]+$/, '').trimEnd()
+      // Articles ending with apostrophe elide directly (L'arte), others add space
+      t = article.endsWith("'") ? `${article}${base}` : `${article} ${base}`
+      break
+    }
+  }
+
+  // 5. Collapse multiple spaces, trim trailing punctuation
+  t = t.replace(/\s{2,}/g, ' ').replace(/[.,\s]+$/, '').trim()
+
+  // 6. Capitalize first letter if lowercase
+  if (t.length > 0 && t[0] >= 'a' && t[0] <= 'z') {
+    t = t[0].toUpperCase() + t.slice(1)
+  }
+
+  return t
+}
+
 async function scanBooks(dirPath: string, author?: string): Promise<KindleBook[]> {
   const entries = await fs.readdir(dirPath, { withFileTypes: true })
   const books: KindleBook[] = []
@@ -77,7 +140,7 @@ async function scanBooks(dirPath: string, author?: string): Promise<KindleBook[]
 
       books.push({
         filename: entry.name,
-        title: path.basename(entry.name, ext),
+        title: sanitizeTitle(path.basename(entry.name, ext), author),
         author,
         extension: ext.replace('.', '').toUpperCase(),
         size: stats.size,

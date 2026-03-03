@@ -81,7 +81,12 @@
     "noBooks": "Nessun libro trovato",
     "loadingBooks": "Caricamento libri...",
     "book": "libro",
-    "books": "libri"
+    "books": "libri",
+    "booksCount": "{{count}} libri",
+    "booksCountFiltered": "{{filtered}} / {{total}} libri",
+    "searchPlaceholder": "Cerca titolo o autore…",
+    "noResults": "Nessun libro trovato per \"{{query}}\"",
+    "removeFilter": "Rimuovi filtro"
   },
   "collectionPicker": {
     "loading": "Caricamento...",
@@ -110,5 +115,15 @@
     "builtWith": "Costruito con",
     "github": "Progetto su GitHub",
     "license": "Licenza MIT"
+  },
+  "bookDetail": {
+    "close": "Chiudi dettaglio",
+    "author": "Autore",
+    "loading": "Caricamento informazioni…",
+    "year": "Anno",
+    "genre": "Genere",
+    "description": "Descrizione",
+    "noInfo": "Nessuna informazione aggiuntiva disponibile",
+    "fileSize": "Dimensione file"
   }
 }

@@ -85,6 +85,52 @@ yarn dist
 
 > On macOS, make sure Xcode Command Line Tools are installed for native module compilation (`xcode-select --install`).
 
+## Installation
+
+### macOS — Homebrew (recommended)
+
+```bash
+brew tap gfoiani/kindle-organizer
+brew install --cask kindle-organizer
+```
+
+### Manual download
+
+Download the latest release from the [Releases](https://github.com/gfoiani/kindle-organizer/releases) page.
+
+> [!NOTE]
+> The app is currently **not code-signed**. Both macOS and Windows will show a security warning on first launch. This is normal for open-source apps distributed without a paid developer certificate.
+
+### macOS — Gatekeeper warning
+
+When you open the `.dmg` and try to launch the app, macOS will show *"Kindle Organizer can't be opened because Apple cannot check it for malicious software"*.
+
+**Option A — Right-click to open (recommended):**
+1. Open the app folder in Finder
+2. **Right-click** (or Control+click) on **Kindle Organizer.app**
+3. Select **Open** from the context menu
+4. Click **Open** in the dialog — macOS will remember your choice
+
+**Option B — System Settings:**
+1. Try to open the app normally (it will be blocked)
+2. Go to **System Settings → Privacy & Security**
+3. Scroll down — you'll see *"Kindle Organizer was blocked"*
+4. Click **Open Anyway** and confirm
+
+**Option C — Terminal (one-time):**
+```bash
+xattr -cr /Applications/Kindle\ Organizer.app
+```
+
+### Windows — SmartScreen warning
+
+When you run the `.exe` installer, Windows will show *"Windows protected your PC"*.
+
+1. Click **More info**
+2. Click **Run anyway**
+
+Windows will remember your choice and won't ask again.
+
 ## License
 
 MIT
