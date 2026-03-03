@@ -14,11 +14,26 @@ brew install --cask kindle-organizer
 
 ## For maintainers
 
-After each release, update the `version` and `sha256` in `Casks/kindle-organizer.rb`:
+After each release, you can use the provided script to automatically extract the newly built application version, calculate the SHA-256 hash, and update the `Casks/kindle-organizer.rb` file.
+
+From the root `app` directory, run:
 
 ```bash
-# Get the SHA-256 of the new DMG
-shasum -a 256 Kindle\ Organizer-*.dmg
+# This searches for the latest .dmg file in the release/ folder and uses the local homebrew folder
+npm run update-homebrew
 ```
 
-Then commit and push to the `homebrew-kindle-organizer` tap repository.
+You can also pass explicit paths for the DMG file and the homebrew repository target:
+
+```bash
+npm run update-homebrew /path/to/Custom-Kindle-Organizer.dmg /path/to/homebrew-repo
+```
+
+Alternatively, you can configure these paths using a `.env` file in the root `app` directory:
+
+```env
+DMG_FILE=/path/to/Custom-Kindle-Organizer.dmg
+HOMEBREW_DIR=/path/to/homebrew-repo
+```
+
+Then commit and push the updated files to the `homebrew-kindle-organizer` tap repository.

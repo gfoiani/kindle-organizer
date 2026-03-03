@@ -33,3 +33,4 @@ src/renderer/public/models/
 
 .nvmrc
 .python-version
+.env.env
