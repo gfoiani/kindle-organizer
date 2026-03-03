@@ -1,6 +1,7 @@
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { viteStaticCopy } from 'vite-plugin-static-copy'
 import path from 'path'
 
 export default defineConfig({
@@ -34,11 +35,33 @@ export default defineConfig({
     },
     plugins: [
       react(),
-      tailwindcss()
+      tailwindcss(),
+      viteStaticCopy({
+        targets: [
+          {
+            src: path.resolve(__dirname, 'node_modules/@xenova/transformers/dist/*.wasm'),
+            dest: 'assets'
+          }
+        ]
+      })
     ],
+    optimizeDeps: {
+      // ort.min.js is a UMD bundle — must be pre-bundled by esbuild so it gets
+      // converted to proper ESM exports. Without this, `import * as ONNX_WEB`
+      // returns an empty namespace and InferenceSession is undefined.
+      include: ['onnxruntime-web'],
+      exclude: ['@xenova/transformers', 'onnxruntime-common', 'onnxruntime-node']
+    },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, 'src/renderer/src')
+        '@': path.resolve(__dirname, 'src/renderer/src'),
+        // ort-web.min.js (the package's "browser" entry) has an external
+        // require("onnxruntime-common") that breaks in Vite's CJS→ESM transform.
+        // ort.min.js is the self-contained bundle with onnxruntime-common included.
+        'onnxruntime-web': path.resolve(
+          __dirname,
+          'node_modules/onnxruntime-web/dist/ort.min.js'
+        )
       }
     }
   }

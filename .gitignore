@@ -28,5 +28,8 @@ Thumbs.db
 # TypeScript cache
 *.tsbuildinfo
 
+# Bundled AI model (download with: npm run download-model)
+src/renderer/public/models/
+
 .nvmrc
 .python-version
