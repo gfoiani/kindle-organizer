@@ -3,7 +3,7 @@ import * as fs from 'fs'
 import * as http from 'http'
 import * as https from 'https'
 import * as path from 'path'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 // Serial queue: one outbound request at a time, with a guaranteed minimum gap.
@@ -48,6 +48,42 @@ function getCacheKey(title: string, author: string | undefined): string {
 
 function getCachePath(key: string): string {
   return path.join(getCoverCacheDir(), `${key}.jpg`)
+}
+
+// ─── Retry registry ───────────────────────────────────────────────────────────
+// Tracks books whose cover download failed due to network errors (not "no cover found").
+// Retried with exponential backoff; on success pushes cover:updated to the renderer.
+
+// Delays: 30s → 2min → 5min → 15min → 1hr
+const RETRY_DELAYS_MS = [30_000, 120_000, 300_000, 900_000, 3_600_000]
+
+interface RetryEntry {
+  title: string
+  author: string | undefined
+  /** How many retries have been scheduled so far (0 = first retry pending). */
+  attempts: number
+  /** Epoch ms after which this entry is eligible for retry. Infinity = in-progress. */
+  nextRetry: number
+}
+
+const retryRegistry = new Map<string, RetryEntry>()
+
+function scheduleRetry(
+  key: string,
+  title: string,
+  author: string | undefined,
+  prevAttempts: number
+): void {
+  if (prevAttempts >= RETRY_DELAYS_MS.length) return // max retries reached
+  retryRegistry.set(key, {
+    title,
+    author,
+    attempts: prevAttempts,
+    nextRetry: Date.now() + RETRY_DELAYS_MS[prevAttempts]
+  })
+  console.log(
+    `[cover] Scheduled retry #${prevAttempts + 1} for "${title}" in ${RETRY_DELAYS_MS[prevAttempts] / 1000}s`
+  )
 }
 
 // ─── HTTP fetch ───────────────────────────────────────────────────────────────
@@ -138,7 +174,7 @@ async function searchGoogleBooks(
     return result
   } catch (err) {
     console.log(`[searchGoogleBooks] Error: ${err instanceof Error ? err.message : String(err)}`)
-    return null
+    throw err
   }
 }
 
@@ -169,11 +205,217 @@ async function searchOpenLibrary(
     return result
   } catch (err) {
     console.log(`[searchOpenLibrary] Error: ${err instanceof Error ? err.message : String(err)}`)
-    return null
+    throw err
   }
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+async function searchItunes(
+  title: string,
+  author: string | undefined
+): Promise<string | null> {
+  let term = title
+  if (author) term += ` ${author}`
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=ebook&limit=5&country=us`
+
+  try {
+    const body = await fetchUrlWithRetry(url)
+    const json = JSON.parse(body.toString('utf-8')) as unknown
+    if (typeof json !== 'object' || json === null) {
+      console.log(`[searchItunes] Invalid JSON response`)
+      return null
+    }
+
+    const results = (json as { results?: { artworkUrl100?: string }[] })?.results
+    const artwork = results?.[0]?.artworkUrl100
+    if (typeof artwork !== 'string') {
+      console.log(`[searchItunes] No artwork found`)
+      return null
+    }
+
+    // Bump resolution from 100x100 to 600x600
+    const result = artwork.replace('100x100bb', '600x600bb')
+    console.log(`[searchItunes] Found artwork: ${result}`)
+    return result
+  } catch (err) {
+    console.log(`[searchItunes] Error: ${err instanceof Error ? err.message : String(err)}`)
+    throw err
+  }
+}
+
+// ─── Core download helper ─────────────────────────────────────────────────────
+
+type DownloadResult =
+  | { status: 'found'; data: Buffer }
+  | { status: 'not-found' }
+  | { status: 'error' }
+
+/**
+ * Attempts to download a cover image from all providers.
+ * Distinguishes between "provider confirmed no cover" (not-found) and
+ * "network/transient failure" (error) so the caller can decide whether to retry.
+ */
+async function downloadCoverData(
+  title: string,
+  author: string | undefined
+): Promise<DownloadResult> {
+  let imageUrl: string | null = null
+  let hadNetworkError = false
+
+  try {
+    imageUrl = await searchItunes(title, author)
+  } catch {
+    hadNetworkError = true
+  }
+
+  if (!imageUrl) {
+    try {
+      imageUrl = await searchOpenLibrary(title, author)
+    } catch {
+      hadNetworkError = true
+    }
+  }
+
+  if (!imageUrl) {
+    try {
+      imageUrl = await searchGoogleBooks(title, author)
+    } catch {
+      hadNetworkError = true
+    }
+  }
+
+  if (!imageUrl) {
+    return hadNetworkError ? { status: 'error' } : { status: 'not-found' }
+  }
+
+  try {
+    const data = await fetchUrlWithRetry(imageUrl)
+    if (data.length < 500) {
+      console.log(`[cover] Image too small (${data.length} bytes) for "${title}"`)
+      return { status: 'not-found' }
+    }
+    return { status: 'found', data }
+  } catch {
+    return { status: 'error' }
+  }
+}
+
+// ─── Public cover API ─────────────────────────────────────────────────────────
+
+export async function getCover(title: string, author: string | undefined): Promise<string | null> {
+  console.log(`[getCover] Searching for cover: title="${title}", author="${author}"`)
+  const key = getCacheKey(title, author)
+  const cachePath = getCachePath(key)
+
+  // Cache hit — no slot needed
+  if (fs.existsSync(cachePath)) {
+    const data = fs.readFileSync(cachePath)
+    if (data.length === 0) return null // negative cache marker
+    return `data:image/jpeg;base64,${data.toString('base64')}`
+  }
+
+  // Retry already pending — don't re-queue, renderer will receive push when ready
+  if (retryRegistry.has(key)) {
+    return null
+  }
+
+  fs.mkdirSync(getCoverCacheDir(), { recursive: true })
+
+  return scheduleRequest(async () => {
+    const result = await downloadCoverData(title, author)
+
+    if (result.status === 'found') {
+      console.log(`[getCover] Successfully cached image (${result.data.length} bytes)`)
+      fs.writeFileSync(cachePath, result.data)
+      return `data:image/jpeg;base64,${result.data.toString('base64')}`
+    }
+
+    if (result.status === 'not-found') {
+      console.log(`[getCover] No cover found, writing negative cache`)
+      fs.writeFileSync(cachePath, Buffer.alloc(0))
+      return null
+    }
+
+    // Network error — schedule retry, don't write negative cache
+    scheduleRetry(key, title, author, 0)
+    return null
+  }).catch((err) => {
+    console.error(`[getCover] Unexpected error for "${title}":`, err)
+    scheduleRetry(key, title, author, 0)
+    return null
+  })
+}
+
+/**
+ * Starts the background retry loop. Call once after app is ready.
+ * On successful retry, sends 'cover:updated' to the renderer.
+ */
+export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void {
+  const LOOP_INTERVAL_MS = 15_000
+
+  setInterval(() => {
+    const now = Date.now()
+
+    for (const [key, entry] of retryRegistry) {
+      if (entry.nextRetry > now) continue
+
+      // Mark as in-progress to prevent double-scheduling
+      retryRegistry.set(key, { ...entry, nextRetry: Infinity })
+      const nextAttempts = entry.attempts + 1
+
+      scheduleRequest(async () => {
+        const cachePath = getCachePath(key)
+        const result = await downloadCoverData(entry.title, entry.author)
+
+        if (result.status === 'found') {
+          fs.mkdirSync(getCoverCacheDir(), { recursive: true })
+          fs.writeFileSync(cachePath, result.data)
+          retryRegistry.delete(key)
+          console.log(`[cover] Retry #${nextAttempts} succeeded for "${entry.title}"`)
+
+          const dataUrl = `data:image/jpeg;base64,${result.data.toString('base64')}`
+          getWindow()?.webContents.send('cover:updated', entry.title, entry.author, dataUrl)
+          return
+        }
+
+        if (result.status === 'not-found') {
+          // Provider confirmed no cover — write negative cache and stop retrying
+          fs.mkdirSync(getCoverCacheDir(), { recursive: true })
+          fs.writeFileSync(cachePath, Buffer.alloc(0))
+          retryRegistry.delete(key)
+          console.log(`[cover] Retry #${nextAttempts}: confirmed no cover for "${entry.title}"`)
+          return
+        }
+
+        // Still a network error — reschedule if attempts remain
+        if (nextAttempts < RETRY_DELAYS_MS.length) {
+          scheduleRetry(key, entry.title, entry.author, nextAttempts)
+        } else {
+          retryRegistry.delete(key)
+          console.log(`[cover] Max retries reached for "${entry.title}", giving up`)
+        }
+      }).catch(() => {
+        if (nextAttempts < RETRY_DELAYS_MS.length) {
+          scheduleRetry(key, entry.title, entry.author, nextAttempts)
+        } else {
+          retryRegistry.delete(key)
+        }
+      })
+    }
+  }, LOOP_INTERVAL_MS)
+}
+
+export async function clearCoverCache(): Promise<void> {
+  const cacheDir = getCoverCacheDir()
+  if (fs.existsSync(cacheDir)) {
+    const files = fs.readdirSync(cacheDir)
+    for (const file of files) {
+      fs.unlinkSync(path.join(cacheDir, file))
+    }
+  }
+  retryRegistry.clear()
+}
+
+// ─── Book metadata ────────────────────────────────────────────────────────────
 
 export interface BookMetadata {
   year?: string
@@ -182,8 +424,6 @@ export interface BookMetadata {
 }
 
 const metadataCache = new Map<string, BookMetadata | null>()
-
-// ─── Open Library metadata search ─────────────────────────────────────────────
 
 async function searchOpenLibraryMetadata(
   title: string,
@@ -204,7 +444,6 @@ async function searchOpenLibraryMetadata(
     const year = doc.first_publish_year ? String(doc.first_publish_year) : undefined
     const genre = doc.subject?.[0]
 
-    // Fetch description from the works endpoint
     let description: string | undefined
     if (doc.key) {
       try {
@@ -277,83 +516,11 @@ export async function getBookMetadata(
   if (metadataCache.has(key)) return metadataCache.get(key) ?? null
 
   return scheduleRequest(async () => {
-    // Try Open Library first (no aggressive rate limiting)
     let result = await searchOpenLibraryMetadata(title, author)
-
-    // Fall back to Google Books
     if (!result) {
       result = await searchGoogleBooksMetadata(title, author)
     }
-
     metadataCache.set(key, result)
     return result
   }).catch(() => null)
-}
-
-export async function getCover(title: string, author: string | undefined): Promise<string | null> {
-  console.log(`[getCover] Searching for cover: title="${title}", author="${author}"`)
-  const key = getCacheKey(title, author)
-  const cachePath = getCachePath(key)
-
-  // Cache hit — no slot needed
-  if (fs.existsSync(cachePath)) {
-    console.log(`[getCover] Cache hit for key ${key}`)
-    const data = fs.readFileSync(cachePath)
-    if (data.length === 0) return null // negative cache marker
-    return `data:image/jpeg;base64,${data.toString('base64')}`
-  }
-
-  fs.mkdirSync(getCoverCacheDir(), { recursive: true })
-
-  return scheduleRequest(async () => {
-    let imageUrl: string | null = null
-
-    // Try Open Library first (no aggressive rate limiting)
-    try {
-      imageUrl = await searchOpenLibrary(title, author)
-    } catch (err) {
-      console.log(`[getCover] Open Library search failed: ${err instanceof Error ? err.message : String(err)}`)
-    }
-
-    // Fall back to Google Books
-    if (!imageUrl) {
-      try {
-        imageUrl = await searchGoogleBooks(title, author)
-      } catch (err) {
-        console.log(`[getCover] Google Books search failed: ${err instanceof Error ? err.message : String(err)}`)
-        return null
-      }
-    }
-
-    if (!imageUrl) {
-      console.log(`[getCover] No image URL found, writing negative cache`)
-      fs.writeFileSync(cachePath, Buffer.alloc(0))
-      return null
-    }
-
-    console.log(`[getCover] Downloading image from ${imageUrl}`)
-    const imageData = await fetchUrlWithRetry(imageUrl)
-    if (imageData.length < 500) {
-      console.log(`[getCover] Image too small (${imageData.length} bytes), writing negative cache`)
-      fs.writeFileSync(cachePath, Buffer.alloc(0))
-      return null
-    }
-
-    console.log(`[getCover] Successfully cached image (${imageData.length} bytes)`)
-    fs.writeFileSync(cachePath, imageData)
-    return `data:image/jpeg;base64,${imageData.toString('base64')}`
-  }).catch((err) => {
-    console.error(`Failed to fetch cover for "${title}":`, err)
-    return null
-  })
-}
-
-export async function clearCoverCache(): Promise<void> {
-  const cacheDir = getCoverCacheDir()
-  if (fs.existsSync(cacheDir)) {
-    const files = fs.readdirSync(cacheDir)
-    for (const file of files) {
-      fs.unlinkSync(path.join(cacheDir, file))
-    }
-  }
 }

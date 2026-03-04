@@ -2,6 +2,8 @@ import { app, BrowserWindow, shell } from 'electron'
 import path from 'path'
 import { registerIpcHandlers } from './ipc'
 import { setupMenu } from './menu'
+import { startCoverRetryLoop } from './covers'
+import { startKindleWatcher } from './kindle'
 
 const WINDOW_WIDTH = 1200
 const WINDOW_HEIGHT = 780
@@ -43,6 +45,12 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   registerIpcHandlers()
   createWindow()
+  startCoverRetryLoop(() => BrowserWindow.getAllWindows()[0] ?? null)
+
+  startKindleWatcher(
+    (drive) => BrowserWindow.getAllWindows()[0]?.webContents.send('kindle:connected', drive),
+    (drive) => BrowserWindow.getAllWindows()[0]?.webContents.send('kindle:disconnected', drive)
+  )
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

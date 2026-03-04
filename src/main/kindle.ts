@@ -55,6 +55,64 @@ export async function detectKindleDrives(): Promise<KindleDrive[]> {
     }))
 }
 
+/**
+ * Polls for Kindle drives every `intervalMs` ms and fires callbacks when
+ * a drive is connected or disconnected. Returns a stop function.
+ */
+export function startKindleWatcher(
+  onConnect: (drive: KindleDrive) => void,
+  onDisconnect: (drive: KindleDrive) => void,
+  intervalMs = 2500
+): () => void {
+  let knownMountpoints = new Set<string>()
+  let knownDrives = new Map<string, KindleDrive>()
+  let initialized = false
+
+  const handle = setInterval(async () => {
+    let current: KindleDrive[]
+    try {
+      current = await detectKindleDrives()
+    } catch {
+      return // ignore transient errors
+    }
+
+    const currentMountpoints = new Set(current.map((d) => d.mountpoint))
+
+    if (!initialized) {
+      // Snapshot the initial state without firing any events
+      for (const drive of current) {
+        knownMountpoints.add(drive.mountpoint)
+        knownDrives.set(drive.mountpoint, drive)
+      }
+      initialized = true
+      return
+    }
+
+    // Detect newly connected drives
+    for (const drive of current) {
+      if (!knownMountpoints.has(drive.mountpoint)) {
+        knownMountpoints.add(drive.mountpoint)
+        knownDrives.set(drive.mountpoint, drive)
+        console.log(`[kindle-watcher] Connected: ${drive.description} at ${drive.mountpoint}`)
+        onConnect(drive)
+      }
+    }
+
+    // Detect disconnected drives
+    for (const mountpoint of knownMountpoints) {
+      if (!currentMountpoints.has(mountpoint)) {
+        const drive = knownDrives.get(mountpoint)!
+        knownMountpoints.delete(mountpoint)
+        knownDrives.delete(mountpoint)
+        console.log(`[kindle-watcher] Disconnected: ${drive.description} at ${drive.mountpoint}`)
+        onDisconnect(drive)
+      }
+    }
+  }, intervalMs)
+
+  return () => clearInterval(handle)
+}
+
 const JUNK_EXTENSIONS = ['.sdr']
 
 // Calibre sort-articles: checked longest-first to avoid partial matches.

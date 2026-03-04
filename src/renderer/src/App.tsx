@@ -94,6 +94,20 @@ export function App() {
     })
   }, [])
 
+  // Auto-detect Kindle connect/disconnect while the app is running
+  useEffect(() => {
+    const unsubConnect = window.kindleAPI.onKindleConnected(() => {
+      loadKindle()
+    })
+    const unsubDisconnect = window.kindleAPI.onKindleDisconnected(() => {
+      loadKindle()
+    })
+    return () => {
+      unsubConnect()
+      unsubDisconnect()
+    }
+  }, [loadKindle])
+
   useEffect(() => {
     if (selectedCollectionId === null) {
       setCollectionBookPaths(new Set())
@@ -145,6 +159,10 @@ export function App() {
       })
     }
     await reloadCollections()
+  }
+
+  function handleBookUpdated(updatedBook: KindleBook) {
+    setBooks((prev) => prev.map((b) => b.path === updatedBook.path ? updatedBook : b))
   }
 
   async function handleWriteToKindle() {
@@ -334,6 +352,7 @@ export function App() {
               documentsBase={documentsBase}
               onAddBookToCollection={handleAddBookToCollection}
               onRemoveBookFromCollection={handleRemoveBookFromCollection}
+              onBookUpdated={handleBookUpdated}
             />
           </>
         )}

@@ -118,6 +118,11 @@
   },
   "bookDetail": {
     "close": "Close detail",
+    "edit": "Edit metadata",
+    "editing": "Editing…",
+    "save": "Save",
+    "cancelEdit": "Cancel",
+    "titleLabel": "Title",
     "author": "Author",
     "loading": "Loading information…",
     "year": "Year",

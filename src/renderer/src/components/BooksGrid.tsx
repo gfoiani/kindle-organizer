@@ -12,6 +12,7 @@ interface BooksGridProps {
   documentsBase: string
   onAddBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onRemoveBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
+  onBookUpdated: (updatedBook: KindleBook) => void
 }
 
 function formatSize(bytes: number): string {
@@ -47,6 +48,15 @@ function BookCard({
       .catch(() => {})
       .finally(() => { if (!cancelled) setCoverLoading(false) })
     return () => { cancelled = true }
+  }, [book.title, book.author])
+
+  // Listen for retry-succeeded push events from the main process
+  useEffect(() => {
+    return window.kindleAPI.onCoverUpdated((title, author, dataUrl) => {
+      if (title === book.title && author === book.author) {
+        setCover(dataUrl)
+      }
+    })
   }, [book.title, book.author])
 
   return (
@@ -166,11 +176,12 @@ export function BooksGrid({
   collections,
   documentsBase,
   onAddBookToCollection,
-  onRemoveBookFromCollection
+  onRemoveBookFromCollection,
+  onBookUpdated
 }: BooksGridProps) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
-  const [selectedBook, setSelectedBook] = useState<{ book: KindleBook; cover: string | null } | null>(null)
+  const [selectedBook, setSelectedBook] = useState<{ book: KindleBook; cover: string | null; bookRelpath: string } | null>(null)
 
   useEffect(() => {
     setSelectedBook(null)
@@ -262,7 +273,7 @@ export function BooksGrid({
                   collections={collections}
                   onAddToCollection={onAddBookToCollection}
                   onRemoveFromCollection={onRemoveBookFromCollection}
-                  onSelect={(cover) => setSelectedBook({ book, cover })}
+                  onSelect={(cover) => setSelectedBook({ book, cover, bookRelpath })}
                 />
               )
             })}
@@ -274,7 +285,12 @@ export function BooksGrid({
         <BookDetailSidebar
           book={selectedBook.book}
           cover={selectedBook.cover}
+          bookRelpath={selectedBook.bookRelpath}
           onClose={() => setSelectedBook(null)}
+          onBookUpdated={(updatedBook) => {
+            setSelectedBook((prev) => prev ? { ...prev, book: updatedBook } : null)
+            onBookUpdated(updatedBook)
+          }}
         />
       )}
     </div>
