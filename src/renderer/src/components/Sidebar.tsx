@@ -7,11 +7,13 @@ interface SidebarProps {
   selectedCollectionId: string | null
   onSelectCollection: (id: string | null) => void
   isLoading: boolean
+  booksCount: number
   onCreateCollection: (name: string) => Promise<void>
   onRenameCollection: (id: string, newName: string) => Promise<void>
   onDeleteCollection: (id: string) => Promise<void>
   onSelectSettings: () => void
   onSelectAbout: () => void
+  onAIOrganize: () => void
 }
 
 function EditableCollectionRow({
@@ -171,11 +173,13 @@ export function Sidebar({
   selectedCollectionId,
   onSelectCollection,
   isLoading,
+  booksCount,
   onCreateCollection,
   onRenameCollection,
   onDeleteCollection,
   onSelectSettings,
-  onSelectAbout
+  onSelectAbout,
+  onAIOrganize
 }: SidebarProps) {
   const { t } = useTranslation()
   const [isCreating, setIsCreating] = useState(false)
@@ -207,6 +211,22 @@ export function Sidebar({
             }`}
           >
             {t('sidebar.allBooks')}
+          </button>
+          <button
+            onClick={onAIOrganize}
+            disabled={booksCount === 0}
+            title={t('sidebar.aiOrganize')}
+            className="w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-indigo-400 hover:bg-indigo-900/30 hover:text-indigo-300 disabled:opacity-30 disabled:cursor-not-allowed mt-0.5"
+          >
+            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+              />
+            </svg>
+            {t('sidebar.aiOrganize')}
           </button>
         </div>
 

@@ -14,7 +14,8 @@
     "rename": "Rename",
     "delete": "Delete",
     "settings": "Settings",
-    "about": "About"
+    "about": "About",
+    "aiOrganize": "AI Organize"
   },
   "header": {
     "collection": "Collection",
@@ -44,7 +45,12 @@
     "noBooks": "No books found",
     "loadingBooks": "Loading books...",
     "book": "book",
-    "books": "books"
+    "books": "books",
+    "booksCount": "{{count}} books",
+    "booksCountFiltered": "{{filtered}} / {{total}} books",
+    "searchPlaceholder": "Search by title or author…",
+    "noResults": "No books found for \"{{query}}\"",
+    "removeFilter": "Remove filter"
   },
   "collectionPicker": {
     "loading": "Loading...",
@@ -55,6 +61,42 @@
     "connectKindle": "Connect your Kindle via USB to see your books",
     "noBooks": "No books found",
     "emptyDocuments": "The Kindle's documents folder appears to be empty"
+  },
+  "aiClassify": {
+    "title": "AI Organize Books",
+    "categoriesLabel": "Categories",
+    "addLabelPlaceholder": "New category...",
+    "addLabel": "Add",
+    "analyzeBooks": "Analyze {{count}} books",
+    "analyzingProgress": "Analyzing {{current}} / {{total}} books",
+    "preparingModel": "Preparing model...",
+    "results": "Results",
+    "thresholdLabel": "Confidence threshold",
+    "summary": "{{books}} books → {{collections}} collections ({{newCollections}} new)",
+    "cancel": "Cancel",
+    "apply": "Create Collections ({{count}})",
+    "applying": "Applying...",
+    "deleteExisting": "Delete existing collections ({{count}})",
+    "genres": {
+      "fantasy": "Fantasy",
+      "scienceFiction": "Science Fiction",
+      "thriller": "Thriller",
+      "mystery": "Mystery",
+      "horror": "Horror",
+      "romance": "Romance",
+      "historicalFiction": "Historical Fiction",
+      "literaryFiction": "Literary Fiction",
+      "biography": "Biography",
+      "history": "History",
+      "science": "Science",
+      "technology": "Technology",
+      "selfHelp": "Self-Help",
+      "psychology": "Psychology",
+      "philosophy": "Philosophy",
+      "business": "Business",
+      "travel": "Travel",
+      "cooking": "Cooking"
+    }
   },
   "about": {
     "title": "About",
@@ -73,5 +115,20 @@
     "builtWith": "Built with",
     "github": "Project on GitHub",
     "license": "MIT License"
+  },
+  "bookDetail": {
+    "close": "Close detail",
+    "edit": "Edit metadata",
+    "editing": "Editing…",
+    "save": "Save",
+    "cancelEdit": "Cancel",
+    "titleLabel": "Title",
+    "author": "Author",
+    "loading": "Loading information…",
+    "year": "Year",
+    "genre": "Genre",
+    "description": "Description",
+    "noInfo": "No additional information available",
+    "fileSize": "File size"
   }
 }

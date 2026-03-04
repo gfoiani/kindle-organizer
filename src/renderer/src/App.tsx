@@ -4,6 +4,8 @@ import { Sidebar } from './components/Sidebar'
 import { BooksGrid } from './components/BooksGrid'
 import { Settings } from './components/Settings'
 import { About } from './components/About'
+import { AutoClassifyModal } from './components/AutoClassifyModal'
+import type { ClassifyResult } from './hooks/useClassifier'
 import type { KindleDrive, KindleBook, Collection } from '../../preload/api'
 
 export function App() {
@@ -20,6 +22,7 @@ export function App() {
   const [syncResult, setSyncResult] = useState<'success' | 'error' | null>(null)
   const [isShowingSettings, setIsShowingSettings] = useState(false)
   const [isShowingAbout, setIsShowingAbout] = useState(false)
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false)
 
   const loadBooks = async (mountpoint: string) => {
     setIsLoadingBooks(true)
@@ -91,6 +94,20 @@ export function App() {
     })
   }, [])
 
+  // Auto-detect Kindle connect/disconnect while the app is running
+  useEffect(() => {
+    const unsubConnect = window.kindleAPI.onKindleConnected(() => {
+      loadKindle()
+    })
+    const unsubDisconnect = window.kindleAPI.onKindleDisconnected(() => {
+      loadKindle()
+    })
+    return () => {
+      unsubConnect()
+      unsubDisconnect()
+    }
+  }, [loadKindle])
+
   useEffect(() => {
     if (selectedCollectionId === null) {
       setCollectionBookPaths(new Set())
@@ -144,6 +161,10 @@ export function App() {
     await reloadCollections()
   }
 
+  function handleBookUpdated(updatedBook: KindleBook) {
+    setBooks((prev) => prev.map((b) => b.path === updatedBook.path ? updatedBook : b))
+  }
+
   async function handleWriteToKindle() {
     if (!kindle) return
     setIsSyncing(true)
@@ -157,6 +178,47 @@ export function App() {
       setIsSyncing(false)
       setTimeout(() => setSyncResult(null), 3000)
     }
+  }
+
+  async function handleApplySuggestions(
+    suggestions: ClassifyResult[],
+    threshold: number,
+    deleteExisting: boolean
+  ) {
+    const filtered = suggestions.filter((s) => s.score * 100 >= threshold)
+    if (filtered.length === 0) return
+
+    // Optionally wipe all existing collections before creating new ones
+    if (deleteExisting) {
+      for (const col of collections) {
+        await window.kindleAPI.deleteCollection(col.id)
+      }
+    }
+
+    // Collect labels that don't already have a matching collection
+    const uniqueLabels = [...new Set(filtered.map((s) => s.label))]
+    const currentCollections = deleteExisting ? [] : [...collections]
+
+    for (const label of uniqueLabels) {
+      if (!currentCollections.some((c) => c.name === label)) {
+        const created = await window.kindleAPI.createCollection(label)
+        currentCollections.push(created)
+      }
+    }
+
+    const documentsBase = kindle ? `${kindle.mountpoint}/documents/` : ''
+
+    for (const suggestion of filtered) {
+      const collection = currentCollections.find((c) => c.name === suggestion.label)
+      if (!collection) continue
+      const relpath = suggestion.book.path.startsWith(documentsBase)
+        ? suggestion.book.path.slice(documentsBase.length)
+        : suggestion.book.path
+      await window.kindleAPI.addBookToCollection(collection.id, relpath)
+    }
+
+    await reloadCollections()
+    setIsAIModalOpen(false)
   }
 
   const documentsBase = kindle ? `${kindle.mountpoint}/documents/` : ''
@@ -182,6 +244,7 @@ export function App() {
           setIsShowingAbout(false)
         }}
         isLoading={isLoadingCollections}
+        booksCount={books.length}
         onCreateCollection={handleCreateCollection}
         onRenameCollection={handleRenameCollection}
         onDeleteCollection={handleDeleteCollection}
@@ -195,6 +258,7 @@ export function App() {
           setIsShowingSettings(false)
           setSelectedCollectionId(null)
         }}
+        onAIOrganize={() => setIsAIModalOpen(true)}
       />
 
       <main className="flex-1 flex flex-col min-w-0">
@@ -288,10 +352,19 @@ export function App() {
               documentsBase={documentsBase}
               onAddBookToCollection={handleAddBookToCollection}
               onRemoveBookFromCollection={handleRemoveBookFromCollection}
+              onBookUpdated={handleBookUpdated}
             />
           </>
         )}
       </main>
+      {isAIModalOpen && (
+        <AutoClassifyModal
+          books={books}
+          collections={collections}
+          onApply={handleApplySuggestions}
+          onClose={() => setIsAIModalOpen(false)}
+        />
+      )}
     </div>
   )
 }

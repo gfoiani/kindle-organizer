@@ -6,6 +6,9 @@ on:
       - 'v*'          # Triggered on tags like v1.0.0, v2.3.1, etc.
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
+permissions:
+  contents: write    # Required to create releases and upload assets
+
 jobs:
   build-mac:
     name: Build macOS (DMG)
@@ -25,6 +28,9 @@ jobs:
         run: yarn install
         # postinstall script rebuilds better-sqlite3 natively for macOS
 
+      - name: Download AI model
+        run: yarn download-model
+
       - name: Build & package
         run: yarn dist:mac
         env:
@@ -35,6 +41,17 @@ jobs:
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ad-hoc codesign (prevents "app is damaged" on Apple Silicon)
+        run: |
+          APP_PATH=$(find release/mac* -name "*.app" -maxdepth 1 | head -1)
+          if [ -n "$APP_PATH" ]; then
+            echo "Signing: $APP_PATH"
+            codesign --force --deep --sign - "$APP_PATH"
+            echo "Ad-hoc signature applied successfully"
+          else
+            echo "Warning: No .app found to sign"
+          fi
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -60,6 +77,9 @@ jobs:
       - name: Install dependencies
         run: yarn install
         # postinstall script rebuilds better-sqlite3 natively for Windows
+
+      - name: Download AI model
+        run: yarn download-model
 
       - name: Build & package
         run: yarn dist:win

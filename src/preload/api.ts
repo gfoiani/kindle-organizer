@@ -1,7 +1,8 @@
 import { ipcRenderer } from 'electron'
 import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
+import type { BookMetadata } from '../main/covers'
 
-export type { KindleDrive, KindleBook, Collection }
+export type { KindleDrive, KindleBook, Collection, BookMetadata }
 
 export interface KindleAPI {
   detectKindleDrives: () => Promise<KindleDrive[]>
@@ -17,8 +18,18 @@ export interface KindleAPI {
   addBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   removeBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   getCover: (title: string, author?: string) => Promise<string | null>
+  getBookMetadata: (title: string, author?: string) => Promise<BookMetadata | null>
+  updateBookMetadata: (bookRelpath: string, title: string, author?: string) => Promise<void>
   clearCoverCache: () => Promise<void>
   onShowAbout: (callback: () => void) => void
+  /** Subscribe to cover updates pushed by the retry loop. Returns an unsubscribe function. */
+  onCoverUpdated: (
+    callback: (title: string, author: string | undefined, dataUrl: string) => void
+  ) => () => void
+  /** Fired when a Kindle is plugged in while the app is running. */
+  onKindleConnected: (callback: (drive: KindleDrive) => void) => () => void
+  /** Fired when a Kindle is unplugged while the app is running. */
+  onKindleDisconnected: (callback: (drive: KindleDrive) => void) => () => void
 }
 
 export const kindleAPI: KindleAPI = {
@@ -55,10 +66,39 @@ export const kindleAPI: KindleAPI = {
   getCover: (title: string, author?: string) =>
     ipcRenderer.invoke('kindle:get-cover', title, author),
 
+  getBookMetadata: (title: string, author?: string) =>
+    ipcRenderer.invoke('kindle:get-book-metadata', title, author),
+
+  updateBookMetadata: (bookRelpath: string, title: string, author?: string) =>
+    ipcRenderer.invoke('kindle:update-book-metadata', bookRelpath, title, author),
+
   clearCoverCache: () => ipcRenderer.invoke('kindle:clear-cover-cache'),
 
   onShowAbout: (callback: () => void) => {
     ipcRenderer.removeAllListeners('show-about')
     ipcRenderer.on('show-about', () => callback())
+  },
+
+  onCoverUpdated: (callback) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      title: string,
+      author: string | undefined,
+      dataUrl: string
+    ) => callback(title, author, dataUrl)
+    ipcRenderer.on('cover:updated', handler)
+    return () => ipcRenderer.removeListener('cover:updated', handler)
+  },
+
+  onKindleConnected: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, drive: KindleDrive) => callback(drive)
+    ipcRenderer.on('kindle:connected', handler)
+    return () => ipcRenderer.removeListener('kindle:connected', handler)
+  },
+
+  onKindleDisconnected: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, drive: KindleDrive) => callback(drive)
+    ipcRenderer.on('kindle:disconnected', handler)
+    return () => ipcRenderer.removeListener('kindle:disconnected', handler)
   }
 }

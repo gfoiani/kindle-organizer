@@ -1,6 +1,6 @@
 {
   "name": "kindle-manager",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Manage and organize your Kindle library",
   "main": "out/main/index.js",
   "author": "",
@@ -14,9 +14,12 @@
     "preview": "electron-vite preview",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
-    "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
+    "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "download-model": "node scripts/download-model.mjs",
+    "update-homebrew": "ts-node scripts/update-homebrew.mts"
   },
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
     "better-sqlite3": "^12.6.2",
     "fs-extra": "^11.3.3",
     "i18next": "25.8.13",
@@ -34,13 +37,16 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
+    "dotenv": "^17.3.1",
     "electron": "^40.6.1",
     "electron-builder": "^26.8.1",
     "electron-icon-builder": "^2.0.1",
     "electron-vite": "^5.0.0",
     "tailwindcss": "^4.2.1",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vite-plugin-static-copy": "^3.2.0"
   },
   "build": {
     "appId": "com.kindleorganizer.app",
@@ -60,7 +66,10 @@
     },
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": "universal"
+        }
       ],
       "category": "public.app-category.utilities",
       "icon": "assets/icons/icons/icon.icns"

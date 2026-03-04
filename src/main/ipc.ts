@@ -1,7 +1,8 @@
 import { ipcMain } from 'electron'
 import { detectKindleDrives, readDocuments } from './kindle'
 import { readCalibreMetadata, writeCalibreMetadata } from './calibre'
-import { getCover, clearCoverCache } from './covers'
+import { getCover, clearCoverCache, getBookMetadata } from './covers'
+import { applyOverrides, setOverride } from './bookOverrides'
 import {
   getCollections,
   getCollectionBooks,
@@ -21,8 +22,17 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('kindle:read-documents', async (_, kindleMountpoint: string) => {
-    return readDocuments(kindleMountpoint)
+    const books = await readDocuments(kindleMountpoint)
+    const documentsBase = `${kindleMountpoint}/documents/`
+    return applyOverrides(books, documentsBase)
   })
+
+  ipcMain.handle(
+    'kindle:update-book-metadata',
+    async (_, bookRelpath: string, title: string, author: string | undefined) => {
+      setOverride(bookRelpath, title, author)
+    }
+  )
 
   ipcMain.handle('kindle:sync-calibre', async (_, mountpoint: string) => {
     const calibreBooks = readCalibreMetadata(mountpoint)
@@ -74,6 +84,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('kindle:get-cover', async (_, title: string, author?: string) => {
     return getCover(title, author)
+  })
+
+  ipcMain.handle('kindle:get-book-metadata', async (_, title: string, author?: string) => {
+    return getBookMetadata(title, author)
   })
 
   ipcMain.handle('kindle:clear-cover-cache', async () => {
