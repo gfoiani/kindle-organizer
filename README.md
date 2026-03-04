@@ -6,10 +6,12 @@ A desktop application for managing and organizing your Kindle library — browse
 
 - **Auto-detect Kindle** — plugs via USB and is detected automatically using drive labels and models
 - **Book browser** — scans the `documents/` folder and displays all supported ebooks in a visual grid
-- **Book covers** — fetches cover art automatically (Google Books API + Open Library fallback) and caches them locally
+- **Book covers** — fetches cover art automatically (iTunes primary, Open Library and Google Books as fallbacks) and caches them locally
+- **Metadata editing** — edit a book's title and author directly in the detail sidebar; changes persist across sessions
 - **Collections** — create, rename, and delete custom collections; assign books to one or more collections
 - **Calibre integration** — on connect, imports tag-based collections from Calibre's `metadata.calibre` file on the Kindle root
 - **Write to Kindle** — saves collection assignments back to `metadata.calibre` so Calibre can read them on the next sync
+- **Hot-plug detection** — automatically refreshes the library when a Kindle is connected or disconnected while the app is running
 - **System menu integration** — custom "About" menu item that opens the internal app section instead of a default dialog
 
 ## Supported formats
@@ -38,7 +40,8 @@ src/
 │   ├── kindle.ts             # Kindle drive detection + document scanning
 │   ├── calibre.ts            # Read/write metadata.calibre
 │   ├── localCollections.ts   # SQLite collections DB (CRUD)
-│   └── covers.ts             # Cover fetching + file cache
+│   ├── bookOverrides.ts      # SQLite store for user-edited title/author overrides
+│   └── covers.ts             # Cover fetching + file cache (iTunes → Open Library → Google Books)
 ├── preload/
 │   ├── index.ts              # Context bridge setup
 │   └── api.ts                # KindleAPI interface + ipcRenderer wrappers
@@ -47,8 +50,9 @@ src/
         ├── App.tsx
         └── components/
             ├── Sidebar.tsx          # Collections sidebar with CRUD
-            ├── BooksGrid.tsx        # Book grid with cover previews
-            └── CollectionPicker.tsx # Per-book collection assignment popover
+            ├── BooksGrid.tsx          # Book grid with cover previews
+            ├── BookDetailSidebar.tsx  # Slide-in detail panel with metadata editing
+            └── CollectionPicker.tsx   # Per-book collection assignment popover
 ```
 
 ### Collections
