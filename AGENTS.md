@@ -20,6 +20,8 @@ yarn rebuild          # rebuild better-sqlite3 native module if it breaks
 yarn download-model   # download the AI model for auto-classification (one-time)
 ```
 
+**Package manager: yarn (1.x) — use `yarn`, not `npm`.** A `yarn.lock` is committed; run scripts as `yarn <script>` (e.g. `yarn update-homebrew`).
+
 There is **no test suite or test runner configured yet**, and no lint script. Validate changes with `yarn type-check` and a manual `yarn dev` run.
 
 ## Architecture

@@ -67,4 +67,4 @@ for (const file of FILES) {
   await downloadFile(file)
 }
 
-console.log('\nModel ready. Run "npm run build" to bundle it into the app.')
+console.log('\nModel ready. Run "yarn build" to bundle it into the app.')

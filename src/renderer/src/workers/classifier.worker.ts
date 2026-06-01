@@ -58,7 +58,7 @@ async function getExtractor() {
     // for missing model files (see git history for the full rationale).
     env.useBrowserCache = false
   } else {
-    // In production, point to the bundled model (run: npm run download-model before building).
+    // In production, point to the bundled model (run: yarn download-model before building).
     // Worker lives in assets/, model is one level up in models/
     env.localModelPath = new URL('../models/', self.location.href).href
     debug('PROD localModelPath =', env.localModelPath)
