@@ -39,7 +39,11 @@ export default defineConfig({
       viteStaticCopy({
         targets: [
           {
-            src: path.resolve(__dirname, 'node_modules/@xenova/transformers/dist/*.wasm'),
+            // Copy the ONNX Runtime WASM binaries next to the worker bundle.
+            // Source from onnxruntime-web (a hard dependency, present on every
+            // platform) rather than @xenova/transformers/dist, whose wasm files
+            // aren't reliably shipped cross-platform (broke the Windows build).
+            src: path.resolve(__dirname, 'node_modules/onnxruntime-web/dist/*.wasm'),
             dest: 'assets'
           }
         ]

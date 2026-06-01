@@ -59,7 +59,11 @@
     ],
     "files": [
       "out",
-      "node_modules"
+      "node_modules",
+      "!**/node_modules/onnxruntime-node/**",
+      "!**/node_modules/onnxruntime-web/**",
+      "!**/node_modules/@xenova/**",
+      "!**/node_modules/sharp/**"
     ],
     "directories": {
       "buildResources": "assets",
