@@ -37,15 +37,11 @@ jobs:
         run: yarn download-model
 
       - name: Build & package
-        run: yarn dist:mac
-        env:
-          # Optional: Add Apple signing credentials as GitHub Secrets to sign & notarize
-          # CSC_LINK: ${{ secrets.APPLE_CERT_P12_BASE64 }}
-          # CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --publish never: electron-builder only builds; the "release" job below is
+        # the single publisher (avoids duplicate, differently-named release assets).
+        # To sign & notarize, add Apple creds as GitHub Secrets and pass them as env:
+        # CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID.
+        run: yarn dist:mac --publish never
 
       - name: Ad-hoc codesign (prevents "app is damaged" on Apple Silicon)
         run: |
@@ -87,12 +83,9 @@ jobs:
         run: yarn download-model
 
       - name: Build & package
-        run: yarn dist:win
-        env:
-          # Optional: Add Windows code signing credentials as GitHub Secrets
-          # CSC_LINK: ${{ secrets.WIN_CERT_P12_BASE64 }}
-          # CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --publish never: build only; the "release" job is the single publisher.
+        # To sign, add Windows creds as GitHub Secrets and pass CSC_LINK / CSC_KEY_PASSWORD as env.
+        run: yarn dist:win --publish never
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4

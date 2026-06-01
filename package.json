@@ -52,6 +52,7 @@
   "build": {
     "appId": "com.kindleorganizer.app",
     "productName": "Kindle Organizer",
+    "artifactName": "Kindle-Organizer-${version}-${arch}.${ext}",
     "npmRebuild": true,
     "asar": true,
     "asarUnpack": [
