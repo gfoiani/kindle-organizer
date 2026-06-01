@@ -13,7 +13,9 @@ const appRoot = resolve(__dirname, '..');
 
 // Get parameters from CLI or .env
 let dmgFile = process.argv[2] || process.env.DMG_FILE;
-let homebrewDir = process.argv[3] || process.env.HOMEBREW_DIR || 'homebrew';
+// Defaults to the sibling tap repo (gfoiani/homebrew-kindle-organizer) checked
+// out next to the app, i.e. ../homebrew. Override with HOMEBREW_DIR or argv[3].
+let homebrewDir = process.argv[3] || process.env.HOMEBREW_DIR || '../homebrew';
 
 // Default DMG file to the auto-discovered one in release/
 if (!dmgFile) {
@@ -30,7 +32,7 @@ if (!dmgFile) {
 
 if (!dmgFile || !existsSync(dmgFile)) {
   console.error(`Error: No DMG file found at '${dmgFile || 'release/*.dmg'}'.`);
-  console.error('Usage: npm run update-homebrew [path/to/app.dmg] [path/to/homebrew_dir]');
+  console.error('Usage: yarn update-homebrew [path/to/app.dmg] [path/to/homebrew_dir]');
   console.error('Or set DMG_FILE and HOMEBREW_DIR in your .env file.');
   process.exit(1);
 }

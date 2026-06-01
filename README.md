@@ -167,6 +167,49 @@ When you run the `.exe` installer, Windows will show *"Windows protected your PC
 
 Windows will remember your choice and won't ask again.
 
+## Releasing & publishing to Homebrew
+
+The Homebrew tap is a **separate repository**
+([`gfoiani/homebrew-kindle-organizer`](https://github.com/gfoiani/homebrew-kindle-organizer)),
+expected to be checked out next to this app folder at `../homebrew`.
+
+### One command
+
+```bash
+yarn release X.Y.Z
+```
+
+The version is the only thing the script can't infer. [`scripts/release.mts`](scripts/release.mts) then:
+
+1. bumps `package.json` to `X.Y.Z`, commits, tags `vX.Y.Z`, and pushes — which triggers
+   CI ([build.yml](.github/workflows/build.yml)) to build the macOS DMG (`yarn dist:mac`,
+   universal) + Windows installer, ad-hoc-sign the app, and publish a **GitHub Release**;
+2. waits for that release's `.dmg` asset, downloads it, computes its SHA-256, and writes
+   `version` + `sha256` into the tap cask (`../homebrew/Casks/kindle-organizer.rb`);
+3. commits and pushes the tap repo.
+
+Downloading the asset from the **private** repo needs a token — set `GITHUB_TOKEN` (or
+`GH_TOKEN`) in `.env` or the environment. The tap path defaults to `$HOMEBREW_DIR` or `../homebrew`.
+
+> The SHA-256 is taken from the **released** DMG (the CI-built asset), never a local
+> `yarn dist:mac` build — local bytes differ and `brew` would reject the download.
+
+### Useful flags
+
+```bash
+yarn release X.Y.Z --no-homebrew    # stop after tag/push (CI only)
+yarn release X.Y.Z --homebrew-only  # skip bump/tag; just update the tap (e.g. after CI finishes)
+yarn release X.Y.Z --dmg /tmp/ko.dmg  # use a local/downloaded DMG instead of fetching
+yarn release X.Y.Z --sha <hash>     # provide the SHA-256 directly (no download)
+yarn release X.Y.Z --no-wait        # don't poll; fail fast if the release isn't ready
+yarn release X.Y.Z --no-push        # do everything except git push
+```
+
+No code signing with a paid certificate: to sign & notarize, add the Apple/Windows
+credentials as GitHub Secrets (see the commented `env:` block in the workflow).
+
+Users upgrade with `brew update && brew upgrade --cask kindle-organizer`.
+
 ## License
 
 MIT
