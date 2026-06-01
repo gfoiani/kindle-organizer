@@ -5,6 +5,11 @@ import * as https from 'https'
 import * as path from 'path'
 import { app, BrowserWindow } from 'electron'
 
+// Dev-only verbose logging. Silent in packaged builds.
+const debug = (...args: unknown[]): void => {
+  if (!app.isPackaged) console.log(...args)
+}
+
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 // Serial queue: one outbound request at a time, with a guaranteed minimum gap.
 // On 429 all queued requests also wait (globalPauseUntil).
@@ -81,7 +86,7 @@ function scheduleRetry(
     attempts: prevAttempts,
     nextRetry: Date.now() + RETRY_DELAYS_MS[prevAttempts]
   })
-  console.log(
+  debug(
     `[cover] Scheduled retry #${prevAttempts + 1} for "${title}" in ${RETRY_DELAYS_MS[prevAttempts] / 1000}s`
   )
 }
@@ -157,7 +162,7 @@ async function searchGoogleBooks(
     const body = await fetchUrlWithRetry(url)
     const json = JSON.parse(body.toString('utf-8')) as unknown
     if (typeof json !== 'object' || json === null) {
-      console.log(`[searchGoogleBooks] Invalid JSON response`)
+      debug(`[searchGoogleBooks] Invalid JSON response`)
       return null
     }
 
@@ -165,15 +170,15 @@ async function searchGoogleBooks(
       json as { items?: [{ volumeInfo?: { imageLinks?: { thumbnail?: string } } }] }
     )?.items?.[0]?.volumeInfo?.imageLinks?.thumbnail
     if (typeof thumbnail !== 'string') {
-      console.log(`[searchGoogleBooks] No thumbnail found`)
+      debug(`[searchGoogleBooks] No thumbnail found`)
       return null
     }
 
     const result = thumbnail.replace('http://', 'https://').replace('zoom=1', 'zoom=2')
-    console.log(`[searchGoogleBooks] Found thumbnail: ${result}`)
+    debug(`[searchGoogleBooks] Found thumbnail: ${result}`)
     return result
   } catch (err) {
-    console.log(`[searchGoogleBooks] Error: ${err instanceof Error ? err.message : String(err)}`)
+    debug(`[searchGoogleBooks] Error: ${err instanceof Error ? err.message : String(err)}`)
     throw err
   }
 }
@@ -190,21 +195,21 @@ async function searchOpenLibrary(
     const body = await fetchUrlWithRetry(url)
     const json = JSON.parse(body.toString('utf-8')) as unknown
     if (typeof json !== 'object' || json === null) {
-      console.log(`[searchOpenLibrary] Invalid JSON response`)
+      debug(`[searchOpenLibrary] Invalid JSON response`)
       return null
     }
 
     const coverId = (json as { docs?: [{ cover_i?: number }] })?.docs?.[0]?.cover_i
     if (typeof coverId !== 'number') {
-      console.log(`[searchOpenLibrary] No cover_i found`)
+      debug(`[searchOpenLibrary] No cover_i found`)
       return null
     }
 
     const result = `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`
-    console.log(`[searchOpenLibrary] Found cover: ${result}`)
+    debug(`[searchOpenLibrary] Found cover: ${result}`)
     return result
   } catch (err) {
-    console.log(`[searchOpenLibrary] Error: ${err instanceof Error ? err.message : String(err)}`)
+    debug(`[searchOpenLibrary] Error: ${err instanceof Error ? err.message : String(err)}`)
     throw err
   }
 }
@@ -221,23 +226,23 @@ async function searchItunes(
     const body = await fetchUrlWithRetry(url)
     const json = JSON.parse(body.toString('utf-8')) as unknown
     if (typeof json !== 'object' || json === null) {
-      console.log(`[searchItunes] Invalid JSON response`)
+      debug(`[searchItunes] Invalid JSON response`)
       return null
     }
 
     const results = (json as { results?: { artworkUrl100?: string }[] })?.results
     const artwork = results?.[0]?.artworkUrl100
     if (typeof artwork !== 'string') {
-      console.log(`[searchItunes] No artwork found`)
+      debug(`[searchItunes] No artwork found`)
       return null
     }
 
     // Bump resolution from 100x100 to 600x600
     const result = artwork.replace('100x100bb', '600x600bb')
-    console.log(`[searchItunes] Found artwork: ${result}`)
+    debug(`[searchItunes] Found artwork: ${result}`)
     return result
   } catch (err) {
-    console.log(`[searchItunes] Error: ${err instanceof Error ? err.message : String(err)}`)
+    debug(`[searchItunes] Error: ${err instanceof Error ? err.message : String(err)}`)
     throw err
   }
 }
@@ -290,7 +295,7 @@ async function downloadCoverData(
   try {
     const data = await fetchUrlWithRetry(imageUrl)
     if (data.length < 500) {
-      console.log(`[cover] Image too small (${data.length} bytes) for "${title}"`)
+      debug(`[cover] Image too small (${data.length} bytes) for "${title}"`)
       return { status: 'not-found' }
     }
     return { status: 'found', data }
@@ -302,7 +307,7 @@ async function downloadCoverData(
 // ─── Public cover API ─────────────────────────────────────────────────────────
 
 export async function getCover(title: string, author: string | undefined): Promise<string | null> {
-  console.log(`[getCover] Searching for cover: title="${title}", author="${author}"`)
+  debug(`[getCover] Searching for cover: title="${title}", author="${author}"`)
   const key = getCacheKey(title, author)
   const cachePath = getCachePath(key)
 
@@ -324,13 +329,13 @@ export async function getCover(title: string, author: string | undefined): Promi
     const result = await downloadCoverData(title, author)
 
     if (result.status === 'found') {
-      console.log(`[getCover] Successfully cached image (${result.data.length} bytes)`)
+      debug(`[getCover] Successfully cached image (${result.data.length} bytes)`)
       fs.writeFileSync(cachePath, result.data)
       return `data:image/jpeg;base64,${result.data.toString('base64')}`
     }
 
     if (result.status === 'not-found') {
-      console.log(`[getCover] No cover found, writing negative cache`)
+      debug(`[getCover] No cover found, writing negative cache`)
       fs.writeFileSync(cachePath, Buffer.alloc(0))
       return null
     }
@@ -370,7 +375,7 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void
           fs.mkdirSync(getCoverCacheDir(), { recursive: true })
           fs.writeFileSync(cachePath, result.data)
           retryRegistry.delete(key)
-          console.log(`[cover] Retry #${nextAttempts} succeeded for "${entry.title}"`)
+          debug(`[cover] Retry #${nextAttempts} succeeded for "${entry.title}"`)
 
           const dataUrl = `data:image/jpeg;base64,${result.data.toString('base64')}`
           getWindow()?.webContents.send('cover:updated', entry.title, entry.author, dataUrl)
@@ -382,7 +387,7 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void
           fs.mkdirSync(getCoverCacheDir(), { recursive: true })
           fs.writeFileSync(cachePath, Buffer.alloc(0))
           retryRegistry.delete(key)
-          console.log(`[cover] Retry #${nextAttempts}: confirmed no cover for "${entry.title}"`)
+          debug(`[cover] Retry #${nextAttempts}: confirmed no cover for "${entry.title}"`)
           return
         }
 
@@ -391,7 +396,7 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void
           scheduleRetry(key, entry.title, entry.author, nextAttempts)
         } else {
           retryRegistry.delete(key)
-          console.log(`[cover] Max retries reached for "${entry.title}", giving up`)
+          debug(`[cover] Max retries reached for "${entry.title}", giving up`)
         }
       }).catch(() => {
         if (nextAttempts < RETRY_DELAYS_MS.length) {
@@ -454,16 +459,16 @@ async function searchOpenLibraryMetadata(
           description = typeof desc === 'string' ? desc : desc?.value
         }
       } catch (err) {
-        console.log(`[searchOpenLibraryMetadata] Works fetch failed: ${err instanceof Error ? err.message : String(err)}`)
+        debug(`[searchOpenLibraryMetadata] Works fetch failed: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
 
     if (!year && !genre && !description) return null
 
-    console.log(`[searchOpenLibraryMetadata] Found: year=${year}, genre=${genre}, desc=${description ? 'yes' : 'no'}`)
+    debug(`[searchOpenLibraryMetadata] Found: year=${year}, genre=${genre}, desc=${description ? 'yes' : 'no'}`)
     return { year, genre, description }
   } catch (err) {
-    console.log(`[searchOpenLibraryMetadata] Error: ${err instanceof Error ? err.message : String(err)}`)
+    debug(`[searchOpenLibraryMetadata] Error: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
 }
@@ -503,7 +508,7 @@ async function searchGoogleBooksMetadata(
       description: volumeInfo.description
     }
   } catch (err) {
-    console.log(`[searchGoogleBooksMetadata] Error: ${err instanceof Error ? err.message : String(err)}`)
+    debug(`[searchGoogleBooksMetadata] Error: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
 }

@@ -33,7 +33,7 @@ export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpd
     window.kindleAPI
       .getBookMetadata(book.title, book.author)
       .then((data) => { if (!cancelled) setMetadata(data) })
-      .catch(() => {})
+      .catch((err) => { if (!cancelled) console.error('Failed to fetch book metadata:', err) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [book.title, book.author])

@@ -1,7 +1,12 @@
+import { app } from 'electron'
 import si from 'systeminformation'
 import * as fs from 'fs-extra'
-import Database from 'better-sqlite3'
 import path from 'path'
+
+// Dev-only verbose logging. Silent in packaged builds.
+const debug = (...args: unknown[]): void => {
+  if (!app.isPackaged) console.log(...args)
+}
 
 export interface KindleDrive {
   device: string
@@ -25,11 +30,6 @@ export interface Collection {
   name: string
   bookCount: number
   source: 'calibre' | 'local'
-}
-
-export interface CollectionItem {
-  collectionId: string
-  bookPath: string
 }
 
 const KINDLE_IDENTIFIERS = ['kindle', 'amazon']
@@ -93,7 +93,7 @@ export function startKindleWatcher(
       if (!knownMountpoints.has(drive.mountpoint)) {
         knownMountpoints.add(drive.mountpoint)
         knownDrives.set(drive.mountpoint, drive)
-        console.log(`[kindle-watcher] Connected: ${drive.description} at ${drive.mountpoint}`)
+        debug(`[kindle-watcher] Connected: ${drive.description} at ${drive.mountpoint}`)
         onConnect(drive)
       }
     }
@@ -104,7 +104,7 @@ export function startKindleWatcher(
         const drive = knownDrives.get(mountpoint)!
         knownMountpoints.delete(mountpoint)
         knownDrives.delete(mountpoint)
-        console.log(`[kindle-watcher] Disconnected: ${drive.description} at ${drive.mountpoint}`)
+        debug(`[kindle-watcher] Disconnected: ${drive.description} at ${drive.mountpoint}`)
         onDisconnect(drive)
       }
     }
@@ -220,67 +220,4 @@ export async function readDocuments(kindleMountpoint: string): Promise<KindleBoo
 
   const books = await scanBooks(documentsPath)
   return books.sort((a, b) => a.title.localeCompare(b.title))
-}
-
-export function queryCollections(dbPath: string): Collection[] {
-  if (!fs.existsSync(dbPath)) {
-    return []
-  }
-
-  const db = new Database(dbPath, { readonly: true })
-
-  try {
-    const rows = db
-      .prepare(
-        `
-        SELECT
-          p_uuid AS id,
-          p_title AS name,
-          COUNT(i_uuid) AS bookCount
-        FROM Collection
-        LEFT JOIN CollectionEntry ON Collection.p_uuid = CollectionEntry.p_collection
-        GROUP BY Collection.p_uuid, Collection.p_title
-        ORDER BY Collection.p_title
-      `
-      )
-      .all() as Array<{ id: string; name: string; bookCount: number }>
-
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      bookCount: row.bookCount,
-      source: 'local' as const
-    }))
-  } finally {
-    db.close()
-  }
-}
-
-export function queryCollectionItems(dbPath: string, collectionId: string): CollectionItem[] {
-  if (!fs.existsSync(dbPath)) {
-    return []
-  }
-
-  const db = new Database(dbPath, { readonly: true })
-
-  try {
-    const rows = db
-      .prepare(
-        `
-        SELECT
-          p_collection AS collectionId,
-          i_member AS bookPath
-        FROM CollectionEntry
-        WHERE p_collection = ?
-      `
-      )
-      .all(collectionId) as Array<{ collectionId: string; bookPath: string }>
-
-    return rows.map((row) => ({
-      collectionId: row.collectionId,
-      bookPath: row.bookPath
-    }))
-  } finally {
-    db.close()
-  }
 }

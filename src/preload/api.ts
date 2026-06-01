@@ -21,7 +21,8 @@ export interface KindleAPI {
   getBookMetadata: (title: string, author?: string) => Promise<BookMetadata | null>
   updateBookMetadata: (bookRelpath: string, title: string, author?: string) => Promise<void>
   clearCoverCache: () => Promise<void>
-  onShowAbout: (callback: () => void) => void
+  /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
+  onShowAbout: (callback: () => void) => () => void
   /** Subscribe to cover updates pushed by the retry loop. Returns an unsubscribe function. */
   onCoverUpdated: (
     callback: (title: string, author: string | undefined, dataUrl: string) => void
@@ -75,8 +76,9 @@ export const kindleAPI: KindleAPI = {
   clearCoverCache: () => ipcRenderer.invoke('kindle:clear-cover-cache'),
 
   onShowAbout: (callback: () => void) => {
-    ipcRenderer.removeAllListeners('show-about')
-    ipcRenderer.on('show-about', () => callback())
+    const handler = () => callback()
+    ipcRenderer.on('show-about', handler)
+    return () => ipcRenderer.removeListener('show-about', handler)
   },
 
   onCoverUpdated: (callback) => {

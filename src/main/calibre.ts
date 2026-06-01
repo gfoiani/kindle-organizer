@@ -43,9 +43,17 @@ export function writeCalibreMetadata(
       return entry
     })
 
-    fs.writeFileSync(metadataPath, JSON.stringify(updated, null, 2), 'utf-8')
+    // Atomic write: write to a temp file then rename, so the device's
+    // metadata.calibre is never left half-written if the Kindle is unplugged mid-write.
+    const tempPath = `${metadataPath}.tmp`
+    fs.writeFileSync(tempPath, JSON.stringify(updated, null, 2), 'utf-8')
+    fs.renameSync(tempPath, metadataPath)
     return true
-  } catch {
+  } catch (err) {
+    console.error(
+      `[calibre] Failed to write metadata to ${metadataPath}:`,
+      err instanceof Error ? err.message : String(err)
+    )
     return false
   }
 }
@@ -84,7 +92,11 @@ export function readCalibreMetadata(mountpoint: string): CalibreBook[] {
     }
 
     return books
-  } catch {
+  } catch (err) {
+    console.error(
+      `[calibre] Failed to read metadata from ${metadataPath}:`,
+      err instanceof Error ? err.message : String(err)
+    )
     return []
   }
 }

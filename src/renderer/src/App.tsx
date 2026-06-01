@@ -87,11 +87,12 @@ export function App() {
   }, [loadKindle])
 
   useEffect(() => {
-    window.kindleAPI.onShowAbout(() => {
+    const unsubShowAbout = window.kindleAPI.onShowAbout(() => {
       setIsShowingAbout(true)
       setIsShowingSettings(false)
       setSelectedCollectionId(null)
     })
+    return () => unsubShowAbout()
   }, [])
 
   // Auto-detect Kindle connect/disconnect while the app is running
@@ -124,17 +125,29 @@ export function App() {
   }, [selectedCollectionId])
 
   async function handleCreateCollection(name: string) {
-    await window.kindleAPI.createCollection(name)
+    try {
+      await window.kindleAPI.createCollection(name)
+    } catch (err) {
+      console.error('Failed to create collection:', err)
+    }
     await reloadCollections()
   }
 
   async function handleRenameCollection(id: string, newName: string) {
-    await window.kindleAPI.renameCollection(id, newName)
+    try {
+      await window.kindleAPI.renameCollection(id, newName)
+    } catch (err) {
+      console.error('Failed to rename collection:', err)
+    }
     await reloadCollections()
   }
 
   async function handleDeleteCollection(id: string) {
-    await window.kindleAPI.deleteCollection(id)
+    try {
+      await window.kindleAPI.deleteCollection(id)
+    } catch (err) {
+      console.error('Failed to delete collection:', err)
+    }
     if (selectedCollectionId === id) {
       setSelectedCollectionId(null)
     }
@@ -142,21 +155,29 @@ export function App() {
   }
 
   async function handleAddBookToCollection(collectionId: string, bookRelpath: string) {
-    await window.kindleAPI.addBookToCollection(collectionId, bookRelpath)
-    if (collectionId === selectedCollectionId) {
-      setCollectionBookPaths((prev) => new Set([...prev, bookRelpath]))
+    try {
+      await window.kindleAPI.addBookToCollection(collectionId, bookRelpath)
+      if (collectionId === selectedCollectionId) {
+        setCollectionBookPaths((prev) => new Set([...prev, bookRelpath]))
+      }
+    } catch (err) {
+      console.error('Failed to add book to collection:', err)
     }
     await reloadCollections()
   }
 
   async function handleRemoveBookFromCollection(collectionId: string, bookRelpath: string) {
-    await window.kindleAPI.removeBookFromCollection(collectionId, bookRelpath)
-    if (collectionId === selectedCollectionId) {
-      setCollectionBookPaths((prev) => {
-        const next = new Set(prev)
-        next.delete(bookRelpath)
-        return next
-      })
+    try {
+      await window.kindleAPI.removeBookFromCollection(collectionId, bookRelpath)
+      if (collectionId === selectedCollectionId) {
+        setCollectionBookPaths((prev) => {
+          const next = new Set(prev)
+          next.delete(bookRelpath)
+          return next
+        })
+      }
+    } catch (err) {
+      console.error('Failed to remove book from collection:', err)
     }
     await reloadCollections()
   }
