@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 /**
- * Downloads the Xenova/mobilebert-uncased-mnli model files from HuggingFace Hub
+ * Downloads the Xenova/multilingual-e5-small model files from HuggingFace Hub
  * into src/renderer/public/models/ so they get bundled with the production build.
+ *
+ * This is a multilingual sentence-embedding model (100+ languages). Book
+ * classification works by embedding the book text and each genre label and
+ * comparing them with cosine similarity, so titles and labels in any language
+ * (Italian, English, …) are matched consistently — see classifier.worker.ts.
  *
  * Usage: node scripts/download-model.mjs
  */
@@ -13,7 +18,7 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const MODEL_ID = 'Xenova/mobilebert-uncased-mnli'
+const MODEL_ID = 'Xenova/multilingual-e5-small'
 const BASE_URL = `https://huggingface.co/${MODEL_ID}/resolve/main`
 const OUTPUT_DIR = path.resolve(__dirname, '../src/renderer/public/models', MODEL_ID)
 
@@ -21,6 +26,7 @@ const FILES = [
   'config.json',
   'tokenizer.json',
   'tokenizer_config.json',
+  'special_tokens_map.json',
   'onnx/model_quantized.onnx'
 ]
 

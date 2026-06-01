@@ -25,6 +25,8 @@
     "analyzeBooks": "Analizza {{count}} libri",
     "analyzingProgress": "Analisi {{current}} / {{total}} libri",
     "preparingModel": "Preparazione modello...",
+    "useDescriptions": "Usa descrizioni online (più accurato, più lento)",
+    "fetchingDescriptions": "Recupero descrizioni {{current}} / {{total}}",
     "results": "Risultati",
     "thresholdLabel": "Soglia di confidenza",
     "summary": "{{books}} libri → {{collections}} collezioni ({{newCollections}} nuove)",

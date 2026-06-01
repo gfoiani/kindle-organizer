@@ -4,8 +4,8 @@ import { useClassifier, type ClassifyResult } from '../hooks/useClassifier'
 import type { KindleBook, Collection } from '../../../preload/api'
 
 interface Label {
-  key: string      // English label sent to the model
-  display: string  // Translated name shown in UI and used for collection names
+  key: string      // stable identifier (React key + dedup); English for the defaults
+  display: string  // localized name shown in the UI, sent to the multilingual model, and used as the collection name
 }
 
 const DEFAULT_GENRE_KEYS: Array<{ key: string; i18nKey: string }> = [
@@ -48,17 +48,21 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
     }))
   )
   const [newLabelInput, setNewLabelInput] = useState('')
-  const [threshold, setThreshold] = useState(60)
+  // Embedding-based confidence is relative across labels; 40% is a sensible
+  // starting point. Tune the slider per library (and SOFTMAX_TEMPERATURE in the worker).
+  const [threshold, setThreshold] = useState(40)
   const [deleteExisting, setDeleteExisting] = useState(false)
   const [isApplying, setIsApplying] = useState(false)
+  const [useDescriptions, setUseDescriptions] = useState(false)
+  const [descFetch, setDescFetch] = useState<{ current: number; total: number } | null>(null)
   const newLabelRef = useRef<HTMLInputElement>(null)
   const resultsEndRef = useRef<HTMLDivElement>(null)
 
-  // English key → translated display name lookup
-  const labelMap = new Map(labels.map((l) => [l.key, l.display]))
-  const getDisplayLabel = (modelLabel: string) => labelMap.get(modelLabel) ?? modelLabel
+  // The model now returns the localized label we sent, so the result label is
+  // already the display name. Kept as a helper so call sites stay readable.
+  const getDisplayLabel = (modelLabel: string) => modelLabel
 
-  const hasStarted = isClassifying || results.length > 0 || progress !== null
+  const hasStarted = isClassifying || results.length > 0 || progress !== null || descFetch !== null
   const filteredResults = results.filter((r) => r.score * 100 >= threshold)
   const uniqueDisplayLabels = [...new Set(filteredResults.map((r) => getDisplayLabel(r.label)))]
   const newCollectionCount = uniqueDisplayLabels.filter((l) => !collections.some((c) => c.name === l)).length
@@ -85,9 +89,34 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
     if (e.key === 'Enter') handleAddLabel()
   }
 
-  function handleAnalyze() {
+  async function handleAnalyze() {
     reset()
-    classify(books, labels.map((l) => l.key))
+    setDescFetch(null)
+    // Send the localized display labels: the multilingual model matches them
+    // against book titles in any language, and they double as collection names.
+    const displayLabels = labels.map((l) => l.display)
+
+    if (!useDescriptions) {
+      classify(books, displayLabels)
+      return
+    }
+
+    // Opt-in: fetch a short online description per book to give the classifier
+    // more signal than the title alone. Rate-limited, so we show progress.
+    setDescFetch({ current: 0, total: books.length })
+    const descriptions: Record<string, string> = {}
+    for (let i = 0; i < books.length; i++) {
+      const book = books[i]
+      try {
+        const meta = await window.kindleAPI.getBookMetadata(book.title, book.author)
+        if (meta?.description) descriptions[book.path] = meta.description
+      } catch (err) {
+        console.error('Failed to fetch description:', err)
+      }
+      setDescFetch({ current: i + 1, total: books.length })
+    }
+    setDescFetch(null)
+    classify(books, displayLabels, descriptions)
   }
 
   async function handleApply() {
@@ -105,7 +134,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
   }
 
   function handleOverlayClick(e: React.MouseEvent) {
-    if (e.target === e.currentTarget && !isClassifying && !isApplying) {
+    if (e.target === e.currentTarget && !isClassifying && !isApplying && descFetch === null) {
       onClose()
     }
   }
@@ -134,7 +163,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
           </div>
           <button
             onClick={onClose}
-            disabled={isClassifying || isApplying}
+            disabled={isClassifying || isApplying || descFetch !== null}
             className="text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-40 p-1 rounded"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -186,6 +215,17 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                 </button>
               </div>
             )}
+            {!hasStarted && (
+              <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={useDescriptions}
+                  onChange={(e) => setUseDescriptions(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-indigo-500 cursor-pointer"
+                />
+                <span className="text-xs text-gray-400">{t('aiClassify.useDescriptions')}</span>
+              </label>
+            )}
           </div>
 
           {/* Analyze button + progress */}
@@ -203,6 +243,26 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
               </button>
             ) : (
               <div className="space-y-2">
+                {/* Description fetch progress (opt-in enrichment) */}
+                {descFetch && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-gray-400 text-xs">
+                        {t('aiClassify.fetchingDescriptions', { current: descFetch.current, total: descFetch.total })}
+                      </span>
+                      <span className="text-gray-500 text-xs">
+                        {Math.round((descFetch.current / descFetch.total) * 100)}%
+                      </span>
+                    </div>
+                    <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                        style={{ width: `${(descFetch.current / descFetch.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Model loading progress */}
                 {modelStatus === 'loading' && (
                   <div>
@@ -353,7 +413,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              disabled={isClassifying || isApplying}
+              disabled={isClassifying || isApplying || descFetch !== null}
               className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-40"
             >
               {t('aiClassify.cancel')}

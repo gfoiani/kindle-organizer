@@ -61,7 +61,7 @@ function reducer(state: ClassifierState, action: ClassifierAction): ClassifierSt
 }
 
 interface UseClassifierReturn extends ClassifierState {
-  classify: (books: KindleBook[], labels: string[]) => void
+  classify: (books: KindleBook[], labels: string[], descriptions?: Record<string, string>) => void
   reset: () => void
 }
 
@@ -108,11 +108,14 @@ export function useClassifier(): UseClassifierReturn {
     }
   }, [])
 
-  const classify = useCallback((books: KindleBook[], labels: string[]) => {
-    if (!workerRef.current) return
-    dispatch({ type: 'CLASSIFY_START' })
-    workerRef.current.postMessage({ type: 'classify', books, labels })
-  }, [])
+  const classify = useCallback(
+    (books: KindleBook[], labels: string[], descriptions?: Record<string, string>) => {
+      if (!workerRef.current) return
+      dispatch({ type: 'CLASSIFY_START' })
+      workerRef.current.postMessage({ type: 'classify', books, labels, descriptions })
+    },
+    []
+  )
 
   const reset = useCallback(() => {
     dispatch({ type: 'RESET' })

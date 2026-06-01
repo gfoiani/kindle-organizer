@@ -70,6 +70,8 @@
     "analyzeBooks": "Analyze {{count}} books",
     "analyzingProgress": "Analyzing {{current}} / {{total}} books",
     "preparingModel": "Preparing model...",
+    "useDescriptions": "Use online descriptions (more accurate, slower)",
+    "fetchingDescriptions": "Fetching descriptions {{current}} / {{total}}",
     "results": "Results",
     "thresholdLabel": "Confidence threshold",
     "summary": "{{books}} books → {{collections}} collections ({{newCollections}} new)",
