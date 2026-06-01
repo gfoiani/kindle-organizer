@@ -23,6 +23,8 @@ export interface KindleBook {
   extension: string
   size: number
   path: string
+  /** ISBN from Calibre metadata, when available — used for reliable cover lookup. */
+  isbn?: string
 }
 
 export interface Collection {

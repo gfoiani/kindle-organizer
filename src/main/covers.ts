@@ -10,6 +10,18 @@ const debug = (...args: unknown[]): void => {
   if (!app.isPackaged) console.log(...args)
 }
 
+// ─── iTunes storefront ──────────────────────────────────────────────────────
+// iTunes search results depend on the storefront country. Matching it to the
+// app language greatly improves hit rate for non-US books (e.g. Italian titles).
+const LANG_TO_ITUNES_COUNTRY: Record<string, string> = { it: 'it', en: 'us' }
+let itunesCountry = 'us'
+
+/** Set by the renderer (via IPC) to align the iTunes storefront with the UI language. */
+export function setCoverLocale(lang: string): void {
+  itunesCountry = LANG_TO_ITUNES_COUNTRY[lang] ?? 'us'
+  debug(`[cover] iTunes storefront set to "${itunesCountry}" for lang "${lang}"`)
+}
+
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 // Serial queue: one outbound request at a time, with a guaranteed minimum gap.
 // On 429 all queued requests also wait (globalPauseUntil).
@@ -65,6 +77,7 @@ const RETRY_DELAYS_MS = [30_000, 120_000, 300_000, 900_000, 3_600_000]
 interface RetryEntry {
   title: string
   author: string | undefined
+  isbn: string | undefined
   /** How many retries have been scheduled so far (0 = first retry pending). */
   attempts: number
   /** Epoch ms after which this entry is eligible for retry. Infinity = in-progress. */
@@ -77,12 +90,14 @@ function scheduleRetry(
   key: string,
   title: string,
   author: string | undefined,
+  isbn: string | undefined,
   prevAttempts: number
 ): void {
   if (prevAttempts >= RETRY_DELAYS_MS.length) return // max retries reached
   retryRegistry.set(key, {
     title,
     author,
+    isbn,
     attempts: prevAttempts,
     nextRetry: Date.now() + RETRY_DELAYS_MS[prevAttempts]
   })
@@ -148,103 +163,183 @@ async function fetchUrlWithRetry(url: string): Promise<Buffer> {
   throw new Error('Max retries exceeded')
 }
 
+// ─── Match verification ───────────────────────────────────────────────────────
+// Providers return several candidates; we only accept one whose title (and
+// author, when available) actually matches the book, instead of blindly taking
+// the first result. This is the main defense against wrong covers.
+
+interface CoverCandidate {
+  imageUrl: string
+  title: string
+  author?: string
+}
+
+// Combined match score must clear this, and the title alone must clear MIN_TITLE_SCORE.
+const MATCH_THRESHOLD = 0.5
+const MIN_TITLE_SCORE = 0.34
+
+function normalize(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // strip diacritics
+    .toLowerCase()
+}
+
+function tokenize(s: string): string[] {
+  return normalize(s)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 1)
+}
+
+/** Fraction of the query's tokens that appear in the candidate text (0..1). */
+function containment(query: string, candidate: string): number {
+  const q = tokenize(query)
+  if (q.length === 0) return 0
+  const c = new Set(tokenize(candidate))
+  let hit = 0
+  for (const t of q) if (c.has(t)) hit++
+  return hit / q.length
+}
+
+function matchScore(candidate: CoverCandidate, qTitle: string, qAuthor: string | undefined): number {
+  const titleScore = containment(qTitle, candidate.title)
+  if (titleScore < MIN_TITLE_SCORE) return 0
+  if (qAuthor && candidate.author) {
+    const authorScore = containment(qAuthor, candidate.author)
+    return titleScore * 0.75 + authorScore * 0.25
+  }
+  return titleScore
+}
+
+/** Picks the best-matching candidate above the acceptance threshold, or null. */
+function pickBestMatch(
+  candidates: CoverCandidate[],
+  qTitle: string,
+  qAuthor: string | undefined
+): CoverCandidate | null {
+  let best: CoverCandidate | null = null
+  let bestScore = 0
+  for (const candidate of candidates) {
+    const score = matchScore(candidate, qTitle, qAuthor)
+    if (score > bestScore) {
+      bestScore = score
+      best = candidate
+    }
+  }
+  return bestScore >= MATCH_THRESHOLD ? best : null
+}
+
+/** Validates that a buffer is a real image (JPEG/PNG/GIF/WEBP), not an HTML error page. */
+function isValidImage(buf: Buffer): boolean {
+  if (buf.length < 500) return false
+  // JPEG
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true
+  // PNG
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true
+  // GIF
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true
+  // WEBP (RIFF....WEBP)
+  if (
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+  ) {
+    return true
+  }
+  return false
+}
+
 // ─── Search providers ─────────────────────────────────────────────────────────
+// Each returns up to a handful of candidates (image URL + the title/author it
+// belongs to) so the caller can verify the match before downloading.
 
 async function searchGoogleBooks(
   title: string,
   author: string | undefined
-): Promise<string | null> {
+): Promise<CoverCandidate[]> {
   let query = `intitle:${encodeURIComponent(title)}`
   if (author) query += `+inauthor:${encodeURIComponent(author)}`
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1&fields=items(volumeInfo/imageLinks)`
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=5&fields=items(volumeInfo(title,authors,imageLinks/thumbnail))`
 
-  try {
-    const body = await fetchUrlWithRetry(url)
-    const json = JSON.parse(body.toString('utf-8')) as unknown
-    if (typeof json !== 'object' || json === null) {
-      debug(`[searchGoogleBooks] Invalid JSON response`)
-      return null
-    }
+  const body = await fetchUrlWithRetry(url)
+  const json = JSON.parse(body.toString('utf-8')) as unknown
+  if (typeof json !== 'object' || json === null) return []
 
-    const thumbnail = (
-      json as { items?: [{ volumeInfo?: { imageLinks?: { thumbnail?: string } } }] }
-    )?.items?.[0]?.volumeInfo?.imageLinks?.thumbnail
-    if (typeof thumbnail !== 'string') {
-      debug(`[searchGoogleBooks] No thumbnail found`)
-      return null
-    }
+  const items =
+    (json as {
+      items?: { volumeInfo?: { title?: string; authors?: string[]; imageLinks?: { thumbnail?: string } } }[]
+    }).items ?? []
 
-    const result = thumbnail.replace('http://', 'https://').replace('zoom=1', 'zoom=2')
-    debug(`[searchGoogleBooks] Found thumbnail: ${result}`)
-    return result
-  } catch (err) {
-    debug(`[searchGoogleBooks] Error: ${err instanceof Error ? err.message : String(err)}`)
-    throw err
+  const candidates: CoverCandidate[] = []
+  for (const item of items) {
+    const info = item.volumeInfo
+    const thumbnail = info?.imageLinks?.thumbnail
+    if (typeof info?.title !== 'string' || typeof thumbnail !== 'string') continue
+    candidates.push({
+      imageUrl: thumbnail.replace('http://', 'https://').replace('zoom=1', 'zoom=2'),
+      title: info.title,
+      author: info.authors?.join(' ')
+    })
   }
+  return candidates
 }
 
 async function searchOpenLibrary(
   title: string,
   author: string | undefined
-): Promise<string | null> {
+): Promise<CoverCandidate[]> {
   let query = `title=${encodeURIComponent(title)}`
   if (author) query += `&author=${encodeURIComponent(author)}`
-  const url = `https://openlibrary.org/search.json?${query}&limit=1&fields=cover_i`
+  const url = `https://openlibrary.org/search.json?${query}&limit=5&fields=title,author_name,cover_i`
 
-  try {
-    const body = await fetchUrlWithRetry(url)
-    const json = JSON.parse(body.toString('utf-8')) as unknown
-    if (typeof json !== 'object' || json === null) {
-      debug(`[searchOpenLibrary] Invalid JSON response`)
-      return null
-    }
+  const body = await fetchUrlWithRetry(url)
+  const json = JSON.parse(body.toString('utf-8')) as unknown
+  if (typeof json !== 'object' || json === null) return []
 
-    const coverId = (json as { docs?: [{ cover_i?: number }] })?.docs?.[0]?.cover_i
-    if (typeof coverId !== 'number') {
-      debug(`[searchOpenLibrary] No cover_i found`)
-      return null
-    }
+  const docs =
+    (json as { docs?: { title?: string; author_name?: string[]; cover_i?: number }[] }).docs ?? []
 
-    const result = `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`
-    debug(`[searchOpenLibrary] Found cover: ${result}`)
-    return result
-  } catch (err) {
-    debug(`[searchOpenLibrary] Error: ${err instanceof Error ? err.message : String(err)}`)
-    throw err
+  const candidates: CoverCandidate[] = []
+  for (const doc of docs) {
+    if (typeof doc.title !== 'string' || typeof doc.cover_i !== 'number') continue
+    candidates.push({
+      imageUrl: `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`,
+      title: doc.title,
+      author: doc.author_name?.join(' ')
+    })
   }
+  return candidates
 }
 
 async function searchItunes(
   title: string,
   author: string | undefined
-): Promise<string | null> {
+): Promise<CoverCandidate[]> {
   let term = title
   if (author) term += ` ${author}`
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=ebook&limit=5&country=us`
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=ebook&limit=5&country=${itunesCountry}`
 
-  try {
-    const body = await fetchUrlWithRetry(url)
-    const json = JSON.parse(body.toString('utf-8')) as unknown
-    if (typeof json !== 'object' || json === null) {
-      debug(`[searchItunes] Invalid JSON response`)
-      return null
-    }
+  const body = await fetchUrlWithRetry(url)
+  const json = JSON.parse(body.toString('utf-8')) as unknown
+  if (typeof json !== 'object' || json === null) return []
 
-    const results = (json as { results?: { artworkUrl100?: string }[] })?.results
-    const artwork = results?.[0]?.artworkUrl100
-    if (typeof artwork !== 'string') {
-      debug(`[searchItunes] No artwork found`)
-      return null
-    }
+  const results =
+    (json as {
+      results?: { trackName?: string; collectionName?: string; artistName?: string; artworkUrl100?: string }[]
+    }).results ?? []
 
-    // Bump resolution from 100x100 to 600x600
-    const result = artwork.replace('100x100bb', '600x600bb')
-    debug(`[searchItunes] Found artwork: ${result}`)
-    return result
-  } catch (err) {
-    debug(`[searchItunes] Error: ${err instanceof Error ? err.message : String(err)}`)
-    throw err
+  const candidates: CoverCandidate[] = []
+  for (const r of results) {
+    const candidateTitle = r.trackName ?? r.collectionName
+    if (typeof candidateTitle !== 'string' || typeof r.artworkUrl100 !== 'string') continue
+    candidates.push({
+      // Bump resolution from 100x100 to 600x600
+      imageUrl: r.artworkUrl100.replace('100x100bb', '600x600bb'),
+      title: candidateTitle,
+      author: r.artistName
+    })
   }
+  return candidates
 }
 
 // ─── Core download helper ─────────────────────────────────────────────────────
@@ -254,60 +349,92 @@ type DownloadResult =
   | { status: 'not-found' }
   | { status: 'error' }
 
+type Provider = (title: string, author: string | undefined) => Promise<CoverCandidate[]>
+
+const PROVIDERS: Array<{ name: string; search: Provider }> = [
+  { name: 'iTunes', search: searchItunes },
+  { name: 'OpenLibrary', search: searchOpenLibrary },
+  { name: 'GoogleBooks', search: searchGoogleBooks }
+]
+
+/** Fetches a cover directly by ISBN from Open Library — no search/matching needed. */
+async function tryIsbnCover(isbn: string): Promise<Buffer | null> {
+  // `default=false` makes Open Library return 404 (not a blank placeholder) when missing.
+  const url = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`
+  try {
+    const data = await fetchUrlWithRetry(url)
+    return isValidImage(data) ? data : null
+  } catch (err) {
+    // A 404 (no cover for this ISBN) or transient failure — fall back to search providers.
+    debug(`[cover] ISBN ${isbn} lookup failed: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
 /**
- * Attempts to download a cover image from all providers.
- * Distinguishes between "provider confirmed no cover" (not-found) and
+ * Attempts to download a cover image. When an ISBN is known it is tried first
+ * (most reliable). Otherwise — or on miss — it falls back to the search
+ * providers, accepting only a candidate that actually matches the book and is a
+ * valid image. Distinguishes between "no match found" (not-found) and
  * "network/transient failure" (error) so the caller can decide whether to retry.
  */
 async function downloadCoverData(
   title: string,
-  author: string | undefined
+  author: string | undefined,
+  isbn?: string
 ): Promise<DownloadResult> {
-  let imageUrl: string | null = null
   let hadNetworkError = false
 
-  try {
-    imageUrl = await searchItunes(title, author)
-  } catch {
-    hadNetworkError = true
+  if (isbn) {
+    const data = await tryIsbnCover(isbn)
+    if (data) {
+      debug(`[cover] ISBN ${isbn}: matched cover for "${title}"`)
+      return { status: 'found', data }
+    }
   }
 
-  if (!imageUrl) {
+  for (const provider of PROVIDERS) {
+    let candidates: CoverCandidate[]
     try {
-      imageUrl = await searchOpenLibrary(title, author)
-    } catch {
+      candidates = await provider.search(title, author)
+    } catch (err) {
+      debug(`[cover] ${provider.name} error: ${err instanceof Error ? err.message : String(err)}`)
       hadNetworkError = true
+      continue
     }
-  }
 
-  if (!imageUrl) {
+    const best = pickBestMatch(candidates, title, author)
+    if (!best) {
+      debug(`[cover] ${provider.name}: no confident match for "${title}" (${candidates.length} candidates)`)
+      continue
+    }
+
     try {
-      imageUrl = await searchGoogleBooks(title, author)
-    } catch {
+      const data = await fetchUrlWithRetry(best.imageUrl)
+      if (!isValidImage(data)) {
+        debug(`[cover] ${provider.name}: invalid/too-small image for "${title}"`)
+        continue
+      }
+      debug(`[cover] ${provider.name}: matched "${best.title}" for "${title}"`)
+      return { status: 'found', data }
+    } catch (err) {
+      debug(`[cover] ${provider.name} image fetch error: ${err instanceof Error ? err.message : String(err)}`)
       hadNetworkError = true
+      continue
     }
   }
 
-  if (!imageUrl) {
-    return hadNetworkError ? { status: 'error' } : { status: 'not-found' }
-  }
-
-  try {
-    const data = await fetchUrlWithRetry(imageUrl)
-    if (data.length < 500) {
-      debug(`[cover] Image too small (${data.length} bytes) for "${title}"`)
-      return { status: 'not-found' }
-    }
-    return { status: 'found', data }
-  } catch {
-    return { status: 'error' }
-  }
+  return hadNetworkError ? { status: 'error' } : { status: 'not-found' }
 }
 
 // ─── Public cover API ─────────────────────────────────────────────────────────
 
-export async function getCover(title: string, author: string | undefined): Promise<string | null> {
-  debug(`[getCover] Searching for cover: title="${title}", author="${author}"`)
+export async function getCover(
+  title: string,
+  author: string | undefined,
+  isbn?: string
+): Promise<string | null> {
+  debug(`[getCover] Searching for cover: title="${title}", author="${author}", isbn="${isbn ?? ''}"`)
   const key = getCacheKey(title, author)
   const cachePath = getCachePath(key)
 
@@ -326,7 +453,7 @@ export async function getCover(title: string, author: string | undefined): Promi
   fs.mkdirSync(getCoverCacheDir(), { recursive: true })
 
   return scheduleRequest(async () => {
-    const result = await downloadCoverData(title, author)
+    const result = await downloadCoverData(title, author, isbn)
 
     if (result.status === 'found') {
       debug(`[getCover] Successfully cached image (${result.data.length} bytes)`)
@@ -341,11 +468,11 @@ export async function getCover(title: string, author: string | undefined): Promi
     }
 
     // Network error — schedule retry, don't write negative cache
-    scheduleRetry(key, title, author, 0)
+    scheduleRetry(key, title, author, isbn, 0)
     return null
   }).catch((err) => {
     console.error(`[getCover] Unexpected error for "${title}":`, err)
-    scheduleRetry(key, title, author, 0)
+    scheduleRetry(key, title, author, isbn, 0)
     return null
   })
 }
@@ -369,7 +496,7 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void
 
       scheduleRequest(async () => {
         const cachePath = getCachePath(key)
-        const result = await downloadCoverData(entry.title, entry.author)
+        const result = await downloadCoverData(entry.title, entry.author, entry.isbn)
 
         if (result.status === 'found') {
           fs.mkdirSync(getCoverCacheDir(), { recursive: true })
@@ -393,14 +520,14 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void
 
         // Still a network error — reschedule if attempts remain
         if (nextAttempts < RETRY_DELAYS_MS.length) {
-          scheduleRetry(key, entry.title, entry.author, nextAttempts)
+          scheduleRetry(key, entry.title, entry.author, entry.isbn, nextAttempts)
         } else {
           retryRegistry.delete(key)
           debug(`[cover] Max retries reached for "${entry.title}", giving up`)
         }
       }).catch(() => {
         if (nextAttempts < RETRY_DELAYS_MS.length) {
-          scheduleRetry(key, entry.title, entry.author, nextAttempts)
+          scheduleRetry(key, entry.title, entry.author, entry.isbn, nextAttempts)
         } else {
           retryRegistry.delete(key)
         }

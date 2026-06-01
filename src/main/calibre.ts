@@ -100,3 +100,58 @@ export function readCalibreMetadata(mountpoint: string): CalibreBook[] {
     return []
   }
 }
+
+/** Normalizes a raw ISBN string; returns it only if it looks like an ISBN-10/13. */
+function normalizeIsbn(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const cleaned = raw.replace(/[^0-9Xx]/g, '').toUpperCase()
+  return cleaned.length === 10 || cleaned.length === 13 ? cleaned : undefined
+}
+
+/** Pulls an ISBN out of a Calibre record's `identifiers` dict (or a top-level `isbn`). */
+function extractIsbn(rec: Record<string, unknown>): string | undefined {
+  const identifiers = rec['identifiers']
+  if (identifiers && typeof identifiers === 'object') {
+    const isbn = normalizeIsbn((identifiers as Record<string, unknown>)['isbn'])
+    if (isbn) return isbn
+  }
+  return normalizeIsbn(rec['isbn'])
+}
+
+/**
+ * Reads `metadata.calibre` and returns a map of book relative path → ISBN for
+ * every entry that has one. Used to fetch covers by ISBN (the most reliable
+ * source). Unlike readCalibreMetadata, this is not limited to tagged books.
+ */
+export function readCalibreIsbnMap(mountpoint: string): Map<string, string> {
+  const metadataPath = path.join(mountpoint, 'metadata.calibre')
+  const result = new Map<string, string>()
+
+  if (!fs.existsSync(metadataPath)) return result
+
+  try {
+    const raw = fs.readFileSync(metadataPath, 'utf-8')
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return result
+
+    for (const entry of parsed) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const rec = entry as Record<string, unknown>
+      const lpath = rec['lpath']
+      if (typeof lpath !== 'string') continue
+
+      const isbn = extractIsbn(rec)
+      if (!isbn) continue
+
+      const relpath = lpath.startsWith('documents/') ? lpath.slice('documents/'.length) : lpath
+      result.set(relpath, isbn)
+    }
+  } catch (err) {
+    console.error(
+      `[calibre] Failed to read ISBNs from ${metadataPath}:`,
+      err instanceof Error ? err.message : String(err)
+    )
+  }
+
+  return result
+}

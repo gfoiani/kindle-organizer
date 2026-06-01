@@ -43,12 +43,12 @@ function BookCard({
   useEffect(() => {
     let cancelled = false
     window.kindleAPI
-      .getCover(book.title, book.author)
+      .getCover(book.title, book.author, book.isbn)
       .then((dataUrl) => { if (!cancelled) setCover(dataUrl) })
-      .catch(() => {})
+      .catch((err) => { if (!cancelled) console.error('Failed to load cover:', err) })
       .finally(() => { if (!cancelled) setCoverLoading(false) })
     return () => { cancelled = true }
-  }, [book.title, book.author])
+  }, [book.title, book.author, book.isbn])
 
   // Listen for retry-succeeded push events from the main process
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { detectKindleDrives, readDocuments } from './kindle'
-import { readCalibreMetadata, writeCalibreMetadata } from './calibre'
-import { getCover, clearCoverCache, getBookMetadata } from './covers'
+import { readCalibreMetadata, writeCalibreMetadata, readCalibreIsbnMap } from './calibre'
+import { getCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
 import { applyOverrides, setOverride } from './bookOverrides'
 import {
   getCollections,
@@ -24,7 +24,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('kindle:read-documents', async (_, kindleMountpoint: string) => {
     const books = await readDocuments(kindleMountpoint)
     const documentsBase = `${kindleMountpoint}/documents/`
-    return applyOverrides(books, documentsBase)
+    const withOverrides = applyOverrides(books, documentsBase)
+
+    // Attach ISBNs from Calibre metadata (when present) for reliable cover lookup.
+    const isbnMap = readCalibreIsbnMap(kindleMountpoint)
+    if (isbnMap.size === 0) return withOverrides
+
+    return withOverrides.map((book) => {
+      const relpath = book.path.startsWith(documentsBase)
+        ? book.path.slice(documentsBase.length)
+        : book.path
+      const isbn = isbnMap.get(relpath)
+      return isbn ? { ...book, isbn } : book
+    })
   })
 
   ipcMain.handle(
@@ -82,8 +94,8 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('kindle:get-cover', async (_, title: string, author?: string) => {
-    return getCover(title, author)
+  ipcMain.handle('kindle:get-cover', async (_, title: string, author?: string, isbn?: string) => {
+    return getCover(title, author, isbn)
   })
 
   ipcMain.handle('kindle:get-book-metadata', async (_, title: string, author?: string) => {
@@ -92,5 +104,9 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('kindle:clear-cover-cache', async () => {
     await clearCoverCache()
+  })
+
+  ipcMain.handle('kindle:set-locale', async (_, lang: string) => {
+    setCoverLocale(lang)
   })
 }

@@ -9,7 +9,7 @@ import type { ClassifyResult } from './hooks/useClassifier'
 import type { KindleDrive, KindleBook, Collection } from '../../preload/api'
 
 export function App() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [kindle, setKindle] = useState<KindleDrive | null>(null)
   const [books, setBooks] = useState<KindleBook[]>([])
   const [collections, setCollections] = useState<Collection[]>([])
@@ -85,6 +85,16 @@ export function App() {
   useEffect(() => {
     loadKindle()
   }, [loadKindle])
+
+  // Keep the main process's cover storefront aligned with the UI language.
+  useEffect(() => {
+    window.kindleAPI.setLocale(i18n.language)
+    const onLanguageChanged = (lng: string) => window.kindleAPI.setLocale(lng)
+    i18n.on('languageChanged', onLanguageChanged)
+    return () => {
+      i18n.off('languageChanged', onLanguageChanged)
+    }
+  }, [i18n])
 
   useEffect(() => {
     const unsubShowAbout = window.kindleAPI.onShowAbout(() => {

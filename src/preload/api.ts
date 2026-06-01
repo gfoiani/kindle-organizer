@@ -17,10 +17,12 @@ export interface KindleAPI {
   deleteCollection: (id: string) => Promise<void>
   addBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   removeBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
-  getCover: (title: string, author?: string) => Promise<string | null>
+  getCover: (title: string, author?: string, isbn?: string) => Promise<string | null>
   getBookMetadata: (title: string, author?: string) => Promise<BookMetadata | null>
   updateBookMetadata: (bookRelpath: string, title: string, author?: string) => Promise<void>
   clearCoverCache: () => Promise<void>
+  /** Aligns the iTunes cover storefront with the app's UI language (e.g. 'it', 'en'). */
+  setLocale: (lang: string) => Promise<void>
   /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
   onShowAbout: (callback: () => void) => () => void
   /** Subscribe to cover updates pushed by the retry loop. Returns an unsubscribe function. */
@@ -64,8 +66,8 @@ export const kindleAPI: KindleAPI = {
   removeBookFromCollection: (collectionId: string, bookRelpath: string) =>
     ipcRenderer.invoke('kindle:remove-book-from-collection', collectionId, bookRelpath),
 
-  getCover: (title: string, author?: string) =>
-    ipcRenderer.invoke('kindle:get-cover', title, author),
+  getCover: (title: string, author?: string, isbn?: string) =>
+    ipcRenderer.invoke('kindle:get-cover', title, author, isbn),
 
   getBookMetadata: (title: string, author?: string) =>
     ipcRenderer.invoke('kindle:get-book-metadata', title, author),
@@ -74,6 +76,8 @@ export const kindleAPI: KindleAPI = {
     ipcRenderer.invoke('kindle:update-book-metadata', bookRelpath, title, author),
 
   clearCoverCache: () => ipcRenderer.invoke('kindle:clear-cover-cache'),
+
+  setLocale: (lang: string) => ipcRenderer.invoke('kindle:set-locale', lang),
 
   onShowAbout: (callback: () => void) => {
     const handler = () => callback()
