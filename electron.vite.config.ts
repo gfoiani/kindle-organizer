@@ -2,6 +2,7 @@ import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
+import { normalizePath } from 'vite'
 import path from 'path'
 
 export default defineConfig({
@@ -40,10 +41,10 @@ export default defineConfig({
         targets: [
           {
             // Copy the ONNX Runtime WASM binaries next to the worker bundle.
-            // Source from onnxruntime-web (a hard dependency, present on every
-            // platform) rather than @xenova/transformers/dist, whose wasm files
-            // aren't reliably shipped cross-platform (broke the Windows build).
-            src: path.resolve(__dirname, 'node_modules/onnxruntime-web/dist/*.wasm'),
+            // normalizePath is required: on Windows path.resolve yields backslashes,
+            // which fast-glob (used by vite-plugin-static-copy) treats as escapes →
+            // "No file was found to copy" and the NSIS build fails.
+            src: normalizePath(path.resolve(__dirname, 'node_modules/onnxruntime-web/dist/*.wasm')),
             dest: 'assets'
           }
         ]

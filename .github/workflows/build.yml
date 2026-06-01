@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write    # Required to create releases and upload assets
 
+# Run all JavaScript actions on Node.js 24 (checkout/setup-node/artifact actions
+# ship a Node20 runtime that GitHub deprecates — this opts in early, no warnings).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-mac:
     name: Build macOS (DMG)
