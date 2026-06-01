@@ -1,0 +1,35 @@
+# Paths AI tools should ignore to reduce noise and context.
+# NOTE: Claude Code does not natively consume .claudeignore — it respects
+# .gitignore and the `permissions` settings instead. This file is advisory /
+# forward-compatible and is read by some other AI coding tools.
+
+# Dependencies & native builds
+node_modules/
+
+# Build & packaging output
+out/
+dist/
+dist-electron/
+release/
+
+# Lockfiles (large, low signal)
+package-lock.json
+yarn.lock
+
+# Local SQLite databases & cached covers (runtime data)
+*.db
+covers/
+
+# Bundled AI model weights (download with: yarn download-model)
+src/renderer/public/models/
+
+# Generated app icons / large binary assets
+assets/icons/
+
+# Secrets & environment
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db

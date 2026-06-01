@@ -1,22 +1,43 @@
 # Kindle Organizer
 
-A desktop application for managing and organizing your Kindle library — browse books, create collections, and sync them back to your device.
+A desktop application for managing and organizing your Kindle library — browse books, enrich them with cover art and metadata, build collections, and sync everything back to your device.
+
+## Why this exists
+
+The Kindle's built-in library is awkward to organize: there's no fast visual overview, cover art is often missing for sideloaded books, and grouping titles into collections on the device is slow. [Calibre](https://calibre-ebook.com/) is powerful but heavyweight for the common case of "just let me see my books and tidy them up."
+
+**Kindle Organizer** fills that gap. Plug in your Kindle and it gives you an instant, visual grid of every book on the device, automatically fetches missing covers, lets you fix messy titles and authors, and builds collections that sync back to the Kindle through Calibre's metadata format. It can even sort your library into genre collections automatically using an on-device AI model — no data ever leaves your machine.
 
 ## Features
 
-- **Auto-detect Kindle** — plugs via USB and is detected automatically using drive labels and models
+- **Auto-detect Kindle** — plug in via USB and the device is detected automatically using drive labels and models
 - **Book browser** — scans the `documents/` folder and displays all supported ebooks in a visual grid
-- **Book covers** — fetches cover art automatically (iTunes primary, Open Library and Google Books as fallbacks) and caches them locally
+- **Book covers** — fetches cover art automatically (iTunes primary, Open Library and Google Books as fallbacks), caches them locally, and retries failed downloads in the background
 - **Metadata editing** — edit a book's title and author directly in the detail sidebar; changes persist across sessions
+- **Metadata lookup** — the detail sidebar pulls publication year, genre, and description for the selected book
 - **Collections** — create, rename, and delete custom collections; assign books to one or more collections
+- **AI auto-classification** — sort your library into genre collections with an on-device, zero-shot ML model ([`@xenova/transformers`](https://github.com/xenova/transformers.js), running in a Web Worker). Define your own genre labels, set a confidence threshold, preview the suggestions, and apply them in one batch. **Everything runs locally — no book data is sent to any server.**
 - **Calibre integration** — on connect, imports tag-based collections from Calibre's `metadata.calibre` file on the Kindle root
-- **Write to Kindle** — saves collection assignments back to `metadata.calibre` so Calibre can read them on the next sync
+- **Write to Kindle** — saves collection assignments back to `metadata.calibre` (via an atomic write) so Calibre can read them on the next sync
 - **Hot-plug detection** — automatically refreshes the library when a Kindle is connected or disconnected while the app is running
+- **Settings** — clear the local cover cache when you want covers re-fetched from scratch
 - **System menu integration** — custom "About" menu item that opens the internal app section instead of a default dialog
 
 ## Supported formats
 
 `MOBI` · `AZW` · `AZW3` · `KFX` · `EPUB` · `PDF`
+
+## Usage
+
+1. **Connect your Kindle** via USB. The app detects it automatically and lists every book in a grid (or click **Refresh** to re-scan).
+2. **Browse** your library. Covers load in the background; click a book to open the detail sidebar with its cover and metadata, plus an edit button for fixing the title/author.
+3. **Build collections.** Create a collection in the sidebar, then assign books to it from the grid (a book can belong to several collections).
+4. **Let AI organize it for you (optional).** Open **AI Organize**, adjust the genre labels and confidence threshold, run the classifier, review the suggestions, and apply them — the app creates the matching collections and assigns the books.
+5. **Write to Kindle.** Click **Write to Kindle** to save your collections back to `metadata.calibre`. Calibre picks them up on its next sync.
+
+## Screenshots
+
+<!-- TODO: add screenshots of the book grid, detail sidebar, and AI Organize modal -->
 
 ## Tech stack
 
@@ -28,6 +49,7 @@ A desktop application for managing and organizing your Kindle library — browse
 | Styling | Tailwind CSS v4 |
 | Local DB | better-sqlite3 (SQLite) |
 | Drive detection | systeminformation |
+| On-device AI | [@xenova/transformers](https://github.com/xenova/transformers.js) (zero-shot classification) |
 
 ## Architecture
 
@@ -48,11 +70,18 @@ src/
 └── renderer/
     └── src/
         ├── App.tsx
-        └── components/
-            ├── Sidebar.tsx          # Collections sidebar with CRUD
-            ├── BooksGrid.tsx          # Book grid with cover previews
-            ├── BookDetailSidebar.tsx  # Slide-in detail panel with metadata editing
-            └── CollectionPicker.tsx   # Per-book collection assignment popover
+        ├── components/
+        │   ├── Sidebar.tsx              # Collections sidebar with CRUD
+        │   ├── BooksGrid.tsx            # Book grid with cover previews
+        │   ├── BookDetailSidebar.tsx    # Slide-in detail panel with metadata editing
+        │   ├── CollectionPicker.tsx     # Per-book collection assignment popover
+        │   ├── Settings.tsx             # Settings panel (clear cover cache)
+        │   ├── About.tsx                # About panel
+        │   └── AutoClassifyModal.tsx    # AI genre-classification modal
+        ├── hooks/
+        │   └── useClassifier.ts         # Model loading + classification state
+        └── workers/
+            └── classifier.worker.ts     # Web Worker running the ML model
 ```
 
 ### Collections
@@ -64,7 +93,7 @@ Collections are stored in a local SQLite database (`userData/collections.db`). T
 
 ### Cover cache
 
-Covers are fetched once per book (keyed by `sha256(title|author)`) and saved to `userData/covers/`. A zero-byte file is written when no cover is found, acting as a negative-cache marker to avoid redundant API calls.
+Covers are fetched once per book (keyed by `sha256(title|author)`) and saved to `userData/covers/`. A zero-byte file is written when no cover is found, acting as a negative-cache marker to avoid redundant API calls. Network failures are retried in the background with exponential back-off.
 
 ## Development
 
@@ -73,6 +102,9 @@ Covers are fetched once per book (keyed by `sha256(title|author)`) and saved to 
 ```bash
 # Install dependencies (rebuilds native modules automatically)
 yarn install
+
+# Download the AI model used for auto-classification (one-time)
+yarn download-model
 
 # Start in development mode
 yarn dev
