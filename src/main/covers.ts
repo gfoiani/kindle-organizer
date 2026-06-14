@@ -1,5 +1,5 @@
 import * as crypto from 'crypto'
-import * as fs from 'fs'
+import * as fs from 'fs-extra'
 import * as http from 'http'
 import * as https from 'https'
 import * as path from 'path'
@@ -530,8 +530,8 @@ export async function getCover(
   const cachePath = getCachePath(key)
 
   // Cache hit — no slot needed
-  if (fs.existsSync(cachePath)) {
-    const data = fs.readFileSync(cachePath)
+  if (await fs.pathExists(cachePath)) {
+    const data = await fs.readFile(cachePath)
     if (data.length === 0) return null // negative cache marker
     return `data:image/jpeg;base64,${data.toString('base64')}`
   }
@@ -548,20 +548,20 @@ export async function getCover(
   // Capture the iTunes storefront now so a mid-flight locale change can't shift it.
   const country = itunesCountry
 
-  fs.mkdirSync(getCoverCacheDir(), { recursive: true })
+  await fs.ensureDir(getCoverCacheDir())
 
   const work = scheduleRequest(async () => {
     const result = await downloadCoverData(title, author, isbn, country)
 
     if (result.status === 'found') {
       debug(`[getCover] Successfully cached image (${result.data.length} bytes)`)
-      fs.writeFileSync(cachePath, result.data)
+      await fs.writeFile(cachePath, result.data)
       return `data:image/jpeg;base64,${result.data.toString('base64')}`
     }
 
     if (result.status === 'not-found') {
       debug(`[getCover] No cover found, writing negative cache`)
-      fs.writeFileSync(cachePath, Buffer.alloc(0))
+      await fs.writeFile(cachePath, Buffer.alloc(0))
       return null
     }
 
@@ -613,8 +613,8 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): () =
         const result = await downloadCoverData(entry.title, entry.author, entry.isbn, itunesCountry)
 
         if (result.status === 'found') {
-          fs.mkdirSync(getCoverCacheDir(), { recursive: true })
-          fs.writeFileSync(cachePath, result.data)
+          await fs.ensureDir(getCoverCacheDir())
+          await fs.writeFile(cachePath, result.data)
           retryRegistry.delete(key)
           debug(`[cover] Retry #${nextAttempts} succeeded for "${entry.title}"`)
 
@@ -625,8 +625,8 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): () =
 
         if (result.status === 'not-found') {
           // Provider confirmed no cover — write negative cache and stop retrying
-          fs.mkdirSync(getCoverCacheDir(), { recursive: true })
-          fs.writeFileSync(cachePath, Buffer.alloc(0))
+          await fs.ensureDir(getCoverCacheDir())
+          await fs.writeFile(cachePath, Buffer.alloc(0))
           retryRegistry.delete(key)
           debug(`[cover] Retry #${nextAttempts}: confirmed no cover for "${entry.title}"`)
           return
@@ -654,10 +654,10 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): () =
 
 export async function clearCoverCache(): Promise<void> {
   const cacheDir = getCoverCacheDir()
-  if (fs.existsSync(cacheDir)) {
-    const files = fs.readdirSync(cacheDir)
+  if (await fs.pathExists(cacheDir)) {
+    const files = await fs.readdir(cacheDir)
     for (const file of files) {
-      fs.unlinkSync(path.join(cacheDir, file))
+      await fs.remove(path.join(cacheDir, file))
     }
   }
   retryRegistry.clear()
