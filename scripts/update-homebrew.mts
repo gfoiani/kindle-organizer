@@ -99,7 +99,10 @@ if (existsSync(caskFile)) {
     writeFileSync(caskFile, caskContent);
     console.log(`Successfully updated ${caskFile}`);
   } catch (error) {
+    // Abort the release pipeline on a failed cask write so release.mts never
+    // commits/pushes a stale cask.
     console.error(`Error updating Cask file at ${caskFile}:`, error);
+    process.exit(1);
   }
 } else {
   console.warn(`Warning: Cask file not found at ${caskFile}.`);
