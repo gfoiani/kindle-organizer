@@ -8,6 +8,15 @@ import { AutoClassifyModal } from './components/AutoClassifyModal'
 import { useClassifier, type ClassifyResult } from './hooks/useClassifier'
 import { STATUS_RESET_MS } from './utils/constants'
 import { toBookRelpath } from './utils/relpath'
+import {
+  buildAuthorSubcollections,
+  isSubCollection,
+  parseCollectionName,
+  formatAuthorCollectionName,
+  sanitizeNamePart,
+  normalizeKey,
+  type AuthoredBook
+} from './utils/collectionHierarchy'
 import type { KindleDrive, KindleBook, Collection } from '../../preload/api'
 
 export function App() {
@@ -25,6 +34,7 @@ export function App() {
   const [isShowingSettings, setIsShowingSettings] = useState(false)
   const [isShowingAbout, setIsShowingAbout] = useState(false)
   const [isAIModalOpen, setIsAIModalOpen] = useState(false)
+  const [isGroupingByAuthor, setIsGroupingByAuthor] = useState(false)
 
   // Lifted so the classifier worker (and its loaded model) persists across
   // modal open/close instead of being recreated every time the modal mounts.
@@ -239,7 +249,8 @@ export function App() {
   async function handleApplySuggestions(
     suggestions: ClassifyResult[],
     threshold: number,
-    deleteExisting: boolean
+    deleteExisting: boolean,
+    groupByAuthor: boolean
   ) {
     const filtered = suggestions.filter((s) => s.score * 100 >= threshold)
     if (filtered.length === 0) return
@@ -275,6 +286,20 @@ export function App() {
         await window.kindleAPI.addBookToCollection(collection.id, relpath)
       }
 
+      // Optionally materialize author sub-collections (e.g. "Thriller / Glenn Cooper")
+      // for genres with 2+ distinct authors. Routed through the idempotent batch
+      // writer in one call so concurrent same-name creates can't throw.
+      if (groupByAuthor) {
+        const payload = buildAuthorSubcollections(
+          filtered.map((s) => ({
+            genre: s.label,
+            author: s.book.author,
+            relpath: toBookRelpath(s.book.path, documentsBase)
+          }))
+        )
+        if (payload.length > 0) await window.kindleAPI.ensureCollectionsContain(payload)
+      }
+
       await reloadCollections()
       setIsAIModalOpen(false)
     } catch (err) {
@@ -282,6 +307,95 @@ export function App() {
       // Re-throw so the modal can surface the failure to the user.
       throw err
     }
+  }
+
+  // Standalone "group by author": materialize author sub-collections for the
+  // genres that already exist (including Calibre-imported ones) without re-running
+  // the classifier. Reads current membership once, joins each book's author from
+  // state, and lets the idempotent batch writer create the subs.
+  async function handleGroupByAuthor() {
+    if (collections.length === 0 || books.length === 0) return
+    setIsGroupingByAuthor(true)
+    try {
+      const relpaths = books.map((b) => toBookRelpath(b.path, documentsBase))
+      const authorByRelpath = new Map(relpaths.map((rp, i) => [rp, books[i].author]))
+      const tagsByRelpath = await window.kindleAPI.getBookTags(relpaths)
+
+      const authored: AuthoredBook[] = []
+      for (const [relpath, names] of Object.entries(tagsByRelpath)) {
+        const author = authorByRelpath.get(relpath)
+        if (!author || !author.trim()) continue
+        for (const name of names) {
+          if (isSubCollection(name)) continue // only group under top-level genres
+          authored.push({ genre: name, author, relpath })
+        }
+      }
+
+      const payload = buildAuthorSubcollections(authored)
+      if (payload.length > 0) {
+        await window.kindleAPI.ensureCollectionsContain(payload)
+        await reloadCollections()
+      }
+    } catch (err) {
+      console.error('Failed to group by author:', err)
+    } finally {
+      setIsGroupingByAuthor(false)
+    }
+  }
+
+  // Collections whose genre matches `genreName` (the bare genre row plus every
+  // "<genre> / <author>" child), used for cascade rename/delete.
+  function collectionsInGenre(genreName: string): Collection[] {
+    const key = normalizeKey(genreName)
+    return collections.filter((c) => normalizeKey(parseCollectionName(c.name).genre) === key)
+  }
+
+  // Delete a genre and every author sub-collection under it.
+  async function handleDeleteGenre(genreName: string) {
+    const toDelete = collectionsInGenre(genreName)
+    try {
+      for (const c of toDelete) await window.kindleAPI.deleteCollection(c.id)
+    } catch (err) {
+      console.error('Failed to delete genre:', err)
+    }
+    if (toDelete.some((c) => c.id === selectedCollectionId)) setSelectedCollectionId(null)
+    await reloadCollections()
+  }
+
+  // Rename a genre and re-prefix its author sub-collections. Pre-checks for name
+  // collisions so a mid-loop UNIQUE failure can't leave a half-renamed tree.
+  async function handleRenameGenre(genreName: string, rawNewName: string) {
+    const newGenre = sanitizeNamePart(rawNewName)
+    if (!newGenre || normalizeKey(newGenre) === normalizeKey(genreName)) return
+
+    const affected = collectionsInGenre(genreName)
+    const targets = affected.map((c) => {
+      const parsed = parseCollectionName(c.name)
+      const newName =
+        parsed.author === undefined ? newGenre : formatAuthorCollectionName(newGenre, parsed.author)
+      return { id: c.id, oldName: c.name, newName }
+    })
+
+    const affectedIds = new Set(affected.map((c) => c.id))
+    const existingNames = new Set(
+      collections.filter((c) => !affectedIds.has(c.id)).map((c) => normalizeKey(c.name))
+    )
+    const collides = targets.some((tgt) => tgt.newName && existingNames.has(normalizeKey(tgt.newName)))
+    if (collides) {
+      console.error(`Rename of genre "${genreName}" would collide with an existing collection`)
+      return
+    }
+
+    try {
+      for (const tgt of targets) {
+        if (tgt.newName && tgt.newName !== tgt.oldName) {
+          await window.kindleAPI.renameCollection(tgt.id, tgt.newName)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to rename genre:', err)
+    }
+    await reloadCollections()
   }
 
   const documentsBase = kindle ? `${kindle.mountpoint}/documents/` : ''
@@ -306,6 +420,10 @@ export function App() {
         onCreateCollection={handleCreateCollection}
         onRenameCollection={handleRenameCollection}
         onDeleteCollection={handleDeleteCollection}
+        onRenameGenre={handleRenameGenre}
+        onDeleteGenre={handleDeleteGenre}
+        onGroupByAuthor={handleGroupByAuthor}
+        isGroupingByAuthor={isGroupingByAuthor}
         onSelectSettings={() => {
           setIsShowingSettings(true)
           setIsShowingAbout(false)

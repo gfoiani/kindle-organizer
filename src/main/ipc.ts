@@ -15,6 +15,7 @@ import {
   deleteCollection,
   addBookToCollection,
   removeBookFromCollection,
+  ensureCollectionsContain,
   importFromCalibre
 } from './localCollections'
 
@@ -33,6 +34,29 @@ function assertString(value: unknown, name: string): asserts value is string {
 function assertOptionalString(value: unknown, name: string): asserts value is string | undefined {
   if (value !== undefined && typeof value !== 'string') {
     throw new TypeError(`Expected "${name}" to be a string or undefined, got ${typeof value}`)
+  }
+}
+
+function assertStringArray(value: unknown, name: string): asserts value is string[] {
+  if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+    throw new TypeError(`Expected "${name}" to be a string[]`)
+  }
+}
+
+function assertCollectionMemberships(
+  value: unknown,
+  name: string
+): asserts value is { name: string; relpaths: string[] }[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`Expected "${name}" to be an array`)
+  }
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new TypeError(`Expected each "${name}" entry to be an object`)
+    }
+    const rec = entry as Record<string, unknown>
+    assertString(rec.name, `${name}[].name`)
+    assertStringArray(rec.relpaths, `${name}[].relpaths`)
   }
 }
 
@@ -189,6 +213,23 @@ export function registerIpcHandlers(): void {
         removeBookFromCollection(collectionId, bookRelpath)
       }
     )
+  )
+
+  ipcMain.handle(
+    'kindle:ensure-collections-contain',
+    withErrorLogging('kindle:ensure-collections-contain', async (_, entries: unknown) => {
+      assertCollectionMemberships(entries, 'entries')
+      return ensureCollectionsContain(entries)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:get-book-tags',
+    withErrorLogging('kindle:get-book-tags', async (_, relpaths: unknown) => {
+      assertStringArray(relpaths, 'relpaths')
+      // Serialize the Map as a plain object — Maps don't survive the IPC structured clone cleanly.
+      return Object.fromEntries(getAllBookTags(relpaths))
+    })
   )
 
   ipcMain.handle(

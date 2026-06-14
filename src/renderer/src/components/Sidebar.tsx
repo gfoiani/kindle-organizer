@@ -1,5 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import {
+  parseCollectionName,
+  formatAuthorCollectionName,
+  normalizeKey
+} from '../utils/collectionHierarchy'
 import type { Collection } from '../../../preload/api'
 
 interface SidebarProps {
@@ -11,9 +16,50 @@ interface SidebarProps {
   onCreateCollection: (name: string) => Promise<void>
   onRenameCollection: (id: string, newName: string) => Promise<void>
   onDeleteCollection: (id: string) => Promise<void>
+  /** Cascade-rename a genre and re-prefix its author sub-collections. */
+  onRenameGenre: (genreName: string, newName: string) => Promise<void>
+  /** Cascade-delete a genre and every author sub-collection under it. */
+  onDeleteGenre: (genreName: string) => Promise<void>
+  onGroupByAuthor: () => void
+  isGroupingByAuthor: boolean
   onSelectSettings: () => void
   onSelectAbout: () => void
   onAIOrganize: () => void
+}
+
+/**
+ * A top-level genre and its author sub-collections. `genreCollection` is null
+ * for an "orphan" genre that exists only as sub-collections (e.g. a Calibre tag
+ * "Thriller / X" with no bare "Thriller") — rendered as a non-selectable header.
+ */
+interface CollectionGroup {
+  genreKey: string
+  genreName: string
+  genreCollection: Collection | null
+  children: Collection[]
+}
+
+/** Groups a flat collection list into genre → author-children, preserving sort order. */
+function groupCollections(collections: Collection[]): CollectionGroup[] {
+  const order: string[] = []
+  const groups = new Map<string, CollectionGroup>()
+
+  for (const c of collections) {
+    const parsed = parseCollectionName(c.name)
+    const key = normalizeKey(parsed.genre)
+    if (!groups.has(key)) {
+      order.push(key)
+      groups.set(key, { genreKey: key, genreName: parsed.genre, genreCollection: null, children: [] })
+    }
+    const group = groups.get(key)!
+    if (parsed.author === undefined) {
+      groups.set(key, { ...group, genreName: c.name, genreCollection: c })
+    } else {
+      groups.set(key, { ...group, children: [...group.children, c] })
+    }
+  }
+
+  return order.map((key) => groups.get(key)!)
 }
 
 function EditableCollectionRow({
@@ -21,17 +67,21 @@ function EditableCollectionRow({
   isSelected,
   onSelect,
   onRename,
-  onDelete
+  onDelete,
+  displayName
 }: {
   collection: Collection
   isSelected: boolean
   onSelect: () => void
   onRename: (newName: string) => Promise<void>
   onDelete: () => Promise<void>
+  /** Label shown/edited instead of the full name (e.g. just the author for a child row). */
+  displayName?: string
 }) {
   const { t } = useTranslation()
+  const shownName = displayName ?? collection.name
   const [isEditing, setIsEditing] = useState(false)
-  const [editValue, setEditValue] = useState(collection.name)
+  const [editValue, setEditValue] = useState(shownName)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -42,13 +92,13 @@ function EditableCollectionRow({
 
   function startEdit(e: React.MouseEvent) {
     e.stopPropagation()
-    setEditValue(collection.name)
+    setEditValue(shownName)
     setIsEditing(true)
   }
 
   async function commitEdit() {
     const trimmed = editValue.trim()
-    if (trimmed && trimmed !== collection.name) {
+    if (trimmed && trimmed !== shownName) {
       await onRename(trimmed)
     }
     setIsEditing(false)
@@ -93,7 +143,7 @@ function EditableCollectionRow({
             : 'text-gray-300 hover:bg-gray-800 hover:text-white'
         }`}
       >
-        <span className="truncate pr-1">{collection.name}</span>
+        <span className="truncate pr-1">{shownName}</span>
         <span
           className={`text-xs ml-1 shrink-0 ${
             isSelected ? 'text-indigo-200' : 'text-gray-500 group-hover:text-gray-400'
@@ -133,6 +183,85 @@ function EditableCollectionRow({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A genre row with an expand toggle that reveals its author sub-collections. */
+function CollectionGroupRow({
+  group,
+  selectedCollectionId,
+  onSelectCollection,
+  onRenameChild,
+  onDeleteChild,
+  onRenameGenre,
+  onDeleteGenre
+}: {
+  group: CollectionGroup
+  selectedCollectionId: string | null
+  onSelectCollection: (id: string) => void
+  onRenameChild: (id: string, newName: string) => Promise<void>
+  onDeleteChild: (id: string) => Promise<void>
+  onRenameGenre: (genreName: string, newName: string) => Promise<void>
+  onDeleteGenre: (genreName: string) => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(true)
+  const { genreCollection, genreName, children } = group
+
+  return (
+    <div>
+      <div className="flex items-center">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? t('sidebar.collapse') : t('sidebar.expand')}
+          aria-expanded={expanded}
+          className="p-1 text-gray-500 hover:text-gray-300 transition-colors shrink-0"
+        >
+          <svg
+            aria-hidden="true"
+            className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+        {genreCollection ? (
+          <div className="flex-1 min-w-0">
+            <EditableCollectionRow
+              collection={genreCollection}
+              isSelected={selectedCollectionId === genreCollection.id}
+              onSelect={() => onSelectCollection(genreCollection.id)}
+              onRename={(newName) => onRenameGenre(genreName, newName)}
+              onDelete={() => onDeleteGenre(genreName)}
+            />
+          </div>
+        ) : (
+          <div className="flex-1 px-2 py-2 text-sm text-gray-400 truncate" title={genreName}>
+            {genreName}
+          </div>
+        )}
+      </div>
+
+      {expanded && (
+        <div className="ml-4 pl-1 border-l border-gray-800">
+          {children.map((child) => (
+            <EditableCollectionRow
+              key={child.id}
+              collection={child}
+              isSelected={selectedCollectionId === child.id}
+              onSelect={() => onSelectCollection(child.id)}
+              displayName={parseCollectionName(child.name).author ?? child.name}
+              onRename={(typed) =>
+                onRenameChild(child.id, formatAuthorCollectionName(genreName, typed) || child.name)
+              }
+              onDelete={() => onDeleteChild(child.id)}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -183,6 +312,10 @@ export function Sidebar({
   onCreateCollection,
   onRenameCollection,
   onDeleteCollection,
+  onRenameGenre,
+  onDeleteGenre,
+  onGroupByAuthor,
+  isGroupingByAuthor,
   onSelectSettings,
   onSelectAbout,
   onAIOrganize
@@ -190,6 +323,7 @@ export function Sidebar({
   const { t } = useTranslation()
   const [isCreating, setIsCreating] = useState(false)
   const isAllSelected = selectedCollectionId === null
+  const groups = groupCollections(collections)
 
   async function handleCreate(name: string) {
     await onCreateCollection(name)
@@ -234,6 +368,23 @@ export function Sidebar({
             </svg>
             {t('sidebar.aiOrganize')}
           </button>
+          <button
+            onClick={onGroupByAuthor}
+            disabled={booksCount === 0 || collections.length === 0 || isGroupingByAuthor}
+            title={t('sidebar.groupByAuthor')}
+            className="w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-indigo-400 hover:bg-indigo-900/30 hover:text-indigo-300 disabled:opacity-30 disabled:cursor-not-allowed mt-0.5"
+          >
+            {isGroupingByAuthor ? (
+              <svg aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            ) : (
+              <svg aria-hidden="true" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            )}
+            {t('sidebar.groupByAuthor')}
+          </button>
         </div>
 
         <div>
@@ -270,16 +421,34 @@ export function Sidebar({
             </div>
           )}
 
-          {collections.map((collection) => (
-            <EditableCollectionRow
-              key={collection.id}
-              collection={collection}
-              isSelected={selectedCollectionId === collection.id}
-              onSelect={() => onSelectCollection(collection.id)}
-              onRename={(newName) => onRenameCollection(collection.id, newName)}
-              onDelete={() => onDeleteCollection(collection.id)}
-            />
-          ))}
+          {groups.map((group) => {
+            // A plain top-level collection with no author children renders flat.
+            if (group.children.length === 0 && group.genreCollection) {
+              const c = group.genreCollection
+              return (
+                <EditableCollectionRow
+                  key={c.id}
+                  collection={c}
+                  isSelected={selectedCollectionId === c.id}
+                  onSelect={() => onSelectCollection(c.id)}
+                  onRename={(newName) => onRenameCollection(c.id, newName)}
+                  onDelete={() => onDeleteCollection(c.id)}
+                />
+              )
+            }
+            return (
+              <CollectionGroupRow
+                key={`genre:${group.genreKey}`}
+                group={group}
+                selectedCollectionId={selectedCollectionId}
+                onSelectCollection={onSelectCollection}
+                onRenameChild={onRenameCollection}
+                onDeleteChild={onDeleteCollection}
+                onRenameGenre={onRenameGenre}
+                onDeleteGenre={onDeleteGenre}
+              />
+            )
+          })}
         </div>
       </nav>
 

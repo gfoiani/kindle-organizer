@@ -17,6 +17,12 @@ export interface KindleAPI {
   deleteCollection: (id: string) => Promise<void>
   addBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   removeBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
+  /** Ensures each named collection exists and contains the given relpaths (idempotent batch). */
+  ensureCollectionsContain: (
+    entries: { name: string; relpaths: string[] }[]
+  ) => Promise<Collection[]>
+  /** Returns a relpath → collection-name[] map for the given known book relpaths. */
+  getBookTags: (relpaths: string[]) => Promise<Record<string, string[]>>
   getCover: (title: string, author?: string, isbn?: string) => Promise<string | null>
   getBookMetadata: (title: string, author?: string) => Promise<BookMetadata | null>
   updateBookMetadata: (bookRelpath: string, title: string, author?: string) => Promise<void>
@@ -78,6 +84,11 @@ export const kindleAPI: KindleAPI = {
 
   removeBookFromCollection: (collectionId: string, bookRelpath: string) =>
     ipcRenderer.invoke('kindle:remove-book-from-collection', collectionId, bookRelpath),
+
+  ensureCollectionsContain: (entries: { name: string; relpaths: string[] }[]) =>
+    ipcRenderer.invoke('kindle:ensure-collections-contain', entries),
+
+  getBookTags: (relpaths: string[]) => ipcRenderer.invoke('kindle:get-book-tags', relpaths),
 
   getCover: (title: string, author?: string, isbn?: string) =>
     ipcRenderer.invoke('kindle:get-cover', title, author, isbn),

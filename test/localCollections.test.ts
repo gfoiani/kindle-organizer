@@ -4,6 +4,7 @@ import type { CalibreBook } from '../src/main/calibre'
 import {
   addBookToCollection,
   createCollection,
+  ensureCollectionsContain,
   getAllBookTags,
   getCollectionBooks,
   getCollections,
@@ -182,5 +183,73 @@ describe('importFromCalibre — upsert + reconcile (H2)', () => {
     importFromCalibre([{ lpath: 'documents/A/Book.azw3', tags: ['Sci-Fi'] }])
     importFromCalibre([])
     expect(findCollection('Sci-Fi')).toBeUndefined()
+  })
+})
+
+describe('ensureCollectionsContain — generic batch writer', () => {
+  test('creates a new local collection holding the given books', () => {
+    // Act
+    ensureCollectionsContain([
+      { name: 'Thriller / Glenn Cooper', relpaths: ['Cooper/A.azw3', 'Cooper/B.azw3'] }
+    ])
+
+    // Assert
+    const sub = findCollection('Thriller / Glenn Cooper')
+    expect(sub?.source).toBe('local')
+    expect(getCollectionBooks(sub!.id).sort()).toEqual(['Cooper/A.azw3', 'Cooper/B.azw3'])
+  })
+
+  test('re-running with the same payload is an idempotent no-op (no throw, no dupes)', () => {
+    // Arrange
+    const payload = [{ name: 'Thriller / Lee Child', relpaths: ['Child/A.azw3'] }]
+    ensureCollectionsContain(payload)
+    const idBefore = findCollection('Thriller / Lee Child')!.id
+
+    // Act — re-run.
+    ensureCollectionsContain(payload)
+
+    // Assert — same collection, same single membership row.
+    const after = findCollection('Thriller / Lee Child')!
+    expect(after.id).toBe(idBefore)
+    expect(after.bookCount).toBe(1)
+  })
+
+  test('adds books to an existing collection without duplicating membership', () => {
+    // Arrange — a pre-existing collection with one book.
+    const existing = createCollection('Thriller / Glenn Cooper')
+    addBookToCollection(existing.id, 'Cooper/A.azw3')
+
+    // Act — re-add A and add a new B.
+    ensureCollectionsContain([
+      { name: 'Thriller / Glenn Cooper', relpaths: ['Cooper/A.azw3', 'Cooper/B.azw3'] }
+    ])
+
+    // Assert — id preserved, A not duplicated, B added.
+    const after = findCollection('Thriller / Glenn Cooper')!
+    expect(after.id).toBe(existing.id)
+    expect(getCollectionBooks(after.id).sort()).toEqual(['Cooper/A.azw3', 'Cooper/B.azw3'])
+  })
+
+  test('processes multiple entries and skips blank names / relpaths', () => {
+    // Act
+    ensureCollectionsContain([
+      { name: 'Thriller / Glenn Cooper', relpaths: ['Cooper/A.azw3', ''] },
+      { name: '   ', relpaths: ['ignored.azw3'] },
+      { name: 'Thriller / Lee Child', relpaths: ['Child/B.azw3'] }
+    ])
+
+    // Assert
+    expect(getCollectionBooks(findCollection('Thriller / Glenn Cooper')!.id)).toEqual([
+      'Cooper/A.azw3'
+    ])
+    expect(findCollection('Thriller / Lee Child')?.bookCount).toBe(1)
+    expect(getCollections().some((c) => c.name.trim() === '')).toBe(false)
+  })
+
+  test('returns the refreshed collection list', () => {
+    const result = ensureCollectionsContain([
+      { name: 'Thriller / Glenn Cooper', relpaths: ['Cooper/A.azw3'] }
+    ])
+    expect(result.find((c) => c.name === 'Thriller / Glenn Cooper')?.bookCount).toBe(1)
   })
 })

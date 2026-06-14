@@ -38,7 +38,12 @@ interface AutoClassifyModalProps {
   books: KindleBook[]
   collections: Collection[]
   classifier: UseClassifierReturn
-  onApply: (suggestions: ClassifyResult[], threshold: number, deleteExisting: boolean) => Promise<void>
+  onApply: (
+    suggestions: ClassifyResult[],
+    threshold: number,
+    deleteExisting: boolean,
+    groupByAuthor: boolean
+  ) => Promise<void>
   onClose: () => void
 }
 
@@ -66,6 +71,7 @@ export function AutoClassifyModal({
   const [deleteExisting, setDeleteExisting] = useState(false)
   const [isApplying, setIsApplying] = useState(false)
   const [useDescriptions, setUseDescriptions] = useState(false)
+  const [groupByAuthor, setGroupByAuthor] = useState(true)
   const [descFetch, setDescFetch] = useState<{ current: number; total: number } | null>(null)
   const [applyError, setApplyError] = useState<string | null>(null)
   const newLabelRef = useRef<HTMLInputElement>(null)
@@ -162,7 +168,7 @@ export function AutoClassifyModal({
     setIsApplying(true)
     setApplyError(null)
     try {
-      await onApply(filteredResults, threshold, deleteExisting)
+      await onApply(filteredResults, threshold, deleteExisting, groupByAuthor)
     } catch (err) {
       console.error('Failed to apply suggestions:', err)
       setApplyError(t('aiClassify.applyError'))
@@ -274,6 +280,17 @@ export function AutoClassifyModal({
                   className="w-3.5 h-3.5 rounded accent-indigo-500 cursor-pointer"
                 />
                 <span className="text-xs text-gray-400">{t('aiClassify.useDescriptions')}</span>
+              </label>
+            )}
+            {!hasStarted && (
+              <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={groupByAuthor}
+                  onChange={(e) => setGroupByAuthor(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-indigo-500 cursor-pointer"
+                />
+                <span className="text-xs text-gray-400">{t('aiClassify.groupByAuthor')}</span>
               </label>
             )}
           </div>

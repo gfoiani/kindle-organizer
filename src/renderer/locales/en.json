@@ -20,7 +20,10 @@
     "confirmDelete": "Delete the collection \"{{name}}\" ({{count}} books)? This cannot be undone.",
     "settings": "Settings",
     "about": "About",
-    "aiOrganize": "AI Organize"
+    "aiOrganize": "AI Organize",
+    "groupByAuthor": "Group by author",
+    "expand": "Expand",
+    "collapse": "Collapse"
   },
   "header": {
     "collection": "Collection",
@@ -84,6 +87,7 @@
     "modelDownloading": "Downloading {{file}}...",
     "modelReady": "Model ready",
     "useDescriptions": "Use online descriptions (more accurate, slower)",
+    "groupByAuthor": "Also group books by author within each category",
     "fetchingDescriptions": "Fetching descriptions {{current}} / {{total}}",
     "results": "Results",
     "thresholdLabel": "Confidence threshold",

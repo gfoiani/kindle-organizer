@@ -20,7 +20,10 @@
     "confirmDelete": "Eliminare la collezione \"{{name}}\" ({{count}} libri)? L'operazione non può essere annullata.",
     "settings": "Impostazioni",
     "about": "Il Progetto",
-    "aiOrganize": "Organizza con IA"
+    "aiOrganize": "Organizza con IA",
+    "groupByAuthor": "Raggruppa per autore",
+    "expand": "Espandi",
+    "collapse": "Comprimi"
   },
   "aiClassify": {
     "title": "Organizzazione con IA",
@@ -38,6 +41,7 @@
     "modelDownloading": "Download di {{file}}...",
     "modelReady": "Modello pronto",
     "useDescriptions": "Usa descrizioni online (più accurato, più lento)",
+    "groupByAuthor": "Raggruppa anche i libri per autore in ogni categoria",
     "fetchingDescriptions": "Recupero descrizioni {{current}} / {{total}}",
     "results": "Risultati",
     "thresholdLabel": "Soglia di confidenza",

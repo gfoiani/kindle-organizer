@@ -142,6 +142,64 @@ export function getAllBookTags(knownRelpaths: readonly string[] = []): Map<strin
   }
 }
 
+/** A "<collection name> contains these book relpaths" instruction for the batch writer. */
+export interface CollectionMembership {
+  name: string
+  relpaths: string[]
+}
+
+/**
+ * Generic batch writer: ensures each named collection exists (created as a
+ * `local` collection when absent) and contains the given book relpaths.
+ *
+ * Idempotent — re-running with the same payload is a no-op: both the collection
+ * row (`INSERT OR IGNORE` on the UNIQUE name) and each membership row
+ * (`INSERT OR IGNORE`) tolerate duplicates, sidestepping the throw `createCollection`
+ * would hit on a duplicate name. Runs in a single transaction so a mid-way
+ * failure rolls back cleanly.
+ *
+ * Hierarchy is NOT understood here — names arrive pre-composed by the caller
+ * (the renderer's collectionHierarchy util). This keeps the main process a
+ * dumb, reusable primitive. Returns the refreshed collection list.
+ */
+export function ensureCollectionsContain(entries: CollectionMembership[]): Collection[] {
+  const db = openDb()
+  try {
+    initSchema(db)
+
+    const getByName = db.prepare<[string], { id: string }>(
+      `SELECT id FROM collections WHERE name = ?`
+    )
+    const insertCollection = db.prepare<[string, string]>(
+      `INSERT OR IGNORE INTO collections (id, name, source) VALUES (?, ?, 'local')`
+    )
+    const insertBook = db.prepare<[string, string]>(
+      `INSERT OR IGNORE INTO collection_books (collection_id, book_relpath) VALUES (?, ?)`
+    )
+
+    const apply = db.transaction(() => {
+      for (const entry of entries) {
+        const name = entry.name.trim()
+        if (!name) continue
+        let row = getByName.get(name)
+        if (!row) {
+          insertCollection.run(crypto.randomUUID(), name)
+          row = getByName.get(name)
+        }
+        if (!row) continue
+        for (const relpath of entry.relpaths) {
+          if (relpath) insertBook.run(row.id, relpath)
+        }
+      }
+    })
+
+    apply()
+  } finally {
+    db.close()
+  }
+  return getCollections()
+}
+
 export function createCollection(name: string): Collection {
   const db = openDb()
   try {
