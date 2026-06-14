@@ -1,8 +1,18 @@
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 export function About() {
   const { t } = useTranslation()
-  const version = '0.1.0'
+  const [version, setVersion] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    window.kindleAPI
+      .getAppVersion()
+      .then((v) => { if (!cancelled) setVersion(v) })
+      .catch((err) => console.error('Failed to read app version:', err))
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <div className="flex-1 flex flex-col min-w-0 h-full">
@@ -129,8 +139,8 @@ export function About() {
 
           {/* Footer */}
           <div className="pt-4 border-t border-gray-700 text-center">
-            <p className="text-gray-600 text-xs">
-              Made with ❤️ for Kindle lovers
+            <p className="text-gray-400 text-xs">
+              {t('about.tagline')}
             </p>
           </div>
         </div>

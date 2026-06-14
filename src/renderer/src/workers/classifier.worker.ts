@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
-import { pipeline, env } from '@xenova/transformers'
-import type { KindleBook } from '../../../preload/api'
+import { pipeline, env, type FeatureExtractionPipeline, type Tensor } from '@xenova/transformers'
+import type { ClassifyRequest, WorkerMessage } from './messages'
 
 // Multilingual sentence-embedding model (100+ languages). We classify a book by
 // embedding its text and each genre label, then comparing them with cosine
@@ -22,6 +22,11 @@ const debug = (...args: unknown[]): void => {
   if (import.meta.env.DEV) console.log('[worker]', ...args)
 }
 
+/** Type-safe wrapper around self.postMessage for worker→hook messages. */
+function post(message: WorkerMessage): void {
+  self.postMessage(message)
+}
+
 interface ProgressData {
   status: string
   file?: string
@@ -29,10 +34,9 @@ interface ProgressData {
   total?: number
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let extractorPipeline: any = null
+let extractorPipeline: FeatureExtractionPipeline | null = null
 
-async function getExtractor() {
+async function getExtractor(): Promise<FeatureExtractionPipeline> {
   if (extractorPipeline) return extractorPipeline
 
   // Configure ONNX backend lazily — env.backends.onnx uses a webpack lazy getter
@@ -67,12 +71,12 @@ async function getExtractor() {
   extractorPipeline = await pipeline('feature-extraction', MODEL_ID, {
     progress_callback: (data: ProgressData) => {
       if (data.status === 'initiate') {
-        self.postMessage({ type: 'model-loading', progress: 0, stage: `Loading ${data.file ?? 'model'}...` })
+        post({ type: 'model-loading', progress: 0, stage: { kind: 'loading', file: data.file ?? '' } })
       } else if (data.status === 'downloading' && data.file) {
-        const pct = data.total ? Math.round((data.loaded! / data.total) * 100) : 0
-        self.postMessage({ type: 'model-loading', progress: pct, stage: `Downloading ${data.file}` })
+        const pct = data.total != null && data.loaded != null ? Math.round((data.loaded / data.total) * 100) : 0
+        post({ type: 'model-loading', progress: pct, stage: { kind: 'downloading', file: data.file } })
       } else if (data.status === 'done') {
-        self.postMessage({ type: 'model-loading', progress: 100, stage: 'Model ready' })
+        post({ type: 'model-loading', progress: 100, stage: { kind: 'ready' } })
       }
     }
   })
@@ -81,11 +85,10 @@ async function getExtractor() {
 }
 
 /** Embeds a single text into a normalized vector (cosine-ready). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function embed(extractor: any, text: string): Promise<Float32Array> {
-  const output = await extractor(`${E5_PREFIX}${text}`, { pooling: 'mean', normalize: true })
+async function embed(extractor: FeatureExtractionPipeline, text: string): Promise<Float32Array> {
+  const output: Tensor = await extractor(`${E5_PREFIX}${text}`, { pooling: 'mean', normalize: true })
   // Copy out of the tensor so the underlying buffer can be reused/freed.
-  return Float32Array.from(output.data as Float32Array)
+  return Float32Array.from(output.data)
 }
 
 /** Cosine similarity of two already-normalized vectors (= dot product). */
@@ -108,15 +111,17 @@ function softmax(values: number[], temperature: number): number[] {
 // short enough to stay fast and within the model's context.
 const MAX_DESCRIPTION_CHARS = 500
 
-self.onmessage = async (event: MessageEvent) => {
-  const { type, books, labels, descriptions } = event.data as {
-    type: string
-    books: KindleBook[]
-    labels: string[]
-    descriptions?: Record<string, string>
-  }
+self.onmessage = async (event: MessageEvent<ClassifyRequest>) => {
+  const { type, books, labels, descriptions } = event.data
 
   if (type !== 'classify') return
+
+  // Embedding-based classification needs ≥2 labels to be meaningful: with a
+  // single label every book trivially scores 100%. The UI also guards this.
+  if (!Array.isArray(labels) || labels.length < 2) {
+    post({ type: 'error', message: 'NEED_TWO_LABELS' })
+    return
+  }
 
   try {
     const extractor = await getExtractor()
@@ -143,7 +148,7 @@ self.onmessage = async (event: MessageEvent) => {
         if (confidences[j] > confidences[bestIdx]) bestIdx = j
       }
 
-      self.postMessage({
+      post({
         type: 'result',
         book,
         label: labels[bestIdx],
@@ -153,10 +158,10 @@ self.onmessage = async (event: MessageEvent) => {
       })
     }
 
-    self.postMessage({ type: 'complete' })
+    post({ type: 'complete' })
   } catch (err) {
     console.error('[worker] caught error:', err)
-    self.postMessage({
+    post({
       type: 'error',
       message: err instanceof Error ? err.message : String(err)
     })

@@ -2,6 +2,10 @@
   "app": {
     "title": "Kindle Organizer"
   },
+  "menu": {
+    "about": "Informazioni",
+    "learnMore": "Scopri di più"
+  },
   "sidebar": {
     "title": "Kindle Organizer",
     "subtitle": "La tua libreria Kindle",
@@ -13,18 +17,26 @@
     "noCollections": "Nessuna collezione. Usa il tasto {{symbol}} per crearne una, o connetti un Kindle con Calibre per importarle automaticamente.",
     "rename": "Rinomina",
     "delete": "Elimina",
+    "confirmDelete": "Eliminare la collezione \"{{name}}\" ({{count}} libri)? L'operazione non può essere annullata.",
     "settings": "Impostazioni",
     "about": "Il Progetto",
     "aiOrganize": "Organizza con IA"
   },
   "aiClassify": {
     "title": "Organizzazione con IA",
+    "close": "Chiudi",
     "categoriesLabel": "Categorie",
     "addLabelPlaceholder": "Nuova categoria...",
     "addLabel": "Aggiungi",
-    "analyzeBooks": "Analizza {{count}} libri",
+    "removeLabel": "Rimuovi la categoria {{label}}",
+    "needMoreLabels": "Aggiungi almeno due categorie per analizzare i tuoi libri.",
+    "analyzeBooks_one": "Analizza {{count}} libro",
+    "analyzeBooks_other": "Analizza {{count}} libri",
     "analyzingProgress": "Analisi {{current}} / {{total}} libri",
     "preparingModel": "Preparazione modello...",
+    "modelLoading": "Caricamento di {{file}}...",
+    "modelDownloading": "Download di {{file}}...",
+    "modelReady": "Modello pronto",
     "useDescriptions": "Usa descrizioni online (più accurato, più lento)",
     "fetchingDescriptions": "Recupero descrizioni {{current}} / {{total}}",
     "results": "Risultati",
@@ -33,7 +45,11 @@
     "cancel": "Annulla",
     "apply": "Crea Collezioni ({{count}})",
     "applying": "Applicazione...",
+    "applyError": "Impossibile applicare i suggerimenti. Riprova.",
+    "workerInitFailed": "Impossibile avviare il motore di classificazione. Riprova.",
+    "workerError": "Si è verificato un errore di classificazione imprevisto. Riprova.",
     "deleteExisting": "Elimina le collezioni esistenti ({{count}})",
+    "confirmDeleteAll": "Eliminare tutte le {{count}} collezioni esistenti prima di creare quelle nuove? L'operazione non può essere annullata.",
     "genres": {
       "fantasy": "Fantasy",
       "scienceFiction": "Fantascienza",
@@ -74,17 +90,18 @@
     "cacheCleared": "Cache cancellata",
     "cacheError": "Errore",
     "cacheInfo": "Dopo aver cancellato la cache, le copertine verranno ricaricate al prossimo aggiornamento della libreria.",
-    "language": "Lingua",
-    "selectLanguage": "Seleziona lingua"
+    "language": "Lingua"
   },
   "books": {
     "addToCollection": "Aggiungi a collezione",
     "removeFromCollection": "Rimuovi dalla collezione",
+    "manageCollections": "Gestisci collezioni",
+    "clearSearch": "Cancella ricerca",
+    "untitled": "Libro senza titolo",
     "noBooks": "Nessun libro trovato",
     "loadingBooks": "Caricamento libri...",
-    "book": "libro",
-    "books": "libri",
-    "booksCount": "{{count}} libri",
+    "booksCount_one": "{{count}} libro",
+    "booksCount_other": "{{count}} libri",
     "booksCountFiltered": "{{filtered}} / {{total}} libri",
     "searchPlaceholder": "Cerca titolo o autore…",
     "noResults": "Nessun libro trovato per \"{{query}}\"",
@@ -116,7 +133,8 @@
     "credits": "Crediti",
     "builtWith": "Costruito con",
     "github": "Progetto su GitHub",
-    "license": "Licenza MIT"
+    "license": "Licenza MIT",
+    "tagline": "Fatto con ❤️ per gli amanti del Kindle"
   },
   "bookDetail": {
     "close": "Chiudi dettaglio",

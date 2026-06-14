@@ -1,11 +1,14 @@
 import { useReducer, useRef, useCallback, useEffect } from 'react'
 import type { KindleBook } from '../../../preload/api'
+import type { ClassifyRequest, ModelLoadingStage, WorkerMessage } from '../workers/messages'
 
 export interface ClassifyResult {
   book: KindleBook
   label: string
   score: number
 }
+
+export type { ModelLoadingStage }
 
 export type ModelStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -14,14 +17,14 @@ interface ClassifierState {
   progress: { current: number; total: number } | null
   modelStatus: ModelStatus
   modelProgress: number
-  modelStage: string
+  modelStage: ModelLoadingStage | null
   isClassifying: boolean
   error: string | null
 }
 
 type ClassifierAction =
   | { type: 'CLASSIFY_START' }
-  | { type: 'MODEL_LOADING'; progress: number; stage: string }
+  | { type: 'MODEL_LOADING'; progress: number; stage: ModelLoadingStage }
   | { type: 'RESULT'; result: ClassifyResult; current: number; total: number }
   | { type: 'COMPLETE' }
   | { type: 'ERROR'; message: string }
@@ -32,7 +35,7 @@ const initialState: ClassifierState = {
   progress: null,
   modelStatus: 'idle',
   modelProgress: 0,
-  modelStage: '',
+  modelStage: null,
   isClassifying: false,
   error: null
 }
@@ -60,7 +63,7 @@ function reducer(state: ClassifierState, action: ClassifierAction): ClassifierSt
   }
 }
 
-interface UseClassifierReturn extends ClassifierState {
+export interface UseClassifierReturn extends ClassifierState {
   classify: (books: KindleBook[], labels: string[], descriptions?: Record<string, string>) => void
   reset: () => void
 }
@@ -75,31 +78,36 @@ export function useClassifier(): UseClassifierReturn {
     })
     workerRef.current = worker
 
-    worker.onmessage = (event: MessageEvent) => {
+    worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
       const msg = event.data
       switch (msg.type) {
         case 'model-loading':
-          dispatch({ type: 'MODEL_LOADING', progress: msg.progress as number, stage: msg.stage as string })
+          dispatch({ type: 'MODEL_LOADING', progress: msg.progress, stage: msg.stage })
           break
         case 'result':
           dispatch({
             type: 'RESULT',
-            result: { book: msg.book as KindleBook, label: msg.label as string, score: msg.score as number },
-            current: msg.current as number,
-            total: msg.total as number
+            result: { book: msg.book, label: msg.label, score: msg.score },
+            current: msg.current,
+            total: msg.total
           })
           break
         case 'complete':
           dispatch({ type: 'COMPLETE' })
           break
         case 'error':
-          dispatch({ type: 'ERROR', message: msg.message as string })
+          dispatch({ type: 'ERROR', message: msg.message })
           break
       }
     }
 
     worker.onerror = (err) => {
-      dispatch({ type: 'ERROR', message: err.message })
+      // A failed worker-script load yields an empty err.message; keep a usable fallback.
+      dispatch({ type: 'ERROR', message: err.message || 'WORKER_INIT_FAILED' })
+    }
+
+    worker.onmessageerror = () => {
+      dispatch({ type: 'ERROR', message: 'WORKER_MESSAGE_DESERIALIZE_FAILED' })
     }
 
     return () => {
@@ -112,7 +120,8 @@ export function useClassifier(): UseClassifierReturn {
     (books: KindleBook[], labels: string[], descriptions?: Record<string, string>) => {
       if (!workerRef.current) return
       dispatch({ type: 'CLASSIFY_START' })
-      workerRef.current.postMessage({ type: 'classify', books, labels, descriptions })
+      const request: ClassifyRequest = { type: 'classify', books, labels, descriptions }
+      workerRef.current.postMessage(request)
     },
     []
   )

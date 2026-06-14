@@ -61,6 +61,10 @@ function EditableCollectionRow({
 
   async function handleDelete(e: React.MouseEvent) {
     e.stopPropagation()
+    const confirmed = window.confirm(
+      t('sidebar.confirmDelete', { name: collection.name, count: collection.bookCount })
+    )
+    if (!confirmed) return
     await onDelete()
   }
 
@@ -108,22 +112,24 @@ function EditableCollectionRow({
           <button
             onClick={startEdit}
             title={t('sidebar.rename')}
+            aria-label={t('sidebar.rename')}
             className={`p-1 rounded ${
-              isSelected ? 'text-indigo-200 hover:text-white hover:bg-indigo-500' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700'
+              isSelected ? 'text-indigo-200 hover:text-white hover:bg-indigo-500' : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700'
             } transition-colors`}
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg aria-hidden="true" className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </button>
           <button
             onClick={handleDelete}
             title={t('sidebar.delete')}
+            aria-label={t('sidebar.delete')}
             className={`p-1 rounded ${
-              isSelected ? 'text-indigo-200 hover:text-red-400 hover:bg-indigo-500' : 'text-gray-500 hover:text-red-400 hover:bg-gray-700'
+              isSelected ? 'text-indigo-200 hover:text-red-400 hover:bg-indigo-500' : 'text-gray-400 hover:text-red-400 hover:bg-gray-700'
             } transition-colors`}
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg aria-hidden="true" className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
@@ -218,7 +224,7 @@ export function Sidebar({
             title={t('sidebar.aiOrganize')}
             className="w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-indigo-400 hover:bg-indigo-900/30 hover:text-indigo-300 disabled:opacity-30 disabled:cursor-not-allowed mt-0.5"
           >
-            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg aria-hidden="true" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -238,9 +244,10 @@ export function Sidebar({
             <button
               onClick={() => setIsCreating(true)}
               title={t('sidebar.newCollection')}
-              className="text-gray-500 hover:text-gray-300 transition-colors p-0.5 rounded"
+              aria-label={t('sidebar.newCollection')}
+              className="text-gray-400 hover:text-gray-300 transition-colors p-0.5 rounded"
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
             </button>
@@ -281,7 +288,7 @@ export function Sidebar({
           onClick={onSelectAbout}
           className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800`}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -295,7 +302,7 @@ export function Sidebar({
           onClick={onSelectSettings}
           className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800`}
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"

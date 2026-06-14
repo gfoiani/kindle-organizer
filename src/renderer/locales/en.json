@@ -2,6 +2,10 @@
   "app": {
     "title": "Kindle Organizer"
   },
+  "menu": {
+    "about": "About",
+    "learnMore": "Learn More"
+  },
   "sidebar": {
     "title": "Kindle Organizer",
     "subtitle": "Your Kindle library",
@@ -13,6 +17,7 @@
     "noCollections": "No collections. Use the {{symbol}} button to create one, or connect a Kindle with Calibre to import them automatically.",
     "rename": "Rename",
     "delete": "Delete",
+    "confirmDelete": "Delete the collection \"{{name}}\" ({{count}} books)? This cannot be undone.",
     "settings": "Settings",
     "about": "About",
     "aiOrganize": "AI Organize"
@@ -36,17 +41,18 @@
     "cacheCleared": "Cache cleared",
     "cacheError": "Error",
     "cacheInfo": "After clearing the cache, covers will be reloaded on the next library refresh.",
-    "language": "Language",
-    "selectLanguage": "Select language"
+    "language": "Language"
   },
   "books": {
     "addToCollection": "Add to collection",
     "removeFromCollection": "Remove from collection",
+    "manageCollections": "Manage collections",
+    "clearSearch": "Clear search",
+    "untitled": "Untitled book",
     "noBooks": "No books found",
     "loadingBooks": "Loading books...",
-    "book": "book",
-    "books": "books",
-    "booksCount": "{{count}} books",
+    "booksCount_one": "{{count}} book",
+    "booksCount_other": "{{count}} books",
     "booksCountFiltered": "{{filtered}} / {{total}} books",
     "searchPlaceholder": "Search by title or author…",
     "noResults": "No books found for \"{{query}}\"",
@@ -64,12 +70,19 @@
   },
   "aiClassify": {
     "title": "AI Organize Books",
+    "close": "Close",
     "categoriesLabel": "Categories",
     "addLabelPlaceholder": "New category...",
     "addLabel": "Add",
-    "analyzeBooks": "Analyze {{count}} books",
+    "removeLabel": "Remove category {{label}}",
+    "needMoreLabels": "Add at least two categories to analyze your books.",
+    "analyzeBooks_one": "Analyze {{count}} book",
+    "analyzeBooks_other": "Analyze {{count}} books",
     "analyzingProgress": "Analyzing {{current}} / {{total}} books",
     "preparingModel": "Preparing model...",
+    "modelLoading": "Loading {{file}}...",
+    "modelDownloading": "Downloading {{file}}...",
+    "modelReady": "Model ready",
     "useDescriptions": "Use online descriptions (more accurate, slower)",
     "fetchingDescriptions": "Fetching descriptions {{current}} / {{total}}",
     "results": "Results",
@@ -78,7 +91,11 @@
     "cancel": "Cancel",
     "apply": "Create Collections ({{count}})",
     "applying": "Applying...",
+    "applyError": "Failed to apply the suggestions. Please try again.",
+    "workerInitFailed": "Could not start the classification engine. Please try again.",
+    "workerError": "An unexpected classification error occurred. Please try again.",
     "deleteExisting": "Delete existing collections ({{count}})",
+    "confirmDeleteAll": "Delete all {{count}} existing collections before creating the new ones? This cannot be undone.",
     "genres": {
       "fantasy": "Fantasy",
       "scienceFiction": "Science Fiction",
@@ -116,7 +133,8 @@
     "credits": "Credits",
     "builtWith": "Built with",
     "github": "Project on GitHub",
-    "license": "MIT License"
+    "license": "MIT License",
+    "tagline": "Made with ❤️ for Kindle lovers"
   },
   "bookDetail": {
     "close": "Close detail",

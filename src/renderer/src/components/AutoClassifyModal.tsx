@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo, useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useClassifier, type ClassifyResult } from '../hooks/useClassifier'
+import type { ClassifyResult, ModelLoadingStage, UseClassifierReturn } from '../hooks/useClassifier'
 import type { KindleBook, Collection } from '../../../preload/api'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface Label {
   key: string      // stable identifier (React key + dedup); English for the defaults
@@ -29,17 +30,28 @@ const DEFAULT_GENRE_KEYS: Array<{ key: string; i18nKey: string }> = [
   { key: 'Cooking', i18nKey: 'cooking' }
 ]
 
+// Embedding-based classification needs at least two categories to discriminate;
+// with one label every book trivially scores 100%.
+const MIN_LABELS = 2
+
 interface AutoClassifyModalProps {
   books: KindleBook[]
   collections: Collection[]
+  classifier: UseClassifierReturn
   onApply: (suggestions: ClassifyResult[], threshold: number, deleteExisting: boolean) => Promise<void>
   onClose: () => void
 }
 
-export function AutoClassifyModal({ books, collections, onApply, onClose }: AutoClassifyModalProps) {
+export function AutoClassifyModal({
+  books,
+  collections,
+  classifier,
+  onApply,
+  onClose
+}: AutoClassifyModalProps) {
   const { t } = useTranslation()
   const { classify, results, progress, modelStatus, modelProgress, modelStage, isClassifying, error, reset } =
-    useClassifier()
+    classifier
 
   const [labels, setLabels] = useState<Label[]>(() =>
     DEFAULT_GENRE_KEYS.map(({ key, i18nKey }) => ({
@@ -55,17 +67,36 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
   const [isApplying, setIsApplying] = useState(false)
   const [useDescriptions, setUseDescriptions] = useState(false)
   const [descFetch, setDescFetch] = useState<{ current: number; total: number } | null>(null)
+  const [applyError, setApplyError] = useState<string | null>(null)
   const newLabelRef = useRef<HTMLInputElement>(null)
   const resultsEndRef = useRef<HTMLDivElement>(null)
-
-  // The model now returns the localized label we sent, so the result label is
-  // already the display name. Kept as a helper so call sites stay readable.
-  const getDisplayLabel = (modelLabel: string) => modelLabel
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
 
   const hasStarted = isClassifying || results.length > 0 || progress !== null || descFetch !== null
-  const filteredResults = results.filter((r) => r.score * 100 >= threshold)
-  const uniqueDisplayLabels = [...new Set(filteredResults.map((r) => getDisplayLabel(r.label)))]
-  const newCollectionCount = uniqueDisplayLabels.filter((l) => !collections.some((c) => c.name === l)).length
+  const isBusy = isClassifying || isApplying || descFetch !== null
+
+  const filteredResults = useMemo(
+    () => results.filter((r) => r.score * 100 >= threshold),
+    [results, threshold]
+  )
+  const uniqueDisplayLabels = useMemo(
+    () => [...new Set(filteredResults.map((r) => r.label))],
+    [filteredResults]
+  )
+  const newCollectionCount = useMemo(
+    () => uniqueDisplayLabels.filter((l) => !collections.some((c) => c.name === l)).length,
+    [uniqueDisplayLabels, collections]
+  )
+
+  // Translate the worker's machine-readable model-loading stage into UI text.
+  const modelStageText = useMemo(() => translateModelStage(modelStage, t), [modelStage, t])
+
+  // Map the worker's machine-readable error codes to localized messages.
+  const displayError = useMemo(() => translateClassifierError(error, t), [error, t])
+
+  // Focus containment + restore focus on close.
+  useFocusTrap(dialogRef, { onEscape: isBusy ? undefined : onClose, trapTab: true })
 
   // Auto-scroll results as they arrive
   useEffect(() => {
@@ -91,6 +122,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
 
   async function handleAnalyze() {
     reset()
+    setApplyError(null)
     setDescFetch(null)
     // Send the localized display labels: the multilingual model matches them
     // against book titles in any language, and they double as collection names.
@@ -120,38 +152,51 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
   }
 
   async function handleApply() {
+    // Confirm the irreversible bulk delete before applying.
+    if (deleteExisting) {
+      const confirmed = window.confirm(
+        t('aiClassify.confirmDeleteAll', { count: collections.length })
+      )
+      if (!confirmed) return
+    }
     setIsApplying(true)
+    setApplyError(null)
     try {
-      // Replace English model labels with translated display names before applying
-      const resultsWithDisplayLabels = filteredResults.map((r) => ({
-        ...r,
-        label: getDisplayLabel(r.label)
-      }))
-      await onApply(resultsWithDisplayLabels, threshold, deleteExisting)
+      await onApply(filteredResults, threshold, deleteExisting)
+    } catch (err) {
+      console.error('Failed to apply suggestions:', err)
+      setApplyError(t('aiClassify.applyError'))
     } finally {
       setIsApplying(false)
     }
   }
 
   function handleOverlayClick(e: React.MouseEvent) {
-    if (e.target === e.currentTarget && !isClassifying && !isApplying && descFetch === null) {
+    if (e.target === e.currentTarget && !isBusy) {
       onClose()
     }
   }
 
-  const canAnalyze = labels.length > 0 && books.length > 0 && !isClassifying
+  const canAnalyze = labels.length >= MIN_LABELS && books.length > 0 && !isClassifying
   const canApply = filteredResults.length > 0 && !isApplying && !isClassifying
+  const shownError = displayError ?? applyError
 
   return (
     <div
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
       onClick={handleOverlayClick}
     >
-      <div className="bg-gray-800 border border-gray-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-gray-800 border border-gray-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700 shrink-0">
           <div className="flex items-center gap-2.5">
-            <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg aria-hidden="true" className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -159,14 +204,15 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                 d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
               />
             </svg>
-            <h2 className="text-white font-semibold">{t('aiClassify.title')}</h2>
+            <h2 id={titleId} className="text-white font-semibold">{t('aiClassify.title')}</h2>
           </div>
           <button
             onClick={onClose}
-            disabled={isClassifying || isApplying || descFetch !== null}
-            className="text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-40 p-1 rounded"
+            disabled={isBusy}
+            aria-label={t('aiClassify.close')}
+            className="text-gray-400 hover:text-gray-300 transition-colors disabled:opacity-40 p-1 rounded"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -188,15 +234,19 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                   <button
                     onClick={() => handleRemoveLabel(label.key)}
                     disabled={hasStarted}
+                    aria-label={t('aiClassify.removeLabel', { label: label.display })}
                     className="text-indigo-400 hover:text-indigo-200 transition-colors disabled:opacity-30 ml-0.5"
                   >
-                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg aria-hidden="true" className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
                 </span>
               ))}
             </div>
+            {!hasStarted && labels.length < MIN_LABELS && (
+              <p className="text-yellow-500/80 text-xs mb-2">{t('aiClassify.needMoreLabels')}</p>
+            )}
             {!hasStarted && (
               <div className="flex gap-2">
                 <input
@@ -205,7 +255,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                   onChange={(e) => setNewLabelInput(e.target.value)}
                   onKeyDown={handleLabelKeyDown}
                   placeholder={t('aiClassify.addLabelPlaceholder')}
-                  className="flex-1 bg-gray-700 text-white text-sm rounded-md px-3 py-1.5 outline-none ring-0 focus:ring-1 focus:ring-indigo-500 placeholder-gray-500"
+                  className="flex-1 bg-gray-700 text-white text-sm rounded-md px-3 py-1.5 outline-none ring-0 focus:ring-1 focus:ring-indigo-500 placeholder-gray-400"
                 />
                 <button
                   onClick={handleAddLabel}
@@ -236,13 +286,13 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                 disabled={!canAnalyze}
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-md transition-colors"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
                 {t('aiClassify.analyzeBooks', { count: books.length })}
               </button>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2" role="status" aria-live="polite">
                 {/* Description fetch progress (opt-in enrichment) */}
                 {descFetch && (
                   <div>
@@ -250,11 +300,17 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                       <span className="text-gray-400 text-xs">
                         {t('aiClassify.fetchingDescriptions', { current: descFetch.current, total: descFetch.total })}
                       </span>
-                      <span className="text-gray-500 text-xs">
+                      <span className="text-gray-400 text-xs">
                         {Math.round((descFetch.current / descFetch.total) * 100)}%
                       </span>
                     </div>
-                    <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-1 bg-gray-700 rounded-full overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={descFetch.current}
+                      aria-valuemin={0}
+                      aria-valuemax={descFetch.total}
+                    >
                       <div
                         className="h-full bg-indigo-500 rounded-full transition-all duration-300"
                         style={{ width: `${(descFetch.current / descFetch.total) * 100}%` }}
@@ -267,10 +323,16 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                 {modelStatus === 'loading' && (
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-gray-400 text-xs">{modelStage}</span>
-                      <span className="text-gray-500 text-xs">{modelProgress}%</span>
+                      <span className="text-gray-400 text-xs">{modelStageText}</span>
+                      <span className="text-gray-400 text-xs">{modelProgress}%</span>
                     </div>
-                    <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-1 bg-gray-700 rounded-full overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={modelProgress}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
                       <div
                         className="h-full bg-indigo-500 rounded-full transition-all duration-300"
                         style={{ width: `${modelProgress}%` }}
@@ -286,11 +348,17 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                       <span className="text-gray-400 text-xs">
                         {t('aiClassify.analyzingProgress', { current: progress.current, total: progress.total })}
                       </span>
-                      <span className="text-gray-500 text-xs">
+                      <span className="text-gray-400 text-xs">
                         {Math.round((progress.current / progress.total) * 100)}%
                       </span>
                     </div>
-                    <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-1 bg-gray-700 rounded-full overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={progress.current}
+                      aria-valuemin={0}
+                      aria-valuemax={progress.total}
+                    >
                       <div
                         className="h-full bg-indigo-500 rounded-full transition-all duration-300"
                         style={{ width: `${(progress.current / progress.total) * 100}%` }}
@@ -301,7 +369,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
 
                 {isClassifying && !progress && modelStatus !== 'loading' && (
                   <div className="flex items-center gap-2 text-gray-400 text-xs">
-                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg aria-hidden="true" className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -317,9 +385,9 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
           </div>
 
           {/* Error */}
-          {error && (
-            <div className="mx-5 my-3 px-4 py-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
-              {error}
+          {shownError && (
+            <div role="alert" className="mx-5 my-3 px-4 py-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
+              {shownError}
             </div>
           )}
 
@@ -340,16 +408,16 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                         isAbove ? 'opacity-100' : 'opacity-40'
                       }`}
                     >
-                      <span className={`shrink-0 text-xs ${isAbove ? 'text-green-400' : 'text-gray-600'}`}>
+                      <span aria-hidden="true" className={`shrink-0 text-xs ${isAbove ? 'text-green-400' : 'text-gray-500'}`}>
                         {isAbove ? '✓' : '—'}
                       </span>
                       <span className="flex-1 text-gray-300 truncate min-w-0">{result.book.title}</span>
                       <span className="shrink-0 text-indigo-400 text-xs font-medium">
-                        {getDisplayLabel(result.label)}
+                        {result.label}
                       </span>
                       <span
                         className={`shrink-0 text-xs font-mono w-9 text-right ${
-                          pct >= 80 ? 'text-green-400' : pct >= 60 ? 'text-yellow-400' : 'text-gray-500'
+                          pct >= 80 ? 'text-green-400' : pct >= 60 ? 'text-yellow-400' : 'text-gray-400'
                         }`}
                       >
                         {pct}%
@@ -377,9 +445,10 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                 max={100}
                 value={threshold}
                 onChange={(e) => setThreshold(Number(e.target.value))}
+                aria-label={t('aiClassify.thresholdLabel')}
                 className="w-full h-1.5 accent-indigo-500 cursor-pointer"
               />
-              <p className="text-gray-500 text-xs mt-2">
+              <p className="text-gray-400 text-xs mt-2">
                 {t('aiClassify.summary', {
                   books: filteredResults.length,
                   collections: uniqueDisplayLabels.length,
@@ -403,7 +472,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                   disabled={isApplying}
                   className="w-3.5 h-3.5 rounded accent-red-500 cursor-pointer disabled:opacity-40"
                 />
-                <span className={`text-xs ${deleteExisting ? 'text-red-400' : 'text-gray-500'}`}>
+                <span className={`text-xs ${deleteExisting ? 'text-red-400' : 'text-gray-400'}`}>
                   {t('aiClassify.deleteExisting', { count: collections.length })}
                 </span>
               </label>
@@ -413,7 +482,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              disabled={isClassifying || isApplying || descFetch !== null}
+              disabled={isBusy}
               className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-40"
             >
               {t('aiClassify.cancel')}
@@ -427,7 +496,7 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
                 }`}
               >
                 {isApplying && (
-                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg aria-hidden="true" className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -444,4 +513,40 @@ export function AutoClassifyModal({ books, collections, onApply, onClose }: Auto
       </div>
     </div>
   )
+}
+
+/** Translates the worker's machine-readable model-loading stage into UI text. */
+function translateModelStage(
+  stage: ModelLoadingStage | null,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string {
+  if (!stage) return ''
+  switch (stage.kind) {
+    case 'loading':
+      return t('aiClassify.modelLoading', { file: stage.file })
+    case 'downloading':
+      return t('aiClassify.modelDownloading', { file: stage.file })
+    case 'ready':
+      return t('aiClassify.modelReady')
+    default:
+      return ''
+  }
+}
+
+/** Maps worker error codes to localized, user-friendly messages. */
+function translateClassifierError(
+  error: string | null,
+  t: (key: string) => string
+): string | null {
+  if (!error) return null
+  switch (error) {
+    case 'NEED_TWO_LABELS':
+      return t('aiClassify.needMoreLabels')
+    case 'WORKER_INIT_FAILED':
+      return t('aiClassify.workerInitFailed')
+    case 'WORKER_MESSAGE_DESERIALIZE_FAILED':
+      return t('aiClassify.workerError')
+    default:
+      return error
+  }
 }

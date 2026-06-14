@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18next from '../i18n'
+import { STATUS_RESET_MS } from '../utils/constants'
 
 export function Settings() {
   const { t } = useTranslation()
@@ -18,7 +19,7 @@ export function Settings() {
       setClearResult('error')
     } finally {
       setIsClearing(false)
-      setTimeout(() => setClearResult(null), 3000)
+      setTimeout(() => setClearResult(null), STATUS_RESET_MS)
     }
   }
 
@@ -81,7 +82,7 @@ export function Settings() {
               } disabled:opacity-50`}
             >
               {isClearing ? (
-                <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg aria-hidden="true" className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -121,9 +122,18 @@ export function Settings() {
                     : t('settings.clearCache')}
             </button>
 
-            <p className="text-gray-500 text-xs mt-3">
+            <p className="text-gray-400 text-xs mt-3">
               {t('settings.cacheInfo')}
             </p>
+
+            {/* Visually-hidden live region announces the clear-cache result. */}
+            <div role="status" aria-live="polite" className="sr-only">
+              {clearResult === 'success'
+                ? t('settings.cacheCleared')
+                : clearResult === 'error'
+                  ? t('settings.cacheError')
+                  : ''}
+            </div>
           </div>
         </div>
       </div>

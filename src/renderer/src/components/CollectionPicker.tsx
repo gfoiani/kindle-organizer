@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Collection } from '../../../preload/api'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface CollectionPickerProps {
   bookRelpath: string
@@ -23,12 +24,20 @@ export function CollectionPicker({
   const [pending, setPending] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
+  useFocusTrap(ref, { onEscape: onClose })
+
   useEffect(() => {
+    let cancelled = false
+    setLoading(true)
     window.kindleAPI
       .getBookCollections(bookRelpath)
-      .then((ids) => setMemberIds(new Set(ids)))
-      .catch(() => setMemberIds(new Set()))
-      .finally(() => setLoading(false))
+      .then((ids) => { if (!cancelled) setMemberIds(new Set(ids)) })
+      .catch((err) => {
+        console.error('Failed to load book collections:', err)
+        if (!cancelled) setMemberIds(new Set())
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [bookRelpath])
 
   useEffect(() => {
@@ -66,6 +75,8 @@ export function CollectionPicker({
   return (
     <div
       ref={ref}
+      role="dialog"
+      aria-label={t('books.addToCollection')}
       className="absolute z-50 right-0 top-full mt-1 w-52 bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1"
     >
       <p className="px-3 py-1.5 text-gray-400 text-xs font-semibold uppercase tracking-wider border-b border-gray-700 mb-1">

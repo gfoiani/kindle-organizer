@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { KindleBook, BookMetadata } from '../../../preload/api'
+import { formatSize } from '../utils/format'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface Props {
   book: KindleBook
@@ -8,12 +10,6 @@ interface Props {
   bookRelpath: string
   onClose: () => void
   onBookUpdated: (updatedBook: KindleBook) => void
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpdated }: Props) {
@@ -25,6 +21,11 @@ export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpd
   const [editTitle, setEditTitle] = useState('')
   const [editAuthor, setEditAuthor] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const asideRef = useRef<HTMLElement>(null)
+  const titleId = useId()
+
+  // Escape closes the panel (but not mid-save, to avoid losing the edit).
+  useFocusTrap(asideRef, { onEscape: isSaving ? undefined : onClose })
 
   useEffect(() => {
     let cancelled = false
@@ -75,12 +76,15 @@ export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpd
         }
       `}</style>
       <aside
+        ref={asideRef}
+        role="dialog"
+        aria-labelledby={titleId}
         className="w-80 shrink-0 border-l border-gray-700 flex flex-col overflow-hidden bg-gray-900"
         style={{ animation: 'slideInRight 0.25s ease-out both' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 shrink-0">
-          <h3 className="text-sm font-semibold text-white truncate pr-2">
+          <h3 id={titleId} className="text-sm font-semibold text-white truncate pr-2">
             {isEditing ? t('bookDetail.editing') : book.title}
           </h3>
           <div className="flex items-center gap-1 shrink-0">
@@ -90,14 +94,15 @@ export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpd
                   onClick={handleSave}
                   disabled={isSaving || !editTitle.trim()}
                   title={t('bookDetail.save')}
+                  aria-label={t('bookDetail.save')}
                   className="text-green-400 hover:text-green-300 transition-colors p-0.5 disabled:opacity-40"
                 >
                   {isSaving ? (
-                    <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg aria-hidden="true" className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                   ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   )}
@@ -106,9 +111,10 @@ export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpd
                   onClick={handleCancel}
                   disabled={isSaving}
                   title={t('bookDetail.cancelEdit')}
+                  aria-label={t('bookDetail.cancelEdit')}
                   className="text-gray-400 hover:text-white transition-colors p-0.5 disabled:opacity-40"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
@@ -118,9 +124,10 @@ export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpd
                 <button
                   onClick={handleStartEdit}
                   title={t('bookDetail.edit')}
+                  aria-label={t('bookDetail.edit')}
                   className="text-gray-400 hover:text-indigo-300 transition-colors p-0.5"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </button>
@@ -128,8 +135,9 @@ export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpd
                   onClick={onClose}
                   className="text-gray-400 hover:text-white transition-colors p-0.5"
                   title={t('bookDetail.close')}
+                  aria-label={t('bookDetail.close')}
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
