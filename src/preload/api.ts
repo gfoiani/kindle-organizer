@@ -23,11 +23,24 @@ export interface KindleAPI {
   clearCoverCache: () => Promise<void>
   /** Aligns the iTunes cover storefront with the app's UI language (e.g. 'it', 'en'). */
   setLocale: (lang: string) => Promise<void>
+  /** Returns the running app version (from package.json via app.getVersion()). */
+  getAppVersion: () => Promise<string>
+  /** Rebuilds the native menu's custom labels in the active UI language. */
+  setMenuLabels: (about: string, learnMore: string) => Promise<void>
   /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
   onShowAbout: (callback: () => void) => () => void
-  /** Subscribe to cover updates pushed by the retry loop. Returns an unsubscribe function. */
+  /**
+   * Subscribe to cover updates pushed by the retry loop. The callback receives
+   * the book's title/author (back-compat) plus the cover cache key, which lets
+   * the renderer match an edited book reliably. Returns an unsubscribe function.
+   */
   onCoverUpdated: (
-    callback: (title: string, author: string | undefined, dataUrl: string) => void
+    callback: (
+      title: string,
+      author: string | undefined,
+      dataUrl: string,
+      cacheKey: string
+    ) => void
   ) => () => void
   /** Fired when a Kindle is plugged in while the app is running. */
   onKindleConnected: (callback: (drive: KindleDrive) => void) => () => void
@@ -79,6 +92,11 @@ export const kindleAPI: KindleAPI = {
 
   setLocale: (lang: string) => ipcRenderer.invoke('kindle:set-locale', lang),
 
+  getAppVersion: () => ipcRenderer.invoke('kindle:get-app-version'),
+
+  setMenuLabels: (about: string, learnMore: string) =>
+    ipcRenderer.invoke('menu:set-labels', about, learnMore),
+
   onShowAbout: (callback: () => void) => {
     const handler = () => callback()
     ipcRenderer.on('show-about', handler)
@@ -90,8 +108,9 @@ export const kindleAPI: KindleAPI = {
       _: Electron.IpcRendererEvent,
       title: string,
       author: string | undefined,
-      dataUrl: string
-    ) => callback(title, author, dataUrl)
+      dataUrl: string,
+      cacheKey: string
+    ) => callback(title, author, dataUrl, cacheKey)
     ipcRenderer.on('cover:updated', handler)
     return () => ipcRenderer.removeListener('cover:updated', handler)
   },

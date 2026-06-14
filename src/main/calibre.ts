@@ -1,5 +1,6 @@
 import * as fs from 'fs-extra'
 import path from 'path'
+import { stripDocumentsPrefix } from './paths'
 
 export interface CalibreBook {
   lpath: string
@@ -8,8 +9,13 @@ export interface CalibreBook {
 
 /**
  * Writes updated tags back to `metadata.calibre` on the Kindle.
- * Only updates the `tags` field for books already present in the file.
- * Books not in `bookTagMap` keep their existing tags.
+ *
+ * The write is authoritative for every book the app knows about: any book whose
+ * relpath appears in `bookTagMap` has its `tags` set to that exact array — which
+ * includes books removed from all collections (seeded with `[]` by the caller),
+ * so de-tagging actually clears the tag on the device. Books the app does NOT
+ * know about (absent from the map) keep their existing tags untouched.
+ *
  * Returns true if the file was successfully updated.
  */
 export function writeCalibreMetadata(
@@ -17,6 +23,7 @@ export function writeCalibreMetadata(
   bookTagMap: Map<string, string[]>
 ): boolean {
   const metadataPath = path.join(mountpoint, 'metadata.calibre')
+  const tempPath = `${metadataPath}.tmp`
 
   if (!fs.existsSync(metadataPath)) return false
 
@@ -32,9 +39,7 @@ export function writeCalibreMetadata(
       const lpath = rec['lpath']
       if (typeof lpath !== 'string') return entry
 
-      const relpath = lpath.startsWith('documents/')
-        ? lpath.slice('documents/'.length)
-        : lpath
+      const relpath = stripDocumentsPrefix(lpath)
 
       const tags = bookTagMap.get(relpath)
       if (tags !== undefined) {
@@ -45,7 +50,6 @@ export function writeCalibreMetadata(
 
     // Atomic write: write to a temp file then rename, so the device's
     // metadata.calibre is never left half-written if the Kindle is unplugged mid-write.
-    const tempPath = `${metadataPath}.tmp`
     fs.writeFileSync(tempPath, JSON.stringify(updated, null, 2), 'utf-8')
     fs.renameSync(tempPath, metadataPath)
     return true
@@ -54,6 +58,16 @@ export function writeCalibreMetadata(
       `[calibre] Failed to write metadata to ${metadataPath}:`,
       err instanceof Error ? err.message : String(err)
     )
+    // Clean up the orphaned temp file so a failed write doesn't leave a stale
+    // `.tmp` behind on the device.
+    try {
+      fs.removeSync(tempPath)
+    } catch (cleanupErr) {
+      console.error(
+        `[calibre] Failed to clean up temp file ${tempPath}:`,
+        cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
+      )
+    }
     return false
   }
 }
@@ -143,7 +157,7 @@ export function readCalibreIsbnMap(mountpoint: string): Map<string, string> {
       const isbn = extractIsbn(rec)
       if (!isbn) continue
 
-      const relpath = lpath.startsWith('documents/') ? lpath.slice('documents/'.length) : lpath
+      const relpath = stripDocumentsPrefix(lpath)
       result.set(relpath, isbn)
     }
   } catch (err) {

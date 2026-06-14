@@ -1,6 +1,21 @@
 import { Menu, BrowserWindow, app } from 'electron'
 
-export function setupMenu(mainWindow: BrowserWindow): void {
+/** Translatable labels for the custom menu items, supplied by the renderer. */
+export interface MenuLabels {
+  about: string
+  learnMore: string
+}
+
+// English defaults — used until the renderer pushes the active language's labels.
+const DEFAULT_LABELS: MenuLabels = {
+  about: `About ${app.name}`,
+  learnMore: 'Learn More'
+}
+
+let currentWindow: BrowserWindow | null = null
+let currentLabels: MenuLabels = DEFAULT_LABELS
+
+function buildMenu(mainWindow: BrowserWindow, labels: MenuLabels): Menu {
   const isMac = process.platform === 'darwin'
 
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -10,7 +25,7 @@ export function setupMenu(mainWindow: BrowserWindow): void {
             label: app.name,
             submenu: [
               {
-                label: `About ${app.name}`,
+                label: labels.about,
                 click: (): void => {
                   mainWindow.webContents.send('show-about')
                 }
@@ -43,7 +58,7 @@ export function setupMenu(mainWindow: BrowserWindow): void {
       role: 'help',
       submenu: [
         {
-          label: 'Learn More',
+          label: labels.learnMore,
           click: async (): Promise<void> => {
             const { shell } = await import('electron')
             await shell.openExternal('https://github.com/gfoiani/kindle-organizer')
@@ -53,7 +68,7 @@ export function setupMenu(mainWindow: BrowserWindow): void {
           ? ([
               { type: 'separator' },
               {
-                label: `About ${app.name}`,
+                label: labels.about,
                 click: (): void => {
                   mainWindow.webContents.send('show-about')
                 }
@@ -64,6 +79,23 @@ export function setupMenu(mainWindow: BrowserWindow): void {
     }
   ]
 
-  const menu = Menu.buildFromTemplate(template)
-  Menu.setApplicationMenu(menu)
+  return Menu.buildFromTemplate(template)
+}
+
+export function setupMenu(mainWindow: BrowserWindow): void {
+  currentWindow = mainWindow
+  Menu.setApplicationMenu(buildMenu(mainWindow, currentLabels))
+}
+
+/**
+ * Rebuilds the application menu with localized labels. Called over IPC by the
+ * renderer whenever the UI language changes, so the native menu's custom items
+ * ("About …", "Learn More") track the selected language instead of staying
+ * hardcoded English.
+ */
+export function setMenuLabels(labels: MenuLabels): void {
+  currentLabels = labels
+  if (currentWindow && !currentWindow.isDestroyed()) {
+    Menu.setApplicationMenu(buildMenu(currentWindow, currentLabels))
+  }
 }

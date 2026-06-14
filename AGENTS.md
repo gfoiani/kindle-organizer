@@ -53,6 +53,6 @@ Data flow: renderer → `window.kindleAPI.*` → `ipcRenderer.invoke` → `ipcMa
 
 - `better-sqlite3` is a native module — run `yarn rebuild` if it fails to load after dependency or Node/Electron changes.
 - The AI model is **not bundled**; run `yarn download-model` before using auto-classification (CI does this too).
-- `tsconfig.json`'s `include` currently covers `src/renderer/src` and `src/preload` but **not `src/main`** — main-process code is not type-checked. Be extra careful editing `src/main`.
+- `yarn type-check` runs two passes: `tsconfig.json` (renderer + preload) and `tsconfig.node.json` (`src/main`, bundler resolution). Main-process code **is** type-checked now — but `electron-vite` still bundles via esbuild without type-checking, so always run `yarn type-check` (a green `yarn build` does not imply type safety).
 - `crypto.randomUUID()` / `crypto.createHash` in main use Node's global Web Crypto (Node 22) — no explicit import needed, this is intentional.
 - `electron-vite` bundles via esbuild without type-checking, so a successful `yarn build` does not imply type safety — run `yarn type-check`.

@@ -10,6 +10,37 @@ const debug = (...args: unknown[]): void => {
   if (!app.isPackaged) console.log(...args)
 }
 
+// ─── Tuning knobs ─────────────────────────────────────────────────────────────
+/** Per-request socket timeout. */
+const REQUEST_TIMEOUT_MS = 8000
+/** Max HTTP redirects we will follow before giving up. */
+const MAX_REDIRECTS = 4
+/** Hard cap on a single response body so a hostile/buggy host can't exhaust memory. */
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+/** Relative weights when scoring a candidate by title vs author similarity. */
+const TITLE_WEIGHT = 0.75
+const AUTHOR_WEIGHT = 0.25
+/** A buffer smaller than this can't be a real cover image (it's an error page). */
+const MIN_IMAGE_BYTES = 500
+
+// ─── Redirect / host allow-list ─────────────────────────────────────────────
+// fetchUrl follows redirects; we only follow https redirects to known provider
+// and CDN hosts to keep this off the SSRF surface (a compromised/MITM'd provider
+// otherwise could redirect us to an arbitrary internal host).
+function isAllowedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  return (
+    h === 'itunes.apple.com' ||
+    h === 'openlibrary.org' ||
+    h === 'covers.openlibrary.org' ||
+    h === 'www.googleapis.com' ||
+    h === 'books.google.com' ||
+    h.endsWith('.googleusercontent.com') ||
+    /^is\d+-ssl\.mzstatic\.com$/.test(h) ||
+    h.endsWith('.mzstatic.com')
+  )
+}
+
 // ─── iTunes storefront ──────────────────────────────────────────────────────
 // iTunes search results depend on the storefront country. Matching it to the
 // app language greatly improves hit rate for non-US books (e.g. Italian titles).
@@ -111,9 +142,17 @@ function scheduleRetry(
 function fetchRaw(url: string): Promise<{ statusCode: number; location?: string; body: Buffer }> {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http
-    const req = mod.get(url, { timeout: 8000 }, (res) => {
+    const req = mod.get(url, { timeout: REQUEST_TIMEOUT_MS }, (res) => {
       const chunks: Buffer[] = []
-      res.on('data', (chunk: Buffer) => chunks.push(chunk))
+      let received = 0
+      res.on('data', (chunk: Buffer) => {
+        received += chunk.length
+        if (received > MAX_RESPONSE_BYTES) {
+          req.destroy(new Error(`Response exceeded ${MAX_RESPONSE_BYTES} bytes`))
+          return
+        }
+        chunks.push(chunk)
+      })
       res.on('end', () =>
         resolve({
           statusCode: res.statusCode ?? 0,
@@ -128,10 +167,29 @@ function fetchRaw(url: string): Promise<{ statusCode: number; location?: string;
   })
 }
 
-async function fetchUrl(url: string, maxRedirects = 4): Promise<Buffer> {
+/** Resolves a (possibly relative) redirect target and verifies it is https + an allowed host. */
+function resolveSafeRedirect(location: string, base: string): string | null {
+  try {
+    const target = new URL(location, base)
+    if (target.protocol !== 'https:' || !isAllowedHost(target.hostname)) {
+      debug(`[cover] Refusing redirect to disallowed location "${target.href}"`)
+      return null
+    }
+    return target.href
+  } catch (err) {
+    debug(`[cover] Malformed redirect "${location}": ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
+async function fetchUrl(url: string, maxRedirects = MAX_REDIRECTS): Promise<Buffer> {
   const result = await fetchRaw(url)
   if ((result.statusCode === 301 || result.statusCode === 302) && maxRedirects > 0) {
-    if (result.location) return fetchUrl(result.location, maxRedirects - 1)
+    if (result.location) {
+      const next = resolveSafeRedirect(result.location, url)
+      if (!next) throw new Error(`Blocked redirect from ${url}`)
+      return fetchUrl(next, maxRedirects - 1)
+    }
   }
   if (result.statusCode === 429) {
     throw new Error('HTTP 429 Too Many Requests')
@@ -140,6 +198,16 @@ async function fetchUrl(url: string, maxRedirects = 4): Promise<Buffer> {
     throw new Error(`HTTP ${result.statusCode} for ${url}`)
   }
   return result.body
+}
+
+// ─── JSON fetch helper ──────────────────────────────────────────────────────
+// Every provider does the same fetch → parse → object-guard dance. This wraps it
+// so each provider only owns the URL it builds and the shape it expects.
+async function fetchJson<T extends object>(url: string): Promise<T | null> {
+  const body = await fetchUrlWithRetry(url)
+  const json: unknown = JSON.parse(body.toString('utf-8'))
+  if (typeof json !== 'object' || json === null) return null
+  return json as T
 }
 
 // Exponential back-off on 429: 3s → 6s → 12s.
@@ -207,7 +275,7 @@ function matchScore(candidate: CoverCandidate, qTitle: string, qAuthor: string |
   if (titleScore < MIN_TITLE_SCORE) return 0
   if (qAuthor && candidate.author) {
     const authorScore = containment(qAuthor, candidate.author)
-    return titleScore * 0.75 + authorScore * 0.25
+    return titleScore * TITLE_WEIGHT + authorScore * AUTHOR_WEIGHT
   }
   return titleScore
 }
@@ -232,7 +300,7 @@ function pickBestMatch(
 
 /** Validates that a buffer is a real image (JPEG/PNG/GIF/WEBP), not an HTML error page. */
 function isValidImage(buf: Buffer): boolean {
-  if (buf.length < 500) return false
+  if (buf.length < MIN_IMAGE_BYTES) return false
   // JPEG
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true
   // PNG
@@ -249,9 +317,20 @@ function isValidImage(buf: Buffer): boolean {
   return false
 }
 
+/** Normalizes a raw ISBN; returns it only if it looks like an ISBN-10/13. */
+function normalizeIsbn(raw: string | undefined): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const cleaned = raw.replace(/[^0-9Xx]/g, '').toUpperCase()
+  return cleaned.length === 10 || cleaned.length === 13 ? cleaned : undefined
+}
+
 // ─── Search providers ─────────────────────────────────────────────────────────
 // Each returns up to a handful of candidates (image URL + the title/author it
 // belongs to) so the caller can verify the match before downloading.
+
+interface GoogleBooksSearch {
+  items?: { volumeInfo?: { title?: string; authors?: string[]; imageLinks?: { thumbnail?: string } } }[]
+}
 
 async function searchGoogleBooks(
   title: string,
@@ -261,14 +340,8 @@ async function searchGoogleBooks(
   if (author) query += `+inauthor:${encodeURIComponent(author)}`
   const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=5&fields=items(volumeInfo(title,authors,imageLinks/thumbnail))`
 
-  const body = await fetchUrlWithRetry(url)
-  const json = JSON.parse(body.toString('utf-8')) as unknown
-  if (typeof json !== 'object' || json === null) return []
-
-  const items =
-    (json as {
-      items?: { volumeInfo?: { title?: string; authors?: string[]; imageLinks?: { thumbnail?: string } } }[]
-    }).items ?? []
+  const json = await fetchJson<GoogleBooksSearch>(url)
+  const items = json?.items ?? []
 
   const candidates: CoverCandidate[] = []
   for (const item of items) {
@@ -284,6 +357,10 @@ async function searchGoogleBooks(
   return candidates
 }
 
+interface OpenLibrarySearch {
+  docs?: { title?: string; author_name?: string[]; cover_i?: number }[]
+}
+
 async function searchOpenLibrary(
   title: string,
   author: string | undefined
@@ -292,12 +369,8 @@ async function searchOpenLibrary(
   if (author) query += `&author=${encodeURIComponent(author)}`
   const url = `https://openlibrary.org/search.json?${query}&limit=5&fields=title,author_name,cover_i`
 
-  const body = await fetchUrlWithRetry(url)
-  const json = JSON.parse(body.toString('utf-8')) as unknown
-  if (typeof json !== 'object' || json === null) return []
-
-  const docs =
-    (json as { docs?: { title?: string; author_name?: string[]; cover_i?: number }[] }).docs ?? []
+  const json = await fetchJson<OpenLibrarySearch>(url)
+  const docs = json?.docs ?? []
 
   const candidates: CoverCandidate[] = []
   for (const doc of docs) {
@@ -311,22 +384,21 @@ async function searchOpenLibrary(
   return candidates
 }
 
+interface ItunesSearch {
+  results?: { trackName?: string; collectionName?: string; artistName?: string; artworkUrl100?: string }[]
+}
+
 async function searchItunes(
   title: string,
-  author: string | undefined
+  author: string | undefined,
+  country: string
 ): Promise<CoverCandidate[]> {
   let term = title
   if (author) term += ` ${author}`
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=ebook&limit=5&country=${itunesCountry}`
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=ebook&limit=5&country=${encodeURIComponent(country)}`
 
-  const body = await fetchUrlWithRetry(url)
-  const json = JSON.parse(body.toString('utf-8')) as unknown
-  if (typeof json !== 'object' || json === null) return []
-
-  const results =
-    (json as {
-      results?: { trackName?: string; collectionName?: string; artistName?: string; artworkUrl100?: string }[]
-    }).results ?? []
+  const json = await fetchJson<ItunesSearch>(url)
+  const results = json?.results ?? []
 
   const candidates: CoverCandidate[] = []
   for (const r of results) {
@@ -349,24 +421,34 @@ type DownloadResult =
   | { status: 'not-found' }
   | { status: 'error' }
 
-type Provider = (title: string, author: string | undefined) => Promise<CoverCandidate[]>
+type Provider = (
+  title: string,
+  author: string | undefined,
+  country: string
+) => Promise<CoverCandidate[]>
 
 const PROVIDERS: Array<{ name: string; search: Provider }> = [
   { name: 'iTunes', search: searchItunes },
-  { name: 'OpenLibrary', search: searchOpenLibrary },
-  { name: 'GoogleBooks', search: searchGoogleBooks }
+  { name: 'OpenLibrary', search: (title, author) => searchOpenLibrary(title, author) },
+  { name: 'GoogleBooks', search: (title, author) => searchGoogleBooks(title, author) }
 ]
 
 /** Fetches a cover directly by ISBN from Open Library — no search/matching needed. */
 async function tryIsbnCover(isbn: string): Promise<Buffer | null> {
   // `default=false` makes Open Library return 404 (not a blank placeholder) when missing.
-  const url = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`
+  // ISBN is renderer-controlled and interpolated into the URL path, so re-validate it.
+  const safeIsbn = normalizeIsbn(isbn)
+  if (!safeIsbn) {
+    debug(`[cover] Ignoring malformed ISBN "${isbn}"`)
+    return null
+  }
+  const url = `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(safeIsbn)}-L.jpg?default=false`
   try {
     const data = await fetchUrlWithRetry(url)
     return isValidImage(data) ? data : null
   } catch (err) {
     // A 404 (no cover for this ISBN) or transient failure — fall back to search providers.
-    debug(`[cover] ISBN ${isbn} lookup failed: ${err instanceof Error ? err.message : String(err)}`)
+    debug(`[cover] ISBN ${safeIsbn} lookup failed: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
 }
@@ -377,11 +459,15 @@ async function tryIsbnCover(isbn: string): Promise<Buffer | null> {
  * providers, accepting only a candidate that actually matches the book and is a
  * valid image. Distinguishes between "no match found" (not-found) and
  * "network/transient failure" (error) so the caller can decide whether to retry.
+ *
+ * `country` is captured once at enqueue time so a mid-queue locale change can't
+ * shift the iTunes storefront for an in-flight request.
  */
 async function downloadCoverData(
   title: string,
   author: string | undefined,
-  isbn?: string
+  isbn: string | undefined,
+  country: string
 ): Promise<DownloadResult> {
   let hadNetworkError = false
 
@@ -396,7 +482,7 @@ async function downloadCoverData(
   for (const provider of PROVIDERS) {
     let candidates: CoverCandidate[]
     try {
-      candidates = await provider.search(title, author)
+      candidates = await provider.search(title, author, country)
     } catch (err) {
       debug(`[cover] ${provider.name} error: ${err instanceof Error ? err.message : String(err)}`)
       hadNetworkError = true
@@ -429,6 +515,11 @@ async function downloadCoverData(
 
 // ─── Public cover API ─────────────────────────────────────────────────────────
 
+// Dedupes concurrent identical getCover calls: a second request for the same
+// cache key (e.g. the same book mounted twice in the grid) reuses the first
+// request's promise instead of scheduling its own network round-trip.
+const inFlight = new Map<string, Promise<string | null>>()
+
 export async function getCover(
   title: string,
   author: string | undefined,
@@ -450,10 +541,17 @@ export async function getCover(
     return null
   }
 
+  // Identical request already in flight — share its promise.
+  const existing = inFlight.get(key)
+  if (existing) return existing
+
+  // Capture the iTunes storefront now so a mid-flight locale change can't shift it.
+  const country = itunesCountry
+
   fs.mkdirSync(getCoverCacheDir(), { recursive: true })
 
-  return scheduleRequest(async () => {
-    const result = await downloadCoverData(title, author, isbn)
+  const work = scheduleRequest(async () => {
+    const result = await downloadCoverData(title, author, isbn, country)
 
     if (result.status === 'found') {
       debug(`[getCover] Successfully cached image (${result.data.length} bytes)`)
@@ -470,21 +568,37 @@ export async function getCover(
     // Network error — schedule retry, don't write negative cache
     scheduleRetry(key, title, author, isbn, 0)
     return null
-  }).catch((err) => {
-    console.error(`[getCover] Unexpected error for "${title}":`, err)
-    scheduleRetry(key, title, author, isbn, 0)
-    return null
   })
+    .catch((err) => {
+      console.error(`[getCover] Unexpected error for "${title}":`, err)
+      scheduleRetry(key, title, author, isbn, 0)
+      return null
+    })
+    .finally(() => {
+      inFlight.delete(key)
+    })
+
+  inFlight.set(key, work)
+  return work
 }
 
 /**
  * Starts the background retry loop. Call once after app is ready.
- * On successful retry, sends 'cover:updated' to the renderer.
+ * On successful retry, sends 'cover:updated' to the renderer with the cache
+ * key (so the renderer can match an edited book reliably) plus title/author
+ * (kept for back-compat). Returns a stop function that clears the interval.
  */
-export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void {
+export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): () => void {
   const LOOP_INTERVAL_MS = 15_000
 
-  setInterval(() => {
+  const sendCoverUpdated = (key: string, entry: RetryEntry, dataUrl: string): void => {
+    const win = getWindow()
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('cover:updated', entry.title, entry.author, dataUrl, key)
+    }
+  }
+
+  const handle = setInterval(() => {
     const now = Date.now()
 
     for (const [key, entry] of retryRegistry) {
@@ -496,7 +610,7 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void
 
       scheduleRequest(async () => {
         const cachePath = getCachePath(key)
-        const result = await downloadCoverData(entry.title, entry.author, entry.isbn)
+        const result = await downloadCoverData(entry.title, entry.author, entry.isbn, itunesCountry)
 
         if (result.status === 'found') {
           fs.mkdirSync(getCoverCacheDir(), { recursive: true })
@@ -505,7 +619,7 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void
           debug(`[cover] Retry #${nextAttempts} succeeded for "${entry.title}"`)
 
           const dataUrl = `data:image/jpeg;base64,${result.data.toString('base64')}`
-          getWindow()?.webContents.send('cover:updated', entry.title, entry.author, dataUrl)
+          sendCoverUpdated(key, entry, dataUrl)
           return
         }
 
@@ -534,6 +648,8 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): void
       })
     }
   }, LOOP_INTERVAL_MS)
+
+  return () => clearInterval(handle)
 }
 
 export async function clearCoverCache(): Promise<void> {
@@ -557,6 +673,14 @@ export interface BookMetadata {
 
 const metadataCache = new Map<string, BookMetadata | null>()
 
+interface OpenLibraryMetadataSearch {
+  docs?: { first_publish_year?: number; subject?: string[]; key?: string }[]
+}
+
+interface OpenLibraryWork {
+  description?: string | { value?: string }
+}
+
 async function searchOpenLibraryMetadata(
   title: string,
   author: string | undefined
@@ -566,11 +690,8 @@ async function searchOpenLibraryMetadata(
   const url = `https://openlibrary.org/search.json?${query}&limit=1&fields=first_publish_year,subject,key`
 
   try {
-    const body = await fetchUrlWithRetry(url)
-    const json = JSON.parse(body.toString('utf-8')) as unknown
-    if (typeof json !== 'object' || json === null) return null
-
-    const doc = (json as { docs?: [{ first_publish_year?: number; subject?: string[]; key?: string }] })?.docs?.[0]
+    const json = await fetchJson<OpenLibraryMetadataSearch>(url)
+    const doc = json?.docs?.[0]
     if (!doc) return null
 
     const year = doc.first_publish_year ? String(doc.first_publish_year) : undefined
@@ -579,12 +700,9 @@ async function searchOpenLibraryMetadata(
     let description: string | undefined
     if (doc.key) {
       try {
-        const workBody = await fetchUrlWithRetry(`https://openlibrary.org${doc.key}.json`)
-        const workJson = JSON.parse(workBody.toString('utf-8')) as unknown
-        if (typeof workJson === 'object' && workJson !== null) {
-          const desc = (workJson as { description?: string | { value?: string } }).description
-          description = typeof desc === 'string' ? desc : desc?.value
-        }
+        const workJson = await fetchJson<OpenLibraryWork>(`https://openlibrary.org${doc.key}.json`)
+        const desc = workJson?.description
+        description = typeof desc === 'string' ? desc : desc?.value
       } catch (err) {
         debug(`[searchOpenLibraryMetadata] Works fetch failed: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -600,6 +718,10 @@ async function searchOpenLibraryMetadata(
   }
 }
 
+interface GoogleBooksMetadataSearch {
+  items?: { volumeInfo?: { publishedDate?: string; categories?: string[]; description?: string } }[]
+}
+
 async function searchGoogleBooksMetadata(
   title: string,
   author: string | undefined
@@ -609,23 +731,8 @@ async function searchGoogleBooksMetadata(
   const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1&fields=items(volumeInfo(publishedDate,categories,description))`
 
   try {
-    const body = await fetchUrlWithRetry(url)
-    const json = JSON.parse(body.toString('utf-8')) as unknown
-    if (typeof json !== 'object' || json === null) return null
-
-    const volumeInfo = (
-      json as {
-        items?: [
-          {
-            volumeInfo?: {
-              publishedDate?: string
-              categories?: string[]
-              description?: string
-            }
-          }
-        ]
-      }
-    )?.items?.[0]?.volumeInfo
+    const json = await fetchJson<GoogleBooksMetadataSearch>(url)
+    const volumeInfo = json?.items?.[0]?.volumeInfo
 
     if (!volumeInfo) return null
 

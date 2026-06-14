@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import type { Collection } from './kindle'
 import type { CalibreBook } from './calibre'
+import { stripDocumentsPrefix } from './paths'
 
 function getDbPath(): string {
   return path.join(app.getPath('userData'), 'collections.db')
@@ -31,12 +32,19 @@ function initSchema(db: Database.Database): void {
   `)
 }
 
+interface CollectionRow {
+  id: string
+  name: string
+  source: string
+  bookCount: number
+}
+
 export function getCollections(): Collection[] {
   const db = openDb()
   try {
     initSchema(db)
     const rows = db
-      .prepare(
+      .prepare<[], CollectionRow>(
         `
         SELECT
           c.id,
@@ -49,7 +57,7 @@ export function getCollections(): Collection[] {
         ORDER BY c.name
       `
       )
-      .all() as Array<{ id: string; name: string; source: string; bookCount: number }>
+      .all()
 
     return rows.map((row) => ({
       id: row.id,
@@ -67,8 +75,10 @@ export function getCollectionBooks(collectionId: string): string[] {
   try {
     initSchema(db)
     const rows = db
-      .prepare('SELECT book_relpath FROM collection_books WHERE collection_id = ?')
-      .all(collectionId) as Array<{ book_relpath: string }>
+      .prepare<[string], { book_relpath: string }>(
+        'SELECT book_relpath FROM collection_books WHERE collection_id = ?'
+      )
+      .all(collectionId)
 
     return rows.map((row) => row.book_relpath)
   } finally {
@@ -81,8 +91,10 @@ export function getBookCollections(bookRelpath: string): string[] {
   try {
     initSchema(db)
     const rows = db
-      .prepare('SELECT collection_id FROM collection_books WHERE book_relpath = ?')
-      .all(bookRelpath) as Array<{ collection_id: string }>
+      .prepare<[string], { collection_id: string }>(
+        'SELECT collection_id FROM collection_books WHERE book_relpath = ?'
+      )
+      .all(bookRelpath)
 
     return rows.map((row) => row.collection_id)
   } finally {
@@ -90,12 +102,21 @@ export function getBookCollections(bookRelpath: string): string[] {
   }
 }
 
-export function getAllBookTags(): Map<string, string[]> {
+/**
+ * Builds the authoritative book-relpath → tags map for writing to the device.
+ *
+ * Every relpath in `knownRelpaths` is seeded with an empty array so that a book
+ * the user removed from all collections is written back with `tags: []` (the
+ * H1 fix: sync is authoritative, not additive-only). Tags from current
+ * collection membership are then layered on top. Books not in `knownRelpaths`
+ * that still have tags are also included, so manual DB membership is preserved.
+ */
+export function getAllBookTags(knownRelpaths: readonly string[] = []): Map<string, string[]> {
   const db = openDb()
   try {
     initSchema(db)
     const rows = db
-      .prepare(
+      .prepare<[], { book_relpath: string; name: string }>(
         `
         SELECT cb.book_relpath, c.name
         FROM collection_books cb
@@ -103,13 +124,17 @@ export function getAllBookTags(): Map<string, string[]> {
         ORDER BY cb.book_relpath
       `
       )
-      .all() as Array<{ book_relpath: string; name: string }>
+      .all()
 
     const result = new Map<string, string[]>()
+    // Seed every known device book with an explicit empty array.
+    for (const relpath of knownRelpaths) {
+      result.set(relpath, [])
+    }
+    // Layer current collection membership on top (immutable: never push in place).
     for (const row of rows) {
       const tags = result.get(row.book_relpath) ?? []
-      tags.push(row.name)
-      result.set(row.book_relpath, tags)
+      result.set(row.book_relpath, [...tags, row.name])
     }
     return result
   } finally {
@@ -154,7 +179,7 @@ export function addBookToCollection(collectionId: string, bookRelpath: string): 
   try {
     initSchema(db)
     db
-      .prepare(
+      .prepare<[string, string]>(
         `INSERT OR IGNORE INTO collection_books (collection_id, book_relpath) VALUES (?, ?)`
       )
       .run(collectionId, bookRelpath)
@@ -168,53 +193,76 @@ export function removeBookFromCollection(collectionId: string, bookRelpath: stri
   try {
     initSchema(db)
     db
-      .prepare(`DELETE FROM collection_books WHERE collection_id = ? AND book_relpath = ?`)
+      .prepare<[string, string]>(
+        `DELETE FROM collection_books WHERE collection_id = ? AND book_relpath = ?`
+      )
       .run(collectionId, bookRelpath)
   } finally {
     db.close()
   }
 }
 
+/**
+ * Imports Calibre tag-collections into the local store.
+ *
+ * H2 fix: this used to DELETE every `source='calibre'` collection and recreate
+ * it under a fresh UUID, which wiped manual additions and broke any UI state
+ * keyed on the old id on every sync. It now:
+ *   - upserts each Calibre tag by name, keeping its STABLE id (`ON CONFLICT(name)`),
+ *   - additively reconciles `collection_books` (INSERT OR IGNORE) so books the
+ *     user manually added to a Calibre-sourced collection survive the sync,
+ *   - drops only the Calibre collections whose tag no longer exists in the
+ *     export at all.
+ */
 export function importFromCalibre(calibreBooks: CalibreBook[]): void {
   const db = openDb()
   try {
     initSchema(db)
 
-    const deleteCalibreCollections = db.prepare(`DELETE FROM collections WHERE source = 'calibre'`)
-
-    const insertCollection = db.prepare(
+    const upsertCollection = db.prepare<[string, string]>(
       `INSERT INTO collections (id, name, source)
        VALUES (?, ?, 'calibre')
-       ON CONFLICT(name) DO NOTHING`
+       ON CONFLICT(name) DO UPDATE SET source = 'calibre'`
     )
 
-    const getCollectionByName = db.prepare(`SELECT id FROM collections WHERE name = ?`)
+    const getCollectionByName = db.prepare<[string], { id: string }>(
+      `SELECT id FROM collections WHERE name = ?`
+    )
 
-    const insertBook = db.prepare(
+    const insertBook = db.prepare<[string, string]>(
       `INSERT OR IGNORE INTO collection_books (collection_id, book_relpath) VALUES (?, ?)`
     )
 
-    const doImport = db.transaction(() => {
-      deleteCalibreCollections.run()
+    const listCalibreCollections = db.prepare<[], { id: string; name: string }>(
+      `SELECT id, name FROM collections WHERE source = 'calibre'`
+    )
 
+    const deleteById = db.prepare<[string]>(`DELETE FROM collections WHERE id = ?`)
+
+    const doImport = db.transaction(() => {
       const tagToId = new Map<string, string>()
+      const seenTags = new Set<string>()
 
       for (const book of calibreBooks) {
         for (const tag of book.tags) {
+          seenTags.add(tag)
           if (!tagToId.has(tag)) {
-            const id = crypto.randomUUID()
-            insertCollection.run(id, tag)
-            const row = getCollectionByName.get(tag) as { id: string } | undefined
-            tagToId.set(tag, row?.id ?? id)
+            // Keep the existing id when the collection already exists (stable id).
+            upsertCollection.run(crypto.randomUUID(), tag)
+            const row = getCollectionByName.get(tag)
+            if (row) tagToId.set(tag, row.id)
           }
 
-          const relpath = book.lpath.startsWith('documents/')
-            ? book.lpath.slice('documents/'.length)
-            : book.lpath
-
-          const collectionId = tagToId.get(tag)!
-          insertBook.run(collectionId, relpath)
+          const relpath = stripDocumentsPrefix(book.lpath)
+          const collectionId = tagToId.get(tag)
+          if (collectionId) insertBook.run(collectionId, relpath)
         }
+      }
+
+      // Remove Calibre collections whose tag vanished from the export entirely
+      // (their collection_books rows CASCADE-delete).
+      for (const collection of listCalibreCollections.all()) {
+        if (!seenTags.has(collection.name)) deleteById.run(collection.id)
       }
     })
 
