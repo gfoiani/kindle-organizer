@@ -8,37 +8,59 @@ Guidance for AI coding agents working in this repository. (Claude Code loads thi
 
 > The git repository root is this `app/` directory (the `.git` folder lives here, not in the parent).
 
+## Node version
+
+**Node 22 is required** (`package.json` pins `engines: ">=22 <23"`), and an `.nvmrc` in the repo root pins it too.
+
+**Always run `nvm use` before any `yarn` command** (`nvm install` on first setup to fetch Node 22). This is not optional:
+
+- `yarn` enforces the engine range and **refuses to run** on any other Node version.
+- The bundled Vite / Vitest toolchain is Node-22-only — on older Node it fails to load its config with `ERR_REQUIRE_ESM`, so `yarn test`, `yarn build`, and `yarn dev` all break.
+- Main-process code relies on Node 22 globals (`crypto.randomUUID` / `crypto.createHash` via global Web Crypto).
+
+CI runs on Node 22.
+
 ## Commands
 
 ```bash
+nvm use               # switch to Node 22 (REQUIRED — run before anything else)
 yarn install          # install deps; postinstall rebuilds native better-sqlite3
 yarn dev              # run the app in development (electron-vite)
 yarn type-check       # tsc --noEmit for tsconfig.json + tsconfig.node.json
+yarn test             # run the Vitest suite once (vitest run)
+yarn test:watch       # Vitest in watch mode
 yarn build            # production bundle
 yarn dist             # build + package (electron-builder); dist:mac / dist:win for one OS
 yarn rebuild          # rebuild better-sqlite3 native module if it breaks
 yarn download-model   # download the AI model for auto-classification (one-time)
 ```
 
-**Package manager: yarn (1.x) — use `yarn`, not `npm`.** A `yarn.lock` is committed; run scripts as `yarn <script>` (e.g. `yarn update-homebrew`).
+**Package manager: yarn (1.x) — use `yarn`, not `npm`.** A `yarn.lock` is committed; run scripts as `yarn <script>` (e.g. `yarn update-homebrew`). Remember `nvm use` first (see **Node version** above).
 
-There is **no test suite or test runner configured yet**, and no lint script. Validate changes with `yarn type-check` and a manual `yarn dev` run.
+A **Vitest** suite lives in `test/` — unit tests for the main-process logic (`covers`, `httpClient`, `requestScheduler`, `coverProtocol`, `coverSrc`, `calibre`, `paths`, `localCollections`, `collectionHierarchy`), with mocks in `test/setup/` (`electron-mock.ts`, `httpMock.ts`). There is no lint script. Validate changes with `yarn type-check`, `yarn test`, and a manual `yarn dev` run.
 
 ## Architecture
 
 Three Electron layers, kept strictly separated:
 
 - **`src/main/`** — main process (Node). All privileged work lives here:
-  - `index.ts` — bootstrap, window, starts the cover-retry loop and Kindle hot-plug watcher.
+  - `index.ts` — bootstrap, window; registers the `cover-cache://` scheme (privileged, before `ready`) and its protocol handler, starts the cover-retry loop and Kindle hot-plug watcher, and tears them down on `will-quit` (`cancelAllCovers`).
   - `ipc.ts` — the single registry of `ipcMain.handle` channels; the only bridge the renderer can call.
   - `kindle.ts` — drive detection (`systeminformation`), `documents/` scanning, filename→title sanitization, hot-plug watcher.
   - `calibre.ts` — read/write the device's `metadata.calibre` (atomic write).
   - `localCollections.ts` / `bookOverrides.ts` — better-sqlite3 stores in `userData/` (collections; user title/author edits).
-  - `covers.ts` — cover fetch (iTunes → Open Library → Google Books), file cache, rate limiter, background retry loop.
+  - **Cover subsystem** (split into focused modules):
+    - `covers.ts` — cover orchestration: `ensureCover` / `cancelCover` **never block on the network** — `ensureCover` returns a cache key + `ready` / `pending` / `missing` status and runs any download in the background; `cancelCover` aborts an in-flight download when a card scrolls away (interest-ref-counted). Owns the negative cache, the background retry loop (exponential back-off), and **key-only** `cover:updated` / `cover:cache-cleared` pushes to the renderer. Provider order iTunes → Open Library → Google Books.
+    - `coverPaths.ts` — single source of truth for the on-disk cache layout and the sha256 cache key. **Back-compat–sensitive: do not change the key derivation** (it would orphan every cached `<hash>.jpg`).
+    - `coverProtocol.ts` — custom `cover-cache://covers/<key>?v=<n>` protocol that streams cached JPEGs straight from disk to Chromium (replaces the old base64 data-URL delivery). Path-traversal guarded (bare-sha256 keys only); the scheme is registered **privileged before app `ready`** and handled inside `whenReady`.
+    - `httpClient.ts` — HTTP fetch with a typed error taxonomy (`HttpError` / `RateLimitError` / `NetworkError` / `AbortError`), the redirect **SSRF allow-list**, `Retry-After`-aware 429 back-off, and the `fetchJson` helper.
+    - `requestScheduler.ts` — concurrency-limited, **per-host** rate-limited scheduler. The scheduled unit is one HTTP round-trip, so different hosts run in parallel while same-host calls stay gap-limited; a 429 pauses only the offending host.
 - **`src/preload/`** — `contextBridge` exposes a typed `window.kindleAPI` (`api.ts`). Context isolation is on; the renderer has no direct Node access.
-- **`src/renderer/src/`** — React UI (`App.tsx` orchestrates state), components, the `useClassifier` hook, and the ML `classifier.worker.ts` Web Worker. i18n via `react-i18next`.
+- **`src/renderer/src/`** — React UI (`App.tsx` orchestrates state), components, the `useClassifier` hook, and the ML `classifier.worker.ts` Web Worker. i18n via `react-i18next`. `BooksGrid.tsx` is **row-virtualized** with `@tanstack/react-virtual`; cover `<img>`s use `cover-cache://` URLs (built by `utils/coverSrc.ts`), so `img-src cover-cache:` is allow-listed in the renderer CSP (`renderer/index.html`).
 
 Data flow: renderer → `window.kindleAPI.*` → `ipcRenderer.invoke` → `ipcMain.handle` in `ipc.ts` → a `src/main` module. Add a feature by adding the channel in `ipc.ts`, the wrapper + type in `preload/api.ts`, and the implementation in the relevant `src/main` module.
+
+Cover delivery is **not** IPC/base64: the renderer calls `ensureCover` (IPC) to trigger a background download and gets back a cache key + status; when the image lands, the main process pushes `cover:updated` (key only) and the renderer re-fetches the bytes over the `cover-cache://` protocol (a `?v=` query busts Chromium's `immutable` cache).
 
 ## Conventions
 
