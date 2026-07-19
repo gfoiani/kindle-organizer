@@ -125,6 +125,8 @@
     "sent": "Inviato al Kindle",
     "sendError": "Invio non riuscito",
     "connectToSend": "Collega un Kindle per inviare questo libro",
+    "willConvert": "Convertito in {{format}} prima dell'invio",
+    "emptyHint": "Suggerimento: trascina qui file EPUB o Kindle per aggiungerli alla libreria",
     "added_one": "{{count}} aggiunto",
     "added_other": "{{count}} aggiunti",
     "duplicate_one": "{{count}} già in libreria",

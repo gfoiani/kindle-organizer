@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { KindleBook, BookMetadata } from '../../../preload/api'
+import type { KindleBook, BookMetadata, KindleFormat } from '../../../preload/api'
 import type { DisplayBook } from '../utils/mergeBooks'
 import { formatSize } from '../utils/format'
 import { useFocusTrap } from '../hooks/useFocusTrap'
@@ -41,9 +41,22 @@ export function BookDetailSidebar({
   const [sendPhase, setSendPhase] = useState<SendPhase>('idle')
   const [sendPercent, setSendPercent] = useState(0)
   const [isRemoving, setIsRemoving] = useState(false)
+  const [targetFormat, setTargetFormat] = useState<KindleFormat | null>(null)
 
   const isLibraryOnly = Boolean(book.libraryId) && !book.onDevice
   const isSending = sendPhase === 'converting' || sendPhase === 'uploading'
+  // A library-only EPUB is converted before sending; already-Kindle formats aren't.
+  const willConvert = isLibraryOnly && book.extension === 'EPUB'
+
+  // Load the configured target format so the send action can show what the EPUB
+  // will be converted to (reflects a format change in Settings).
+  useEffect(() => {
+    if (!willConvert) return
+    window.kindleAPI
+      .getFormat()
+      .then(setTargetFormat)
+      .catch((err) => console.error('Failed to load conversion format:', err))
+  }, [willConvert])
 
   // Follow convert/upload progress pushes for THIS book only.
   useEffect(() => {
@@ -296,6 +309,12 @@ export function BookDetailSidebar({
                       style={{ width: `${sendPercent}%` }}
                     />
                   </div>
+                )}
+
+                {willConvert && targetFormat && sendPhase === 'idle' && (
+                  <p className="text-gray-500 text-xs">
+                    {t('library.willConvert', { format: targetFormat.toUpperCase() })}
+                  </p>
                 )}
 
                 {!mountpoint && (

@@ -75,6 +75,8 @@
     "sent": "Sent to Kindle",
     "sendError": "Send failed",
     "connectToSend": "Connect a Kindle to send this book",
+    "willConvert": "Converted to {{format}} before sending",
+    "emptyHint": "Tip: drag EPUB or Kindle files here to add them to your library",
     "added_one": "{{count}} added",
     "added_other": "{{count}} added",
     "duplicate_one": "{{count}} already in library",

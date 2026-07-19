@@ -257,6 +257,7 @@ function EmptyState({ kindleConnected }: { kindleConnected: boolean }) {
           <p className="text-gray-400 text-sm mt-1">{t('emptyState.connectKindle')}</p>
         </>
       )}
+      <p className="text-gray-500 text-xs mt-3">{t('library.emptyHint')}</p>
     </div>
   )
 }
