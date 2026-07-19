@@ -39,6 +39,8 @@ yarn download-model   # download the AI model for auto-classification (one-time)
 
 A **Vitest** suite lives in `test/` — unit tests for the main-process logic (`covers`, `httpClient`, `requestScheduler`, `coverProtocol`, `coverSrc`, `calibre`, `paths`, `localCollections`, `collectionHierarchy`), with mocks in `test/setup/` (`electron-mock.ts`, `httpMock.ts`). There is no lint script. Validate changes with `yarn type-check`, `yarn test`, and a manual `yarn dev` run.
 
+**Shipping a release:** see [`RELEASE.md`](RELEASE.md) for the full runbook. In short: validate → update `CHANGELOG.md` → `yarn release <version>` (bumps, tags, pushes → CI builds & publishes the GitHub Release, then updates the Homebrew tap). The landing site (`../site`) auto-updates from `releases/latest`, so it needs no per-release change.
+
 ## Architecture
 
 Three Electron layers, kept strictly separated:
