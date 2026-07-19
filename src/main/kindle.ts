@@ -35,7 +35,8 @@ export interface Collection {
 }
 
 const KINDLE_IDENTIFIERS = ['kindle', 'amazon']
-const SUPPORTED_EXTENSIONS = ['.mobi', '.azw', '.azw3', '.kfx', '.epub', '.pdf']
+/** File formats a Kindle can hold — used both to scan the device and to filter dropped files. */
+export const SUPPORTED_EXTENSIONS = ['.mobi', '.azw', '.azw3', '.kfx', '.epub', '.pdf']
 
 export async function detectKindleDrives(): Promise<KindleDrive[]> {
   const devices = await si.blockDevices()

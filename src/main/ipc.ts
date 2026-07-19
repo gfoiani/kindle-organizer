@@ -6,6 +6,8 @@ import { applyOverrides, setOverride } from './bookOverrides'
 import { setMenuLabels } from './menu'
 import { stripDocumentsBase } from './paths'
 import { getSettings, setKindleFormat, isKindleFormat, type KindleFormat } from './settings'
+import { addDroppedFiles, removeLibraryBook } from './libraryService'
+import { listLibraryBooks } from './library'
 import {
   getCollections,
   getCollectionBooks,
@@ -304,6 +306,27 @@ export function registerIpcHandlers(): void {
     withErrorLogging('kindle:set-format', async (_, format: unknown) => {
       assertKindleFormat(format, 'format')
       setKindleFormat(format)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:add-books',
+    withErrorLogging('kindle:add-books', async (_, filePaths: unknown) => {
+      assertStringArray(filePaths, 'filePaths')
+      return addDroppedFiles(filePaths)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:get-library',
+    withErrorLogging('kindle:get-library', async () => listLibraryBooks())
+  )
+
+  ipcMain.handle(
+    'kindle:remove-library-book',
+    withErrorLogging('kindle:remove-library-book', async (_, id: unknown) => {
+      assertString(id, 'id')
+      await removeLibraryBook(id)
     })
   )
 

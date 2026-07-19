@@ -2,6 +2,8 @@ import { ipcRenderer, webUtils } from 'electron'
 import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
 import type { BookMetadata, CoverStatus, EnsureCoverResult } from '../main/covers'
 import type { KindleFormat } from '../main/settings'
+import type { LibraryBook } from '../main/library'
+import type { AddResult } from '../main/libraryService'
 
 export type {
   KindleDrive,
@@ -10,7 +12,9 @@ export type {
   BookMetadata,
   CoverStatus,
   EnsureCoverResult,
-  KindleFormat
+  KindleFormat,
+  LibraryBook,
+  AddResult
 }
 
 export interface KindleAPI {
@@ -53,6 +57,12 @@ export interface KindleAPI {
    * replacement. Synchronous — returns the path directly, not a Promise.
    */
   getPathForFile: (file: File) => string
+  /** Imports dropped files into the staging library; one AddResult per input path. */
+  addBooks: (filePaths: string[]) => Promise<AddResult[]>
+  /** Lists every book in the staging library (newest first). */
+  getLibrary: () => Promise<LibraryBook[]>
+  /** Removes a library book: its DB row, conversions, and on-disk files. */
+  removeLibraryBook: (id: string) => Promise<void>
   /** Rebuilds the native menu's custom labels in the active UI language. */
   setMenuLabels: (about: string, learnMore: string) => Promise<void>
   /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
@@ -138,6 +148,12 @@ export const kindleAPI: KindleAPI = {
   setFormat: (format: KindleFormat) => ipcRenderer.invoke('kindle:set-format', format),
 
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+
+  addBooks: (filePaths: string[]) => ipcRenderer.invoke('kindle:add-books', filePaths),
+
+  getLibrary: () => ipcRenderer.invoke('kindle:get-library'),
+
+  removeLibraryBook: (id: string) => ipcRenderer.invoke('kindle:remove-library-book', id),
 
   setMenuLabels: (about: string, learnMore: string) =>
     ipcRenderer.invoke('menu:set-labels', about, learnMore),
