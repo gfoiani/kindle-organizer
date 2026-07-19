@@ -10,20 +10,20 @@ Guidance for AI coding agents working in this repository. (Claude Code loads thi
 
 ## Node version
 
-**Node 22 is required** (`package.json` pins `engines: ">=22 <23"`), and an `.nvmrc` in the repo root pins it too.
+**Node 22 or 24 is required** (`package.json` pins `engines: ">=22 <23 || >=24 <25"` — both LTS lines; the odd/EOL 23 is excluded). The repo `.nvmrc` pins **24** for local dev.
 
-**Always run `nvm use` before any `yarn` command** (`nvm install` on first setup to fetch Node 22). This is not optional:
+**Always run `nvm use` before any `yarn` command** (`nvm install` on first setup to fetch the `.nvmrc` version, Node 24). This is not optional:
 
-- `yarn` enforces the engine range and **refuses to run** on any other Node version.
-- The bundled Vite / Vitest toolchain is Node-22-only — on older Node it fails to load its config with `ERR_REQUIRE_ESM`, so `yarn test`, `yarn build`, and `yarn dev` all break.
-- Main-process code relies on Node 22 globals (`crypto.randomUUID` / `crypto.createHash` via global Web Crypto).
+- `yarn` enforces the engine range and **refuses to run** on any out-of-range Node version (e.g. a default Node 18).
+- The bundled Vite / Vitest toolchain needs Node 22+ — on older Node it fails to load its config with `ERR_REQUIRE_ESM`, so `yarn test`, `yarn build`, and `yarn dev` all break.
+- Main-process code relies on Node 22+ globals (`crypto.randomUUID` / `crypto.createHash` via global Web Crypto).
 
-CI runs on Node 22.
+CI runs on Node 22 (`.github/workflows/build.yml`); local dev uses Node 24 via `.nvmrc`. Both are covered by the engine range.
 
 ## Commands
 
 ```bash
-nvm use               # switch to Node 22 (REQUIRED — run before anything else)
+nvm use               # switch to the .nvmrc Node (24) (REQUIRED — run before anything else)
 yarn install          # install deps; postinstall rebuilds native better-sqlite3
 yarn dev              # run the app in development (electron-vite)
 yarn type-check       # tsc --noEmit for tsconfig.json + tsconfig.node.json
@@ -76,5 +76,5 @@ Cover delivery is **not** IPC/base64: the renderer calls `ensureCover` (IPC) to 
 - `better-sqlite3` is a native module — run `yarn rebuild` if it fails to load after dependency or Node/Electron changes.
 - The AI model is **not bundled**; run `yarn download-model` before using auto-classification (CI does this too).
 - `yarn type-check` runs two passes: `tsconfig.json` (renderer + preload) and `tsconfig.node.json` (`src/main`, bundler resolution). Main-process code **is** type-checked now — but `electron-vite` still bundles via esbuild without type-checking, so always run `yarn type-check` (a green `yarn build` does not imply type safety).
-- `crypto.randomUUID()` / `crypto.createHash` in main use Node's global Web Crypto (Node 22) — no explicit import needed, this is intentional.
+- `crypto.randomUUID()` / `crypto.createHash` in main use Node's global Web Crypto (Node 22+) — no explicit import needed, this is intentional.
 - `electron-vite` bundles via esbuild without type-checking, so a successful `yarn build` does not imply type safety — run `yarn type-check`.
