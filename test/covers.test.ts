@@ -11,7 +11,13 @@ const { httpGet, httpsGet } = vi.hoisted(() => ({ httpGet: vi.fn(), httpsGet: vi
 vi.mock('http', () => ({ get: httpGet }))
 vi.mock('https', () => ({ get: httpsGet }))
 
-import { cancelAllCovers, clearCoverCache, ensureCover, setCoverWindowProvider } from '../src/main/covers'
+import {
+  cancelAllCovers,
+  clearCoverCache,
+  ensureCover,
+  importLocalCover,
+  setCoverWindowProvider
+} from '../src/main/covers'
 import { httpGetImpl, mockRoute, resetHttpMock } from './setup/httpMock'
 
 let userData: string
@@ -190,6 +196,74 @@ describe('ensureCover — terminal not-found → negative cache + notifyCoverMis
     // A 0-byte negative-cache marker is on disk, so a later ensureCover is a hit.
     const onDisk = readFileSync(cachePathFor(title, author))
     expect(onDisk.length).toBe(0)
+  })
+})
+
+describe('importLocalCover — seed the cache from an embedded image', () => {
+  test('writes the image under the (title, author) key and returns that key', async () => {
+    // Arrange
+    const title = 'Locally Sourced'
+    const author = 'Anna Author'
+    const image = fakeJpeg()
+
+    // Act
+    const key = await importLocalCover(title, author, image)
+
+    // Assert
+    expect(key).toBe(cacheKeyFor(title, author))
+    const onDisk = readFileSync(cachePathFor(title, author))
+    expect(onDisk.equals(image)).toBe(true)
+    expect(httpGet).not.toHaveBeenCalled()
+    expect(httpsGet).not.toHaveBeenCalled()
+  })
+
+  test('a subsequent ensureCover(title, author) is a "ready" hit with no network', async () => {
+    const title = 'Seeded Book'
+    const author = 'Someone'
+    await importLocalCover(title, author, fakeJpeg())
+
+    const result = await ensureCover(title, author)
+
+    expect(result).toEqual({ key: cacheKeyFor(title, author), status: 'ready' })
+    expect(httpGet).not.toHaveBeenCalled()
+    expect(httpsGet).not.toHaveBeenCalled()
+  })
+
+  test('returns null and writes nothing for an invalid image buffer', async () => {
+    const title = 'Bad Image'
+    const author = 'Nobody'
+
+    const key = await importLocalCover(title, author, Buffer.from('not an image'))
+
+    expect(key).toBeNull()
+    expect(existsSync(cachePathFor(title, author))).toBe(false)
+  })
+
+  test('pushes ("cover:updated", key) so the renderer re-fetches the bytes', async () => {
+    const title = 'Push Me'
+    const author = 'Author X'
+    const send = vi.fn()
+    setCoverWindowProvider(() => ({ isDestroyed: () => false, webContents: { send } }) as never)
+
+    const key = await importLocalCover(title, author, fakeJpeg())
+
+    expect(send).toHaveBeenCalledWith('cover:updated', key)
+  })
+
+  test('overwrites a negative-cache marker with the real image', async () => {
+    const title = 'Was Missing'
+    const author = 'Now Found'
+    // Seed a 0-byte negative-cache marker first.
+    const cachePath = cachePathFor(title, author)
+    mkdirSync(path.dirname(cachePath), { recursive: true })
+    writeFileSync(cachePath, Buffer.alloc(0))
+    expect((await ensureCover(title, author)).status).toBe('missing')
+
+    // Importing a real cover replaces the marker.
+    await importLocalCover(title, author, fakeJpeg())
+
+    expect(readFileSync(cachePath).length).toBeGreaterThan(0)
+    expect((await ensureCover(title, author)).status).toBe('ready')
   })
 })
 

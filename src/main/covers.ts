@@ -431,6 +431,39 @@ const interest = new Map<string, number>()
 const retryControllers = new Set<AbortController>()
 
 /**
+ * Seeds the cover cache directly from a locally-extracted image (e.g. an EPUB's
+ * embedded cover), bypassing the network. Because the key is derived from
+ * (title, author) exactly as in ensureCover, a later ensureCover(title, author)
+ * finds this file already on disk and serves it via cover-cache:// with no
+ * network round-trip.
+ *
+ * Returns the cache key on success, or null when the buffer is not a valid image
+ * (the caller then falls back to the normal online lookup). The key omits ISBN:
+ * library books are keyed on (title, author), so the renderer must read them back
+ * with ensureCover(title, author) (no isbn) for the keys to agree.
+ */
+export async function importLocalCover(
+  title: string,
+  author: string | undefined,
+  image: Buffer
+): Promise<string | null> {
+  if (!isValidImage(image)) return null
+
+  const key = getCacheKey(title, author)
+
+  // Cancel any in-flight download and drop any scheduled retry for this key so a
+  // losing network race can't later overwrite the imported image (or stamp a
+  // negative-cache marker over it).
+  controllers.get(key)?.abort()
+  retryRegistry.delete(key)
+
+  await fs.ensureDir(getCoverCacheDir())
+  await fs.writeFile(getCachePath(key), image)
+  notifyCoverReady(key)
+  return key
+}
+
+/**
  * Ensures a cover for (title, author, isbn) exists on disk, returning its cache
  * key and current status WITHOUT ever blocking on the network:
  *  - 'ready'   → a cached image is on disk (serve it via cover-cache://covers/<key>)
