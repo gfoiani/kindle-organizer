@@ -1,8 +1,8 @@
 import { ipcRenderer } from 'electron'
 import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
-import type { BookMetadata } from '../main/covers'
+import type { BookMetadata, CoverStatus, EnsureCoverResult } from '../main/covers'
 
-export type { KindleDrive, KindleBook, Collection, BookMetadata }
+export type { KindleDrive, KindleBook, Collection, BookMetadata, CoverStatus, EnsureCoverResult }
 
 export interface KindleAPI {
   detectKindleDrives: () => Promise<KindleDrive[]>
@@ -23,7 +23,10 @@ export interface KindleAPI {
   ) => Promise<Collection[]>
   /** Returns a relpath → collection-name[] map for the given known book relpaths. */
   getBookTags: (relpaths: string[]) => Promise<Record<string, string[]>>
-  getCover: (title: string, author?: string, isbn?: string) => Promise<string | null>
+  /** Ensures a cover exists on disk; returns its cache key + status. Never blocks on the network. */
+  ensureCover: (title: string, author?: string, isbn?: string) => Promise<EnsureCoverResult>
+  /** Cancels an in-flight cover download (e.g. when a card scrolls out of view). */
+  cancelCover: (title: string, author?: string, isbn?: string) => void
   getBookMetadata: (title: string, author?: string) => Promise<BookMetadata | null>
   updateBookMetadata: (bookRelpath: string, title: string, author?: string) => Promise<void>
   clearCoverCache: () => Promise<void>
@@ -36,18 +39,13 @@ export interface KindleAPI {
   /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
   onShowAbout: (callback: () => void) => () => void
   /**
-   * Subscribe to cover updates pushed by the retry loop. The callback receives
-   * the book's title/author (back-compat) plus the cover cache key, which lets
-   * the renderer match an edited book reliably. Returns an unsubscribe function.
+   * Subscribe to cover-ready pushes from the main process. The callback receives
+   * only the cache key; the renderer re-fetches the image over cover-cache://.
+   * Returns an unsubscribe function.
    */
-  onCoverUpdated: (
-    callback: (
-      title: string,
-      author: string | undefined,
-      dataUrl: string,
-      cacheKey: string
-    ) => void
-  ) => () => void
+  onCoverUpdated: (callback: (cacheKey: string) => void) => () => void
+  /** Fired after the cover cache is cleared so the renderer can reset. Returns unsubscribe. */
+  onCoverCacheCleared: (callback: () => void) => () => void
   /** Fired when a Kindle is plugged in while the app is running. */
   onKindleConnected: (callback: (drive: KindleDrive) => void) => () => void
   /** Fired when a Kindle is unplugged while the app is running. */
@@ -90,8 +88,12 @@ export const kindleAPI: KindleAPI = {
 
   getBookTags: (relpaths: string[]) => ipcRenderer.invoke('kindle:get-book-tags', relpaths),
 
-  getCover: (title: string, author?: string, isbn?: string) =>
-    ipcRenderer.invoke('kindle:get-cover', title, author, isbn),
+  ensureCover: (title: string, author?: string, isbn?: string) =>
+    ipcRenderer.invoke('kindle:ensure-cover', title, author, isbn),
+
+  cancelCover: (title: string, author?: string, isbn?: string) => {
+    void ipcRenderer.invoke('kindle:cancel-cover', title, author, isbn)
+  },
 
   getBookMetadata: (title: string, author?: string) =>
     ipcRenderer.invoke('kindle:get-book-metadata', title, author),
@@ -115,15 +117,15 @@ export const kindleAPI: KindleAPI = {
   },
 
   onCoverUpdated: (callback) => {
-    const handler = (
-      _: Electron.IpcRendererEvent,
-      title: string,
-      author: string | undefined,
-      dataUrl: string,
-      cacheKey: string
-    ) => callback(title, author, dataUrl, cacheKey)
+    const handler = (_: Electron.IpcRendererEvent, cacheKey: string) => callback(cacheKey)
     ipcRenderer.on('cover:updated', handler)
     return () => ipcRenderer.removeListener('cover:updated', handler)
+  },
+
+  onCoverCacheCleared: (callback) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('cover:cache-cleared', handler)
+    return () => ipcRenderer.removeListener('cover:cache-cleared', handler)
   },
 
   onKindleConnected: (callback) => {

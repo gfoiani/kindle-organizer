@@ -1,9 +1,10 @@
-import * as crypto from 'crypto'
 import * as fs from 'fs-extra'
-import * as http from 'http'
-import * as https from 'https'
 import * as path from 'path'
-import { app, BrowserWindow } from 'electron'
+import { app } from 'electron'
+import type { BrowserWindow } from 'electron'
+import { getCoverCacheDir, getCachePath, getCacheKey, normalizeIsbn } from './coverPaths'
+import { fetchJson, fetchUrlWithRetry } from './httpClient'
+import { resetScheduler } from './requestScheduler'
 
 // Dev-only verbose logging. Silent in packaged builds.
 const debug = (...args: unknown[]): void => {
@@ -11,35 +12,11 @@ const debug = (...args: unknown[]): void => {
 }
 
 // ─── Tuning knobs ─────────────────────────────────────────────────────────────
-/** Per-request socket timeout. */
-const REQUEST_TIMEOUT_MS = 8000
-/** Max HTTP redirects we will follow before giving up. */
-const MAX_REDIRECTS = 4
-/** Hard cap on a single response body so a hostile/buggy host can't exhaust memory. */
-const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 /** Relative weights when scoring a candidate by title vs author similarity. */
 const TITLE_WEIGHT = 0.75
 const AUTHOR_WEIGHT = 0.25
 /** A buffer smaller than this can't be a real cover image (it's an error page). */
 const MIN_IMAGE_BYTES = 500
-
-// ─── Redirect / host allow-list ─────────────────────────────────────────────
-// fetchUrl follows redirects; we only follow https redirects to known provider
-// and CDN hosts to keep this off the SSRF surface (a compromised/MITM'd provider
-// otherwise could redirect us to an arbitrary internal host).
-function isAllowedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase()
-  return (
-    h === 'itunes.apple.com' ||
-    h === 'openlibrary.org' ||
-    h === 'covers.openlibrary.org' ||
-    h === 'www.googleapis.com' ||
-    h === 'books.google.com' ||
-    h.endsWith('.googleusercontent.com') ||
-    /^is\d+-ssl\.mzstatic\.com$/.test(h) ||
-    h.endsWith('.mzstatic.com')
-  )
-}
 
 // ─── iTunes storefront ──────────────────────────────────────────────────────
 // iTunes search results depend on the storefront country. Matching it to the
@@ -53,49 +30,12 @@ export function setCoverLocale(lang: string): void {
   debug(`[cover] iTunes storefront set to "${itunesCountry}" for lang "${lang}"`)
 }
 
-// ─── Rate limiter ─────────────────────────────────────────────────────────────
-// Serial queue: one outbound request at a time, with a guaranteed minimum gap.
-// On 429 all queued requests also wait (globalPauseUntil).
-const MIN_GAP_MS = 600
-
-let lastRequestStart = 0
-let globalPauseUntil = 0
-let requestChain: Promise<void> = Promise.resolve()
-
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-function scheduleRequest<T>(fn: () => Promise<T>): Promise<T> {
-  const result: Promise<T> = requestChain.then(async () => {
-    const pauseWait = Math.max(0, globalPauseUntil - Date.now())
-    const gapWait = Math.max(0, lastRequestStart + MIN_GAP_MS - Date.now())
-    const wait = Math.max(pauseWait, gapWait)
-    if (wait > 0) await delay(wait)
-    lastRequestStart = Date.now()
-    return fn()
-  })
-  // Swallow errors so a failed request doesn't break the chain for subsequent ones
-  requestChain = result.then(
-    () => {},
-    () => {}
-  )
-  return result
-}
-
-// ─── Cache helpers ────────────────────────────────────────────────────────────
-
-function getCoverCacheDir(): string {
-  return path.join(app.getPath('userData'), 'covers')
-}
-
-function getCacheKey(title: string, author: string | undefined): string {
-  const normalized = `${title.toLowerCase().trim()}|${(author ?? '').toLowerCase().trim()}`
-  return crypto.createHash('sha256').update(normalized).digest('hex')
-}
-
-function getCachePath(key: string): string {
-  return path.join(getCoverCacheDir(), `${key}.jpg`)
+// ─── Abort helper ─────────────────────────────────────────────────────────────
+// Cancellation flows as an AbortError (name-matched so it survives realm/module
+// boundaries). It must NEVER be treated as a network failure — an aborted
+// download schedules no retry and writes no negative cache.
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError'
 }
 
 // ─── Retry registry ───────────────────────────────────────────────────────────
@@ -135,100 +75,6 @@ function scheduleRetry(
   debug(
     `[cover] Scheduled retry #${prevAttempts + 1} for "${title}" in ${RETRY_DELAYS_MS[prevAttempts] / 1000}s`
   )
-}
-
-// ─── HTTP fetch ───────────────────────────────────────────────────────────────
-
-function fetchRaw(url: string): Promise<{ statusCode: number; location?: string; body: Buffer }> {
-  return new Promise((resolve, reject) => {
-    const mod = url.startsWith('https') ? https : http
-    const req = mod.get(url, { timeout: REQUEST_TIMEOUT_MS }, (res) => {
-      const chunks: Buffer[] = []
-      let received = 0
-      res.on('data', (chunk: Buffer) => {
-        received += chunk.length
-        if (received > MAX_RESPONSE_BYTES) {
-          req.destroy(new Error(`Response exceeded ${MAX_RESPONSE_BYTES} bytes`))
-          return
-        }
-        chunks.push(chunk)
-      })
-      res.on('end', () =>
-        resolve({
-          statusCode: res.statusCode ?? 0,
-          location: res.headers.location,
-          body: Buffer.concat(chunks)
-        })
-      )
-      res.on('error', reject)
-    })
-    req.on('timeout', () => req.destroy(new Error('Request timed out')))
-    req.on('error', reject)
-  })
-}
-
-/** Resolves a (possibly relative) redirect target and verifies it is https + an allowed host. */
-function resolveSafeRedirect(location: string, base: string): string | null {
-  try {
-    const target = new URL(location, base)
-    if (target.protocol !== 'https:' || !isAllowedHost(target.hostname)) {
-      debug(`[cover] Refusing redirect to disallowed location "${target.href}"`)
-      return null
-    }
-    return target.href
-  } catch (err) {
-    debug(`[cover] Malformed redirect "${location}": ${err instanceof Error ? err.message : String(err)}`)
-    return null
-  }
-}
-
-async function fetchUrl(url: string, maxRedirects = MAX_REDIRECTS): Promise<Buffer> {
-  const result = await fetchRaw(url)
-  if ((result.statusCode === 301 || result.statusCode === 302) && maxRedirects > 0) {
-    if (result.location) {
-      const next = resolveSafeRedirect(result.location, url)
-      if (!next) throw new Error(`Blocked redirect from ${url}`)
-      return fetchUrl(next, maxRedirects - 1)
-    }
-  }
-  if (result.statusCode === 429) {
-    throw new Error('HTTP 429 Too Many Requests')
-  }
-  if (result.statusCode < 200 || result.statusCode >= 300) {
-    throw new Error(`HTTP ${result.statusCode} for ${url}`)
-  }
-  return result.body
-}
-
-// ─── JSON fetch helper ──────────────────────────────────────────────────────
-// Every provider does the same fetch → parse → object-guard dance. This wraps it
-// so each provider only owns the URL it builds and the shape it expects.
-async function fetchJson<T extends object>(url: string): Promise<T | null> {
-  const body = await fetchUrlWithRetry(url)
-  const json: unknown = JSON.parse(body.toString('utf-8'))
-  if (typeof json !== 'object' || json === null) return null
-  return json as T
-}
-
-// Exponential back-off on 429: 3s → 6s → 12s.
-// Also sets globalPauseUntil so all queued requests respect the cooldown.
-const BACKOFF_DELAYS = [3000, 6000, 12000]
-
-async function fetchUrlWithRetry(url: string): Promise<Buffer> {
-  for (let attempt = 0; attempt <= BACKOFF_DELAYS.length; attempt++) {
-    try {
-      return await fetchUrl(url)
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('HTTP 429') && attempt < BACKOFF_DELAYS.length) {
-        const backoff = BACKOFF_DELAYS[attempt]
-        globalPauseUntil = Date.now() + backoff
-        await delay(backoff)
-        continue
-      }
-      throw err
-    }
-  }
-  throw new Error('Max retries exceeded')
 }
 
 // ─── Match verification ───────────────────────────────────────────────────────
@@ -317,13 +163,6 @@ function isValidImage(buf: Buffer): boolean {
   return false
 }
 
-/** Normalizes a raw ISBN; returns it only if it looks like an ISBN-10/13. */
-function normalizeIsbn(raw: string | undefined): string | undefined {
-  if (typeof raw !== 'string') return undefined
-  const cleaned = raw.replace(/[^0-9Xx]/g, '').toUpperCase()
-  return cleaned.length === 10 || cleaned.length === 13 ? cleaned : undefined
-}
-
 // ─── Search providers ─────────────────────────────────────────────────────────
 // Each returns up to a handful of candidates (image URL + the title/author it
 // belongs to) so the caller can verify the match before downloading.
@@ -334,13 +173,14 @@ interface GoogleBooksSearch {
 
 async function searchGoogleBooks(
   title: string,
-  author: string | undefined
+  author: string | undefined,
+  signal?: AbortSignal
 ): Promise<CoverCandidate[]> {
   let query = `intitle:${encodeURIComponent(title)}`
   if (author) query += `+inauthor:${encodeURIComponent(author)}`
   const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=5&fields=items(volumeInfo(title,authors,imageLinks/thumbnail))`
 
-  const json = await fetchJson<GoogleBooksSearch>(url)
+  const json = await fetchJson<GoogleBooksSearch>(url, signal)
   const items = json?.items ?? []
 
   const candidates: CoverCandidate[] = []
@@ -363,13 +203,14 @@ interface OpenLibrarySearch {
 
 async function searchOpenLibrary(
   title: string,
-  author: string | undefined
+  author: string | undefined,
+  signal?: AbortSignal
 ): Promise<CoverCandidate[]> {
   let query = `title=${encodeURIComponent(title)}`
   if (author) query += `&author=${encodeURIComponent(author)}`
   const url = `https://openlibrary.org/search.json?${query}&limit=5&fields=title,author_name,cover_i`
 
-  const json = await fetchJson<OpenLibrarySearch>(url)
+  const json = await fetchJson<OpenLibrarySearch>(url, signal)
   const docs = json?.docs ?? []
 
   const candidates: CoverCandidate[] = []
@@ -391,13 +232,14 @@ interface ItunesSearch {
 async function searchItunes(
   title: string,
   author: string | undefined,
-  country: string
+  country: string,
+  signal?: AbortSignal
 ): Promise<CoverCandidate[]> {
   let term = title
   if (author) term += ` ${author}`
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=ebook&limit=5&country=${encodeURIComponent(country)}`
 
-  const json = await fetchJson<ItunesSearch>(url)
+  const json = await fetchJson<ItunesSearch>(url, signal)
   const results = json?.results ?? []
 
   const candidates: CoverCandidate[] = []
@@ -424,32 +266,43 @@ type DownloadResult =
 type Provider = (
   title: string,
   author: string | undefined,
-  country: string
+  country: string,
+  signal?: AbortSignal
 ) => Promise<CoverCandidate[]>
 
 const PROVIDERS: Array<{ name: string; search: Provider }> = [
   { name: 'iTunes', search: searchItunes },
-  { name: 'OpenLibrary', search: (title, author) => searchOpenLibrary(title, author) },
-  { name: 'GoogleBooks', search: (title, author) => searchGoogleBooks(title, author) }
+  { name: 'OpenLibrary', search: (title, author, _country, signal) => searchOpenLibrary(title, author, signal) },
+  { name: 'GoogleBooks', search: (title, author, _country, signal) => searchGoogleBooks(title, author, signal) }
 ]
 
-/** Fetches a cover directly by ISBN from Open Library — no search/matching needed. */
-async function tryIsbnCover(isbn: string): Promise<Buffer | null> {
+/**
+ * Fetches a cover directly by ISBN from Open Library — no search/matching needed.
+ * Returns `'found'` (valid image), `'miss'` (404 / not an image → try providers),
+ * or `'error'` (network/rate-limit blip → the caller should retry, not
+ * negative-cache). An abort propagates as AbortError (never a miss).
+ */
+async function tryIsbnCover(
+  isbn: string,
+  signal?: AbortSignal
+): Promise<{ status: 'found'; data: Buffer } | { status: 'miss' } | { status: 'error' }> {
   // `default=false` makes Open Library return 404 (not a blank placeholder) when missing.
   // ISBN is renderer-controlled and interpolated into the URL path, so re-validate it.
   const safeIsbn = normalizeIsbn(isbn)
   if (!safeIsbn) {
     debug(`[cover] Ignoring malformed ISBN "${isbn}"`)
-    return null
+    return { status: 'miss' }
   }
   const url = `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(safeIsbn)}-L.jpg?default=false`
   try {
-    const data = await fetchUrlWithRetry(url)
-    return isValidImage(data) ? data : null
+    const data = await fetchUrlWithRetry(url, signal)
+    return isValidImage(data) ? { status: 'found', data } : { status: 'miss' }
   } catch (err) {
-    // A 404 (no cover for this ISBN) or transient failure — fall back to search providers.
-    debug(`[cover] ISBN ${safeIsbn} lookup failed: ${err instanceof Error ? err.message : String(err)}`)
-    return null
+    if (isAbortError(err)) throw err
+    // NetworkError/RateLimitError → transient (retry). HttpError (e.g. 404) → real miss.
+    const transient = err instanceof Error && (err.name === 'NetworkError' || err.name === 'RateLimitError')
+    debug(`[cover] ISBN ${safeIsbn} lookup ${transient ? 'failed (transient)' : 'missed'}: ${err instanceof Error ? err.message : String(err)}`)
+    return transient ? { status: 'error' } : { status: 'miss' }
   }
 }
 
@@ -467,25 +320,32 @@ async function downloadCoverData(
   title: string,
   author: string | undefined,
   isbn: string | undefined,
-  country: string
+  country: string,
+  signal?: AbortSignal
 ): Promise<DownloadResult> {
   let hadNetworkError = false
 
   if (isbn) {
-    const data = await tryIsbnCover(isbn)
-    if (data) {
+    const isbnResult = await tryIsbnCover(isbn, signal)
+    if (isbnResult.status === 'found') {
       debug(`[cover] ISBN ${isbn}: matched cover for "${title}"`)
-      return { status: 'found', data }
+      return { status: 'found', data: isbnResult.data }
     }
+    if (isbnResult.status === 'error') hadNetworkError = true
   }
 
   for (const provider of PROVIDERS) {
     let candidates: CoverCandidate[]
     try {
-      candidates = await provider.search(title, author, country)
+      candidates = await provider.search(title, author, country, signal)
     } catch (err) {
+      if (isAbortError(err)) throw err
       debug(`[cover] ${provider.name} error: ${err instanceof Error ? err.message : String(err)}`)
-      hadNetworkError = true
+      // A malformed/HTTP response is "no candidate" (fetchJson already mapped a
+      // parse error to null), a socket/timeout/429 is a transient network error.
+      if (err instanceof Error && (err.name === 'NetworkError' || err.name === 'RateLimitError')) {
+        hadNetworkError = true
+      }
       continue
     }
 
@@ -496,7 +356,7 @@ async function downloadCoverData(
     }
 
     try {
-      const data = await fetchUrlWithRetry(best.imageUrl)
+      const data = await fetchUrlWithRetry(best.imageUrl, signal)
       if (!isValidImage(data)) {
         debug(`[cover] ${provider.name}: invalid/too-small image for "${title}"`)
         continue
@@ -504,8 +364,11 @@ async function downloadCoverData(
       debug(`[cover] ${provider.name}: matched "${best.title}" for "${title}"`)
       return { status: 'found', data }
     } catch (err) {
+      if (isAbortError(err)) throw err
       debug(`[cover] ${provider.name} image fetch error: ${err instanceof Error ? err.message : String(err)}`)
-      hadNetworkError = true
+      if (err instanceof Error && (err.name === 'NetworkError' || err.name === 'RateLimitError')) {
+        hadNetworkError = true
+      }
       continue
     }
   }
@@ -515,137 +378,233 @@ async function downloadCoverData(
 
 // ─── Public cover API ─────────────────────────────────────────────────────────
 
-// Dedupes concurrent identical getCover calls: a second request for the same
-// cache key (e.g. the same book mounted twice in the grid) reuses the first
-// request's promise instead of scheduling its own network round-trip.
-const inFlight = new Map<string, Promise<string | null>>()
+export type CoverStatus = 'ready' | 'pending' | 'missing'
+export interface EnsureCoverResult {
+  key: string
+  status: CoverStatus
+}
 
-export async function getCover(
+// Renderer window provider — set once at startup. Both ensureCover (background
+// download) and the retry loop push a lightweight 'cover:updated' (KEY ONLY,
+// never bytes): the renderer re-fetches the file over the cover-cache:// protocol.
+let getMainWindow: () => BrowserWindow | null = () => null
+
+export function setCoverWindowProvider(fn: () => BrowserWindow | null): void {
+  getMainWindow = fn
+}
+
+function notifyCoverReady(key: string): void {
+  const win = getMainWindow()
+  if (win && !win.isDestroyed()) win.webContents.send('cover:updated', key)
+}
+
+function notifyCoverCacheCleared(): void {
+  const win = getMainWindow()
+  if (win && !win.isDestroyed()) win.webContents.send('cover:cache-cleared')
+}
+
+// Active downloads keyed by cache key. `controllers` lets the renderer cancel a
+// download when a card scrolls away; `inFlight` dedupes concurrent identical
+// requests; `interest` ref-counts how many mounted cards are awaiting a given
+// key, so a cover shared by two books (same title/author, e.g. two formats)
+// is aborted only when the LAST interested card unmounts.
+const controllers = new Map<string, AbortController>()
+const inFlight = new Map<string, Promise<void>>()
+const interest = new Map<string, number>()
+// In-flight retry-loop downloads: cancellable by cancelAllCovers (teardown /
+// cache-clear) but NOT by cancelCover (a card scrolling away), since retries are
+// background work owned by no card.
+const retryControllers = new Set<AbortController>()
+
+/**
+ * Ensures a cover for (title, author, isbn) exists on disk, returning its cache
+ * key and current status WITHOUT ever blocking on the network:
+ *  - 'ready'   → a cached image is on disk (serve it via cover-cache://covers/<key>)
+ *  - 'missing' → a negative-cache marker is on disk (no cover exists)
+ *  - 'pending' → a download/retry is in flight; a 'cover:updated' push will
+ *                arrive carrying this key when the image lands.
+ * Any download runs in the background through the request scheduler.
+ */
+export async function ensureCover(
   title: string,
   author: string | undefined,
   isbn?: string
-): Promise<string | null> {
-  debug(`[getCover] Searching for cover: title="${title}", author="${author}", isbn="${isbn ?? ''}"`)
-  const key = getCacheKey(title, author)
+): Promise<EnsureCoverResult> {
+  const key = getCacheKey(title, author, isbn)
   const cachePath = getCachePath(key)
 
-  // Cache hit — no slot needed
+  // Cache hit / negative-cache marker — served straight from disk by the protocol.
   if (await fs.pathExists(cachePath)) {
-    const data = await fs.readFile(cachePath)
-    if (data.length === 0) return null // negative cache marker
-    return `data:image/jpeg;base64,${data.toString('base64')}`
+    const stat = await fs.stat(cachePath)
+    return { key, status: stat.size === 0 ? 'missing' : 'ready' }
   }
 
-  // Retry already pending — don't re-queue, renderer will receive push when ready
+  // A background retry owns this key — the card just waits for the push.
   if (retryRegistry.has(key)) {
-    return null
+    return { key, status: 'pending' }
   }
 
-  // Identical request already in flight — share its promise.
-  const existing = inFlight.get(key)
-  if (existing) return existing
+  // An identical download is already running and NOT being torn down — join it
+  // (ref-count the interest). A download whose controller is already aborted is
+  // dying, so we fall through and start a fresh one instead of joining it.
+  if (inFlight.has(key) && controllers.get(key)?.signal.aborted === false) {
+    interest.set(key, (interest.get(key) ?? 0) + 1)
+    return { key, status: 'pending' }
+  }
 
-  // Capture the iTunes storefront now so a mid-flight locale change can't shift it.
+  // Capture the storefront now so a mid-flight locale change can't shift it.
   const country = itunesCountry
+  const controller = new AbortController()
+  controllers.set(key, controller)
+  interest.set(key, 1)
 
-  await fs.ensureDir(getCoverCacheDir())
-
-  const work = scheduleRequest(async () => {
-    const result = await downloadCoverData(title, author, isbn, country)
+  const work = (async () => {
+    await fs.ensureDir(getCoverCacheDir())
+    const result = await downloadCoverData(title, author, isbn, country, controller.signal)
 
     if (result.status === 'found') {
-      debug(`[getCover] Successfully cached image (${result.data.length} bytes)`)
       await fs.writeFile(cachePath, result.data)
-      return `data:image/jpeg;base64,${result.data.toString('base64')}`
+      debug(`[cover] Cached "${title}" (${result.data.length} bytes)`)
+      notifyCoverReady(key)
+      return
     }
-
     if (result.status === 'not-found') {
-      debug(`[getCover] No cover found, writing negative cache`)
-      await fs.writeFile(cachePath, Buffer.alloc(0))
-      return null
+      await fs.writeFile(cachePath, Buffer.alloc(0)) // negative cache
+      debug(`[cover] No cover found for "${title}" — negative-cached`)
+      return
     }
-
-    // Network error — schedule retry, don't write negative cache
+    // Transient network error — retry later, never negative-cache.
     scheduleRetry(key, title, author, isbn, 0)
-    return null
-  })
+  })()
     .catch((err) => {
-      console.error(`[getCover] Unexpected error for "${title}":`, err)
+      if (isAbortError(err)) {
+        debug(`[cover] Download aborted for "${title}"`)
+        return // cancelled: no retry, no negative cache
+      }
+      console.error(
+        `[cover] ensureCover failed for "${title}":`,
+        err instanceof Error ? err.message : String(err)
+      )
       scheduleRetry(key, title, author, isbn, 0)
-      return null
     })
     .finally(() => {
-      inFlight.delete(key)
+      // Only clear state we still own — a remount after an abort may have
+      // installed a fresh controller/work under the same key.
+      if (controllers.get(key) === controller) {
+        controllers.delete(key)
+        interest.delete(key)
+      }
+      if (inFlight.get(key) === work) inFlight.delete(key)
     })
 
   inFlight.set(key, work)
-  return work
+  return { key, status: 'pending' }
 }
 
 /**
- * Starts the background retry loop. Call once after app is ready.
- * On successful retry, sends 'cover:updated' to the renderer with the cache
- * key (so the renderer can match an edited book reliably) plus title/author
- * (kept for back-compat). Returns a stop function that clears the interval.
+ * Called when a card unmounts (e.g. scrolled past the overscan window). Decrements
+ * the interest count and aborts the shared download only when no other mounted
+ * card is still awaiting the same key.
+ */
+export function cancelCover(title: string, author: string | undefined, isbn?: string): void {
+  const key = getCacheKey(title, author, isbn)
+  const remaining = interest.get(key)
+  if (remaining === undefined) return // cache hit / retry-owned / already settled
+  if (remaining <= 1) {
+    interest.delete(key)
+    controllers.get(key)?.abort()
+  } else {
+    interest.set(key, remaining - 1)
+  }
+}
+
+/** Cancels every in-flight download (foreground + retry) and clears the scheduler queue. */
+export function cancelAllCovers(): void {
+  for (const controller of controllers.values()) controller.abort()
+  for (const controller of retryControllers) controller.abort()
+  controllers.clear()
+  retryControllers.clear()
+  interest.clear()
+  resetScheduler()
+}
+
+function rescheduleOrGiveUp(key: string, entry: RetryEntry, nextAttempts: number): void {
+  if (nextAttempts < RETRY_DELAYS_MS.length) {
+    scheduleRetry(key, entry.title, entry.author, entry.isbn, nextAttempts)
+  } else {
+    retryRegistry.delete(key)
+    debug(`[cover] Max retries reached for "${entry.title}", giving up`)
+  }
+}
+
+/**
+ * Runs one due retry: re-attempts the download and, on success, writes the file
+ * and pushes 'cover:updated' (key only). Errors are logged, never swallowed.
+ */
+async function runRetry(key: string, entry: RetryEntry, nextAttempts: number): Promise<void> {
+  const cachePath = getCachePath(key)
+  // A controller so cancelAllCovers (teardown / cache-clear) can abort a retry
+  // that's already mid-request, preventing it from resurrecting a cleared cover.
+  const controller = new AbortController()
+  retryControllers.add(controller)
+  try {
+    const result = await downloadCoverData(
+      entry.title,
+      entry.author,
+      entry.isbn,
+      itunesCountry,
+      controller.signal
+    )
+
+    if (result.status === 'found') {
+      await fs.ensureDir(getCoverCacheDir())
+      await fs.writeFile(cachePath, result.data)
+      retryRegistry.delete(key)
+      debug(`[cover] Retry #${nextAttempts} succeeded for "${entry.title}"`)
+      notifyCoverReady(key)
+      return
+    }
+    if (result.status === 'not-found') {
+      await fs.ensureDir(getCoverCacheDir())
+      await fs.writeFile(cachePath, Buffer.alloc(0))
+      retryRegistry.delete(key)
+      debug(`[cover] Retry #${nextAttempts}: confirmed no cover for "${entry.title}"`)
+      return
+    }
+    rescheduleOrGiveUp(key, entry, nextAttempts)
+  } catch (err) {
+    if (isAbortError(err)) {
+      // Cancelled (teardown / cache-clear). Drop the registry entry; if the app
+      // is still running the next ensureCover for this key starts fresh.
+      retryRegistry.delete(key)
+      return
+    }
+    console.error(
+      `[cover] Retry #${nextAttempts} for "${entry.title}" errored:`,
+      err instanceof Error ? err.message : String(err)
+    )
+    rescheduleOrGiveUp(key, entry, nextAttempts)
+  } finally {
+    retryControllers.delete(controller)
+  }
+}
+
+/**
+ * Starts the background retry loop and wires the renderer window provider. Call
+ * once after app is ready. On a successful retry it pushes 'cover:updated' (key
+ * only). Returns a stop function that clears the interval.
  */
 export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): () => void {
+  setCoverWindowProvider(getWindow)
   const LOOP_INTERVAL_MS = 15_000
-
-  const sendCoverUpdated = (key: string, entry: RetryEntry, dataUrl: string): void => {
-    const win = getWindow()
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('cover:updated', entry.title, entry.author, dataUrl, key)
-    }
-  }
 
   const handle = setInterval(() => {
     const now = Date.now()
-
     for (const [key, entry] of retryRegistry) {
       if (entry.nextRetry > now) continue
-
-      // Mark as in-progress to prevent double-scheduling
+      // Mark as in-progress to prevent double-scheduling.
       retryRegistry.set(key, { ...entry, nextRetry: Infinity })
-      const nextAttempts = entry.attempts + 1
-
-      scheduleRequest(async () => {
-        const cachePath = getCachePath(key)
-        const result = await downloadCoverData(entry.title, entry.author, entry.isbn, itunesCountry)
-
-        if (result.status === 'found') {
-          await fs.ensureDir(getCoverCacheDir())
-          await fs.writeFile(cachePath, result.data)
-          retryRegistry.delete(key)
-          debug(`[cover] Retry #${nextAttempts} succeeded for "${entry.title}"`)
-
-          const dataUrl = `data:image/jpeg;base64,${result.data.toString('base64')}`
-          sendCoverUpdated(key, entry, dataUrl)
-          return
-        }
-
-        if (result.status === 'not-found') {
-          // Provider confirmed no cover — write negative cache and stop retrying
-          await fs.ensureDir(getCoverCacheDir())
-          await fs.writeFile(cachePath, Buffer.alloc(0))
-          retryRegistry.delete(key)
-          debug(`[cover] Retry #${nextAttempts}: confirmed no cover for "${entry.title}"`)
-          return
-        }
-
-        // Still a network error — reschedule if attempts remain
-        if (nextAttempts < RETRY_DELAYS_MS.length) {
-          scheduleRetry(key, entry.title, entry.author, entry.isbn, nextAttempts)
-        } else {
-          retryRegistry.delete(key)
-          debug(`[cover] Max retries reached for "${entry.title}", giving up`)
-        }
-      }).catch(() => {
-        if (nextAttempts < RETRY_DELAYS_MS.length) {
-          scheduleRetry(key, entry.title, entry.author, entry.isbn, nextAttempts)
-        } else {
-          retryRegistry.delete(key)
-        }
-      })
+      void runRetry(key, entry, entry.attempts + 1)
     }
   }, LOOP_INTERVAL_MS)
 
@@ -653,6 +612,10 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): () =
 }
 
 export async function clearCoverCache(): Promise<void> {
+  // Abort in-flight downloads + drop the scheduler queue so nothing re-writes a
+  // file we're about to wipe.
+  cancelAllCovers()
+
   const cacheDir = getCoverCacheDir()
   if (await fs.pathExists(cacheDir)) {
     const files = await fs.readdir(cacheDir)
@@ -661,6 +624,7 @@ export async function clearCoverCache(): Promise<void> {
     }
   }
   retryRegistry.clear()
+  notifyCoverCacheCleared()
 }
 
 // ─── Book metadata ────────────────────────────────────────────────────────────
@@ -671,7 +635,18 @@ export interface BookMetadata {
   description?: string
 }
 
+// Insertion-ordered Map used as a FIFO LRU so a large library can't grow the
+// metadata cache without bound.
+const MAX_METADATA_ENTRIES = 500
 const metadataCache = new Map<string, BookMetadata | null>()
+
+function cacheMetadata(key: string, value: BookMetadata | null): void {
+  if (metadataCache.size >= MAX_METADATA_ENTRIES) {
+    const oldest = metadataCache.keys().next().value
+    if (oldest !== undefined) metadataCache.delete(oldest)
+  }
+  metadataCache.set(key, value)
+}
 
 interface OpenLibraryMetadataSearch {
   docs?: { first_publish_year?: number; subject?: string[]; key?: string }[]
@@ -713,6 +688,14 @@ async function searchOpenLibraryMetadata(
     debug(`[searchOpenLibraryMetadata] Found: year=${year}, genre=${genre}, desc=${description ? 'yes' : 'no'}`)
     return { year, genre, description }
   } catch (err) {
+    // Transient failures and aborts must propagate so the caller never caches
+    // "not found" for a lookup that didn't actually complete.
+    if (
+      err instanceof Error &&
+      (err.name === 'NetworkError' || err.name === 'RateLimitError' || err.name === 'AbortError')
+    ) {
+      throw err
+    }
     debug(`[searchOpenLibraryMetadata] Error: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
@@ -742,6 +725,14 @@ async function searchGoogleBooksMetadata(
       description: volumeInfo.description
     }
   } catch (err) {
+    // Transient failures and aborts must propagate so the caller never caches
+    // "not found" for a lookup that didn't actually complete.
+    if (
+      err instanceof Error &&
+      (err.name === 'NetworkError' || err.name === 'RateLimitError' || err.name === 'AbortError')
+    ) {
+      throw err
+    }
     debug(`[searchGoogleBooksMetadata] Error: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
@@ -754,12 +745,21 @@ export async function getBookMetadata(
   const key = getCacheKey(title, author)
   if (metadataCache.has(key)) return metadataCache.get(key) ?? null
 
-  return scheduleRequest(async () => {
+  try {
     let result = await searchOpenLibraryMetadata(title, author)
     if (!result) {
       result = await searchGoogleBooksMetadata(title, author)
     }
-    metadataCache.set(key, result)
+    // Cache the resolved answer (including a confirmed "not found") but never a
+    // transient failure or abort — the providers throw those up here.
+    cacheMetadata(key, result)
     return result
-  }).catch(() => null)
+  } catch (err) {
+    if (isAbortError(err)) return null // cancelled — never cache
+    console.error(
+      `[cover] getBookMetadata failed for "${title}":`,
+      err instanceof Error ? err.message : String(err)
+    )
+    return null
+  }
 }

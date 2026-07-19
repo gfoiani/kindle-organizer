@@ -2,7 +2,8 @@ import { app, BrowserWindow, shell } from 'electron'
 import path from 'path'
 import { registerIpcHandlers } from './ipc'
 import { setupMenu } from './menu'
-import { startCoverRetryLoop } from './covers'
+import { startCoverRetryLoop, cancelAllCovers } from './covers'
+import { registerCoverSchemePrivileges, registerCoverProtocol } from './coverProtocol'
 import { startKindleWatcher } from './kindle'
 import { closeOverridesDb } from './bookOverrides'
 
@@ -101,8 +102,12 @@ function safeSend(win: BrowserWindow | null, channel: string, ...args: unknown[]
   }
 }
 
+// The cover-cache:// scheme must be registered as privileged BEFORE app `ready`.
+registerCoverSchemePrivileges()
+
 app.whenReady().then(() => {
   registerIpcHandlers()
+  registerCoverProtocol()
   createWindow()
 
   const stopRetryLoop = startCoverRetryLoop(() => BrowserWindow.getAllWindows()[0] ?? null)
@@ -118,6 +123,7 @@ app.whenReady().then(() => {
     stopRetryLoop()
     stopWatcher()
     closeOverridesDb()
+    cancelAllCovers()
   })
 
   app.on('activate', () => {

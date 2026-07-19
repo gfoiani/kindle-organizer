@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useTranslation } from 'react-i18next'
-import type { KindleBook, Collection } from '../../../preload/api'
+import type { KindleBook, Collection, CoverStatus } from '../../../preload/api'
 import { CollectionPicker } from './CollectionPicker'
 import { BookDetailSidebar } from './BookDetailSidebar'
 import { formatSize } from '../utils/format'
-import { computeCoverCacheKey } from '../utils/coverCacheKey'
+import { buildCoverSrc } from '../utils/coverSrc'
 import { toBookRelpath } from '../utils/relpath'
 
 interface BooksGridProps {
@@ -24,11 +25,28 @@ interface SelectedBook {
   bookRelpath: string
 }
 
+// Grid layout constants (kept in sync with the Tailwind gap/padding below so the
+// virtualizer's row-height estimate matches what actually renders).
+const GRID_GAP_PX = 16 // gap-4
+const GRID_PADDING_PX = 24 // p-6 (one side)
+const CARD_INFO_HEIGHT_PX = 72 // title + author + size block under the cover
+const COVER_ASPECT = 1.5 // 2:3 book cover → height = width * 1.5
+const OVERSCAN_ROWS = 3
+
+/** Responsive column count from the measured container width (mirrors the old sm/lg/xl grid). */
+function columnsForWidth(width: number): number {
+  if (width < 640) return 2
+  if (width < 1024) return 3
+  if (width < 1280) return 4
+  return 5
+}
+
 const BookCard = memo(function BookCard({
   book,
   bookRelpath,
   collections,
-  coverUpdates,
+  coverVersions,
+  coverEpoch,
   onAddToCollection,
   onRemoveFromCollection,
   onSelect
@@ -36,104 +54,93 @@ const BookCard = memo(function BookCard({
   book: KindleBook
   bookRelpath: string
   collections: Collection[]
-  coverUpdates: Map<string, string>
+  coverVersions: Map<string, number>
+  coverEpoch: number
   onAddToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onRemoveFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onSelect: (book: KindleBook, bookRelpath: string, cover: string | null) => void
 }) {
   const { t } = useTranslation()
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [cover, setCover] = useState<string | null>(null)
-  const [coverLoading, setCoverLoading] = useState(true)
-  const [isVisible, setIsVisible] = useState(false)
-  const [cacheKey, setCacheKey] = useState<string | null>(null)
-  const cardRef = useRef<HTMLDivElement>(null)
+  const [coverKey, setCoverKey] = useState<string | null>(null)
+  const [status, setStatus] = useState<CoverStatus | null>(null)
+  const [imgFailed, setImgFailed] = useState(false)
 
-  // Defer cover work until the card scrolls into view (bounds the fetch storm
-  // on large libraries). Once seen, stays "visible" so we don't re-fetch.
-  useEffect(() => {
-    const node = cardRef.current
-    if (!node || isVisible) return
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setIsVisible(true)
-          observer.disconnect()
-        }
-      },
-      { rootMargin: '200px' }
-    )
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [isVisible])
-
-  // Compute this card's stable cover cache key so retry-pushed updates match.
+  // The card only mounts when its row is virtualized into view (+ overscan), so
+  // ensureCover runs exactly when the cover is (about to be) needed. On unmount
+  // — a scroll past the overscan window — cancelCover aborts any in-flight
+  // download so fast scrolling doesn't flood the network. `coverEpoch` bumps on
+  // a cache-clear to force a fresh ensure.
   useEffect(() => {
     let cancelled = false
-    computeCoverCacheKey(book.title, book.author)
-      .then((key) => { if (!cancelled) setCacheKey(key) })
-      .catch((err) => { if (!cancelled) console.error('Failed to compute cover key:', err) })
-    return () => { cancelled = true }
-  }, [book.title, book.author])
-
-  // Fetch the cover only once visible.
-  useEffect(() => {
-    if (!isVisible) return
-    let cancelled = false
-    setCoverLoading(true)
+    setImgFailed(false)
     window.kindleAPI
-      .getCover(book.title, book.author, book.isbn)
-      .then((dataUrl) => { if (!cancelled) setCover(dataUrl) })
-      .catch((err) => { if (!cancelled) console.error('Failed to load cover:', err) })
-      .finally(() => { if (!cancelled) setCoverLoading(false) })
-    return () => { cancelled = true }
-  }, [isVisible, book.title, book.author, book.isbn])
+      .ensureCover(book.title, book.author, book.isbn)
+      .then((r) => {
+        if (!cancelled) {
+          setCoverKey(r.key)
+          setStatus(r.status)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) console.error('ensureCover failed:', err)
+      })
+    return () => {
+      cancelled = true
+      window.kindleAPI.cancelCover(book.title, book.author, book.isbn)
+    }
+  }, [book.title, book.author, book.isbn, coverEpoch])
 
-  // Apply a retry-pushed cover update routed by the grid-level listener.
-  const pushedCover = cacheKey ? coverUpdates.get(cacheKey) : undefined
-  const effectiveCover = pushedCover ?? cover
+  const version = coverKey ? coverVersions.get(coverKey) : undefined
 
+  // A push (retry succeeded / cache busted) means the file exists now — clear a
+  // prior load error so the new version is retried.
+  useEffect(() => {
+    if (version !== undefined) setImgFailed(false)
+  }, [version])
+
+  const showImage = coverKey !== null && !imgFailed && (status === 'ready' || version !== undefined)
+  const coverSrc = showImage && coverKey ? buildCoverSrc(coverKey, version ?? 0) : null
   const accessibleName = book.title.trim() || t('books.untitled')
 
   return (
     <div
-      ref={cardRef}
       role="button"
       tabIndex={0}
       aria-label={accessibleName}
       className="relative bg-gray-800 border border-gray-700 rounded-lg overflow-hidden hover:border-indigo-500 transition-colors cursor-pointer group flex flex-col focus:outline-none focus:ring-2 focus:ring-indigo-500"
-      onClick={() => onSelect(book, bookRelpath, effectiveCover)}
+      onClick={() => onSelect(book, bookRelpath, coverSrc)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          onSelect(book, bookRelpath, effectiveCover)
+          onSelect(book, bookRelpath, coverSrc)
         }
       }}
     >
       {/* Cover area — 2:3 book aspect ratio */}
       <div className="relative w-full aspect-[2/3] bg-gray-900 flex items-center justify-center overflow-hidden shrink-0">
-        {coverLoading && !effectiveCover ? (
-          <div className="absolute inset-0 bg-gray-800 animate-pulse" />
-        ) : effectiveCover ? (
+        {coverSrc ? (
           <img
-            src={effectiveCover}
+            key={`${coverKey}:${version ?? 0}`}
+            src={coverSrc}
             alt=""
             decoding="async"
-            onError={() => setCover(null)}
+            loading="lazy"
+            onError={() => setImgFailed(true)}
             className="absolute inset-0 w-full h-full object-cover"
           />
-        ) : (
+        ) : status === 'missing' || imgFailed ? (
           <div className="flex flex-col items-center gap-1">
             <span className="text-indigo-300 text-xl font-bold">{book.extension}</span>
           </div>
+        ) : (
+          <div className="absolute inset-0 bg-gray-800 animate-pulse" />
         )}
 
         {/* Format badge */}
-        {!coverLoading && (
-          <span className="absolute top-2 left-2 bg-black/60 text-indigo-300 text-[10px] font-bold px-1.5 py-0.5 rounded">
-            {book.extension}
-          </span>
-        )}
+        <span className="absolute top-2 left-2 bg-black/60 text-indigo-300 text-[10px] font-bold px-1.5 py-0.5 rounded">
+          {book.extension}
+        </span>
 
         {/* Collection tag button */}
         {collections.length > 0 && (
@@ -158,9 +165,7 @@ const BookCard = memo(function BookCard({
         <h3 className="text-white text-xs font-medium leading-tight line-clamp-2 group-hover:text-indigo-300 transition-colors">
           {book.title}
         </h3>
-        {book.author && (
-          <p className="text-gray-400 text-[11px] truncate">{book.author}</p>
-        )}
+        {book.author && <p className="text-gray-400 text-[11px] truncate">{book.author}</p>}
         <p className="text-gray-400 text-[10px] mt-0.5">{formatSize(book.size)}</p>
       </div>
 
@@ -201,16 +206,12 @@ function EmptyState({ kindleConnected }: { kindleConnected: boolean }) {
       {kindleConnected ? (
         <>
           <p className="text-gray-300 font-medium">{t('emptyState.noBooks')}</p>
-          <p className="text-gray-400 text-sm mt-1">
-            {t('emptyState.emptyDocuments')}
-          </p>
+          <p className="text-gray-400 text-sm mt-1">{t('emptyState.emptyDocuments')}</p>
         </>
       ) : (
         <>
           <p className="text-gray-300 font-medium">{t('emptyState.noKindleDetected')}</p>
-          <p className="text-gray-400 text-sm mt-1">
-            {t('emptyState.connectKindle')}
-          </p>
+          <p className="text-gray-400 text-sm mt-1">{t('emptyState.connectKindle')}</p>
         </>
       )}
     </div>
@@ -230,19 +231,32 @@ export function BooksGrid({
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [selectedBook, setSelectedBook] = useState<SelectedBook | null>(null)
-  // Cover updates pushed by the main-process retry loop, keyed on cache key.
-  const [coverUpdates, setCoverUpdates] = useState<Map<string, string>>(new Map())
+  // Cover cache-buster versions keyed on cache key: bumped by a retry-loop push.
+  const [coverVersions, setCoverVersions] = useState<Map<string, number>>(new Map())
+  // Bumped when the cover cache is cleared, forcing every card to re-ensure.
+  const [coverEpoch, setCoverEpoch] = useState(0)
 
-  // One listener for the whole grid (instead of one per card): route each
-  // retry-pushed cover into a map keyed on the stable cache key.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState(0)
+
+  // Route retry-pushed cover updates into the version map (one listener for the
+  // whole grid); reset everything when the cache is cleared.
   useEffect(() => {
-    return window.kindleAPI.onCoverUpdated((_title, _author, dataUrl, cacheKey) => {
-      setCoverUpdates((prev) => {
+    const offUpdated = window.kindleAPI.onCoverUpdated((cacheKey) => {
+      setCoverVersions((prev) => {
         const next = new Map(prev)
-        next.set(cacheKey, dataUrl)
+        next.set(cacheKey, (prev.get(cacheKey) ?? 0) + 1)
         return next
       })
     })
+    const offCleared = window.kindleAPI.onCoverCacheCleared(() => {
+      setCoverVersions(new Map())
+      setCoverEpoch((e) => e + 1)
+    })
+    return () => {
+      offUpdated()
+      offCleared()
+    }
   }, [])
 
   // Clear the detail sidebar only when the selected book is actually gone
@@ -252,6 +266,17 @@ export function BooksGrid({
       prev && books.some((b) => b.path === prev.book.path) ? prev : null
     )
   }, [books])
+
+  // Measure the scroll container so we can compute the column count + row height.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const measure = (): void => setContainerWidth(el.clientWidth)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const handleSelect = useCallback(
     (book: KindleBook, bookRelpath: string, cover: string | null) => {
@@ -265,10 +290,29 @@ export function BooksGrid({
     if (!q) return books
     return books.filter(
       (b) =>
-        b.title.toLowerCase().includes(q) ||
-        (b.author ?? '').toLowerCase().includes(q)
+        b.title.toLowerCase().includes(q) || (b.author ?? '').toLowerCase().includes(q)
     )
   }, [books, query])
+
+  const columns = columnsForWidth(containerWidth || 1280)
+  const rowCount = Math.ceil(filtered.length / columns)
+
+  // Row height estimate: cover height (card width × aspect) + info block + gap.
+  const usableWidth = Math.max(0, (containerWidth || 1280) - GRID_PADDING_PX * 2)
+  const cardWidth = (usableWidth - GRID_GAP_PX * (columns - 1)) / columns
+  const estimatedRowHeight = Math.round(cardWidth * COVER_ASPECT + CARD_INFO_HEIGHT_PX + GRID_GAP_PX)
+
+  const rowVirtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => estimatedRowHeight,
+    overscan: OVERSCAN_ROWS
+  })
+
+  // Re-measure rows when the column count (and thus row height) changes.
+  useEffect(() => {
+    rowVirtualizer.measure()
+  }, [columns, estimatedRowHeight, rowVirtualizer])
 
   if (isLoading) {
     return (
@@ -282,10 +326,12 @@ export function BooksGrid({
     return <EmptyState kindleConnected={kindleConnected} />
   }
 
+  const virtualRows = rowVirtualizer.getVirtualItems()
+
   return (
     <div className="flex h-full overflow-hidden">
-      <div className="flex-1 p-6 overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
+      <div className="flex-1 flex flex-col p-6 overflow-hidden">
+        <div className="flex items-center justify-between mb-4 shrink-0">
           <p className="text-gray-400 text-sm shrink-0">
             {filtered.length === books.length
               ? t('books.booksCount', { count: books.length })
@@ -336,19 +382,44 @@ export function BooksGrid({
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filtered.map((book) => (
-              <BookCard
-                key={book.path}
-                book={book}
-                bookRelpath={toBookRelpath(book.path, documentsBase)}
-                collections={collections}
-                coverUpdates={coverUpdates}
-                onAddToCollection={onAddBookToCollection}
-                onRemoveFromCollection={onRemoveBookFromCollection}
-                onSelect={handleSelect}
-              />
-            ))}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+              {virtualRows.map((virtualRow) => {
+                const start = virtualRow.index * columns
+                const rowBooks = filtered.slice(start, start + columns)
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    className="grid gap-4"
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                      gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                      paddingBottom: GRID_GAP_PX
+                    }}
+                  >
+                    {rowBooks.map((book) => (
+                      <BookCard
+                        key={book.path}
+                        book={book}
+                        bookRelpath={toBookRelpath(book.path, documentsBase)}
+                        collections={collections}
+                        coverVersions={coverVersions}
+                        coverEpoch={coverEpoch}
+                        onAddToCollection={onAddBookToCollection}
+                        onRemoveFromCollection={onRemoveBookFromCollection}
+                        onSelect={handleSelect}
+                      />
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>

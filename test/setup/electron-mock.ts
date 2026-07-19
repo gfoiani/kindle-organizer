@@ -37,5 +37,12 @@ vi.mock('electron', () => ({
       if (name === 'userData') return currentUserData
       return path.join(currentUserData, name)
     }
+  },
+  // Minimal `protocol` stub so coverProtocol.ts can be imported under Vitest.
+  // The pure request handler (handleCoverRequest) is what tests exercise; the
+  // register* helpers just need to not throw when referenced.
+  protocol: {
+    registerSchemesAsPrivileged: () => {},
+    handle: () => {}
   }
 }))

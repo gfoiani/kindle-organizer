@@ -1,7 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { detectKindleDrives, readDocuments } from './kindle'
 import { readCalibreMetadata, writeCalibreMetadata, readCalibreIsbnMap } from './calibre'
-import { getCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
+import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
 import { applyOverrides, setOverride } from './bookOverrides'
 import { setMenuLabels } from './menu'
 import { stripDocumentsBase } from './paths'
@@ -233,14 +233,27 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
-    'kindle:get-cover',
+    'kindle:ensure-cover',
     withErrorLogging(
-      'kindle:get-cover',
+      'kindle:ensure-cover',
       async (_, title: unknown, author: unknown, isbn: unknown) => {
         assertString(title, 'title')
         assertOptionalString(author, 'author')
         assertOptionalString(isbn, 'isbn')
-        return getCover(title, author, isbn)
+        return ensureCover(title, author, isbn)
+      }
+    )
+  )
+
+  ipcMain.handle(
+    'kindle:cancel-cover',
+    withErrorLogging(
+      'kindle:cancel-cover',
+      async (_, title: unknown, author: unknown, isbn: unknown) => {
+        assertString(title, 'title')
+        assertOptionalString(author, 'author')
+        assertOptionalString(isbn, 'isbn')
+        cancelCover(title, author, isbn)
       }
     )
   )
