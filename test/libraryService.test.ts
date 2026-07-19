@@ -1,11 +1,11 @@
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { cleanupUserDataDirs, freshUserData } from './setup/electron-mock'
 import { fakeJpeg, writeEpub } from './setup/epubFixture'
-import { addDroppedFiles, removeLibraryBook } from '../src/main/libraryService'
-import { getLibraryBook, listLibraryBooks } from '../src/main/library'
+import { addDroppedFiles, removeLibraryBook, sendToKindle } from '../src/main/libraryService'
+import { getConversion, getLibraryBook, listLibraryBooks } from '../src/main/library'
 
 let userData: string
 let src: string
@@ -93,6 +93,85 @@ describe('addDroppedFiles', () => {
     const results = await addDroppedFiles([epub, bad])
 
     expect(results.map((r) => r.status)).toEqual(['added', 'unsupported'])
+  })
+})
+
+describe('sendToKindle', () => {
+  test('converts an EPUB then uploads it, emitting progress and stamping uploaded', async () => {
+    // Arrange
+    const file = writeEpub(path.join(src, 'novel.epub'), { title: 'Dune', author: 'Frank Herbert' })
+    const [{ book }] = await addDroppedFiles([file])
+    const emit = vi.fn()
+    const convertMock = vi.fn(async (_in: string, _fmt: string, opts: { outputPath: string; onProgress?: (p: number) => void }) => {
+      opts.onProgress?.(50)
+      return opts.outputPath
+    })
+    const uploadMock = vi.fn(
+      async (_s: string, _m: string, target: string, onProgress?: (p: number) => void) => {
+        onProgress?.(100)
+        return target
+      }
+    )
+
+    // Act
+    const result = await sendToKindle(book!.id, '/mnt/kindle', 'azw3', emit, {
+      convert: convertMock,
+      uploadFile: uploadMock
+    })
+
+    // Assert
+    expect(convertMock).toHaveBeenCalledOnce()
+    expect(uploadMock).toHaveBeenCalledOnce()
+    expect(result.targetRelpath).toBe('Dune.azw3')
+    expect(emit).toHaveBeenCalledWith('convert:progress', { libraryId: book!.id, percent: 50 })
+    expect(emit).toHaveBeenCalledWith('upload:progress', { libraryId: book!.id, percent: 100 })
+    expect(getConversion(book!.id, 'azw3')?.status).toBe('done')
+
+    const after = getLibraryBook(book!.id)
+    expect(after?.targetRelpath).toBe('Dune.azw3')
+    expect(typeof after?.uploadedAt).toBe('number')
+  })
+
+  test('uploads an already-Kindle format as-is (no conversion)', async () => {
+    const file = path.join(src, 'Manual.azw3')
+    writeFileSync(file, Buffer.from('azw3 bytes'))
+    const [{ book }] = await addDroppedFiles([file])
+    const convertMock = vi.fn()
+    const uploadMock = vi.fn(async (_s: string, _m: string, target: string) => target)
+
+    const result = await sendToKindle(book!.id, '/mnt/kindle', 'azw3', vi.fn(), {
+      convert: convertMock,
+      uploadFile: uploadMock
+    })
+
+    expect(convertMock).not.toHaveBeenCalled()
+    expect(uploadMock).toHaveBeenCalledWith(
+      book!.originalPath,
+      '/mnt/kindle',
+      'Manual.azw3',
+      expect.any(Function)
+    )
+    expect(result.targetRelpath).toBe('Manual.azw3')
+  })
+
+  test('records a conversion error and does not upload when conversion fails', async () => {
+    const file = writeEpub(path.join(src, 'bad.epub'), { title: 'Bad' })
+    const [{ book }] = await addDroppedFiles([file])
+    const convertMock = vi.fn(async () => {
+      throw new Error('convert boom')
+    })
+    const uploadMock = vi.fn()
+
+    await expect(
+      sendToKindle(book!.id, '/mnt/kindle', 'azw3', vi.fn(), {
+        convert: convertMock,
+        uploadFile: uploadMock
+      })
+    ).rejects.toThrow('convert boom')
+
+    expect(uploadMock).not.toHaveBeenCalled()
+    expect(getConversion(book!.id, 'azw3')?.status).toBe('error')
+    expect(getLibraryBook(book!.id)?.uploadedAt).toBeUndefined()
   })
 })
 

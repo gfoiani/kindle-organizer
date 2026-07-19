@@ -6,7 +6,7 @@ import { applyOverrides, setOverride } from './bookOverrides'
 import { setMenuLabels } from './menu'
 import { stripDocumentsBase } from './paths'
 import { getSettings, setKindleFormat, isKindleFormat, type KindleFormat } from './settings'
-import { addDroppedFiles, removeLibraryBook } from './libraryService'
+import { addDroppedFiles, removeLibraryBook, sendToKindle, type SendProgress } from './libraryService'
 import { listLibraryBooks } from './library'
 import {
   getCollections,
@@ -328,6 +328,26 @@ export function registerIpcHandlers(): void {
       assertString(id, 'id')
       await removeLibraryBook(id)
     })
+  )
+
+  ipcMain.handle(
+    'kindle:upload-book',
+    withErrorLogging(
+      'kindle:upload-book',
+      async (event, id: unknown, mountpoint: unknown, format: unknown) => {
+        assertString(id, 'id')
+        assertString(mountpoint, 'mountpoint')
+        assertOptionalString(format, 'format')
+        // Omitted/invalid format falls back to the persisted default.
+        const fmt = isKindleFormat(format) ? format : getSettings().kindleFormat
+        // This push is request-scoped (tied to this invoke), so event.sender is
+        // the right target — guarded against a renderer that navigated away.
+        const emit = (channel: string, payload: SendProgress): void => {
+          if (!event.sender.isDestroyed()) event.sender.send(channel, payload)
+        }
+        return sendToKindle(id, mountpoint, fmt, emit)
+      }
+    )
   )
 
   ipcMain.handle(

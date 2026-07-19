@@ -319,6 +319,16 @@ export function App() {
     setBooks((prev) => prev.map((b) => b.path === updatedBook.path ? updatedBook : b))
   }
 
+  // After a send/remove, rescan the library and (if connected) the device so the
+  // presence badges reconcile — a sent book flips from amber to green.
+  async function handleLibraryChanged() {
+    await loadLibrary()
+    if (kindle) {
+      const requestId = ++loadRequestId.current
+      await loadBooks(kindle.mountpoint, requestId)
+    }
+  }
+
   async function handleWriteToKindle() {
     if (!kindle) return
     setIsSyncing(true)
@@ -647,11 +657,13 @@ export function App() {
               books={filteredBooks}
               isLoading={isLoadingBooks}
               kindleConnected={kindle !== null}
+              mountpoint={kindle?.mountpoint ?? null}
               collections={collections}
               documentsBase={documentsBase}
               onAddBookToCollection={handleAddBookToCollection}
               onRemoveBookFromCollection={handleRemoveBookFromCollection}
               onBookUpdated={handleBookUpdated}
+              onLibraryChanged={handleLibraryChanged}
             />
           </>
         )}

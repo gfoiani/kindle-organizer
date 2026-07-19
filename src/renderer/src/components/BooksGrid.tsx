@@ -20,11 +20,15 @@ interface BooksGridProps {
   books: DisplayBook[]
   isLoading: boolean
   kindleConnected: boolean
+  /** Connected device mountpoint, or null when no Kindle is attached. */
+  mountpoint: string | null
   collections: Collection[]
   documentsBase: string
   onAddBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onRemoveBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onBookUpdated: (updatedBook: KindleBook) => void
+  /** Rescans device + library after a send/remove so badges reconcile. */
+  onLibraryChanged: () => void
 }
 
 interface SelectedBook {
@@ -261,11 +265,13 @@ export function BooksGrid({
   books,
   isLoading,
   kindleConnected,
+  mountpoint,
   collections,
   documentsBase,
   onAddBookToCollection,
   onRemoveBookFromCollection,
-  onBookUpdated
+  onBookUpdated,
+  onLibraryChanged
 }: BooksGridProps) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
@@ -498,6 +504,7 @@ export function BooksGrid({
           cover={selectedBook.cover}
           coverEpoch={coverEpoch}
           bookRelpath={selectedBook.bookRelpath}
+          mountpoint={mountpoint}
           onClose={() => setSelectedBook(null)}
           onBookUpdated={(updatedBook) => {
             // Merge the edited KindleBook fields onto the DisplayBook so
@@ -507,6 +514,8 @@ export function BooksGrid({
             )
             onBookUpdated(updatedBook)
           }}
+          onSent={onLibraryChanged}
+          onRemoved={onLibraryChanged}
         />
       )}
     </div>

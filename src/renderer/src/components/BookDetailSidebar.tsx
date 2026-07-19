@@ -1,23 +1,98 @@
 import { useState, useEffect, useRef, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { KindleBook, BookMetadata } from '../../../preload/api'
+import type { DisplayBook } from '../utils/mergeBooks'
 import { formatSize } from '../utils/format'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useCover } from '../hooks/useCover'
 
+type SendPhase = 'idle' | 'converting' | 'uploading' | 'done' | 'error'
+
 interface Props {
-  book: KindleBook
+  book: DisplayBook
   /** Snapshot src from the card at select time; used only until useCover resolves. */
   cover: string | null
   /** Cache-clear epoch, forwarded to useCover so a clear busts the cover. */
   coverEpoch: number
   bookRelpath: string
+  /** Connected device mountpoint, or null when no Kindle is attached. */
+  mountpoint: string | null
   onClose: () => void
   onBookUpdated: (updatedBook: KindleBook) => void
+  /** Fired after a successful send so the parent can rescan device + library. */
+  onSent: () => void
+  /** Fired after the book is removed from the library. */
+  onRemoved: () => void
 }
 
-export function BookDetailSidebar({ book, cover, coverEpoch, bookRelpath, onClose, onBookUpdated }: Props) {
+export function BookDetailSidebar({
+  book,
+  cover,
+  coverEpoch,
+  bookRelpath,
+  mountpoint,
+  onClose,
+  onBookUpdated,
+  onSent,
+  onRemoved
+}: Props) {
   const { t } = useTranslation()
+
+  const [sendPhase, setSendPhase] = useState<SendPhase>('idle')
+  const [sendPercent, setSendPercent] = useState(0)
+  const [isRemoving, setIsRemoving] = useState(false)
+
+  const isLibraryOnly = Boolean(book.libraryId) && !book.onDevice
+  const isSending = sendPhase === 'converting' || sendPhase === 'uploading'
+
+  // Follow convert/upload progress pushes for THIS book only.
+  useEffect(() => {
+    const libraryId = book.libraryId
+    if (!libraryId) return
+    const offConvert = window.kindleAPI.onConvertProgress((p) => {
+      if (p.libraryId === libraryId) {
+        setSendPhase('converting')
+        setSendPercent(p.percent)
+      }
+    })
+    const offUpload = window.kindleAPI.onUploadProgress((p) => {
+      if (p.libraryId === libraryId) {
+        setSendPhase('uploading')
+        setSendPercent(p.percent)
+      }
+    })
+    return () => {
+      offConvert()
+      offUpload()
+    }
+  }, [book.libraryId])
+
+  async function handleSend() {
+    if (!book.libraryId || !mountpoint) return
+    setSendPhase('converting')
+    setSendPercent(0)
+    try {
+      await window.kindleAPI.uploadBook(book.libraryId, mountpoint)
+      setSendPhase('done')
+      onSent()
+    } catch (err) {
+      console.error('Failed to send to Kindle:', err)
+      setSendPhase('error')
+    }
+  }
+
+  async function handleRemove() {
+    if (!book.libraryId) return
+    setIsRemoving(true)
+    try {
+      await window.kindleAPI.removeLibraryBook(book.libraryId)
+      onRemoved()
+      onClose()
+    } catch (err) {
+      console.error('Failed to remove from library:', err)
+      setIsRemoving(false)
+    }
+  }
 
   // Resolve the cover reactively: if the panel was opened while the cover was
   // still downloading, the snapshot `cover` is null — useCover follows the
@@ -169,6 +244,83 @@ export function BookDetailSidebar({ book, cover, coverEpoch, bookRelpath, onClos
 
           {/* Info */}
           <div className="p-4 space-y-4">
+            {/* Library actions — only for books staged locally but not yet on device. */}
+            {isLibraryOnly && !isEditing && (
+              <div className="space-y-2 border-b border-gray-800 pb-4">
+                <button
+                  onClick={handleSend}
+                  disabled={!mountpoint || isSending || sendPhase === 'done'}
+                  className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50 ${
+                    sendPhase === 'done'
+                      ? 'bg-green-800 border border-green-600 text-green-100'
+                      : sendPhase === 'error'
+                        ? 'bg-red-900 border border-red-700 text-red-200'
+                        : 'bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-500'
+                  }`}
+                >
+                  {isSending ? (
+                    <>
+                      <svg aria-hidden="true" className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      {sendPhase === 'uploading' ? t('library.uploading') : t('library.converting')} {sendPercent}%
+                    </>
+                  ) : sendPhase === 'done' ? (
+                    <>
+                      <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      {t('library.sent')}
+                    </>
+                  ) : sendPhase === 'error' ? (
+                    <>
+                      <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      {t('library.sendError')}
+                    </>
+                  ) : (
+                    <>
+                      <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                      {t('library.sendToKindle')}
+                    </>
+                  )}
+                </button>
+
+                {isSending && (
+                  <div className="w-full h-1.5 bg-gray-800 rounded overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 transition-all"
+                      style={{ width: `${sendPercent}%` }}
+                    />
+                  </div>
+                )}
+
+                {!mountpoint && (
+                  <p className="text-amber-400/80 text-xs">{t('library.connectToSend')}</p>
+                )}
+
+                <button
+                  onClick={handleRemove}
+                  disabled={isRemoving || isSending}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 transition-colors disabled:opacity-50"
+                >
+                  {t('library.removeFromLibrary')}
+                </button>
+
+                {/* Visually-hidden live region announces the send result. */}
+                <div role="status" aria-live="polite" className="sr-only">
+                  {sendPhase === 'done'
+                    ? t('library.sent')
+                    : sendPhase === 'error'
+                      ? t('library.sendError')
+                      : ''}
+                </div>
+              </div>
+            )}
+
             {isEditing ? (
               <>
                 <div>

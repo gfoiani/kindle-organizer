@@ -6,7 +6,18 @@ import { app } from 'electron'
 import { SUPPORTED_EXTENSIONS } from './kindle'
 import { parseEpub } from './epub'
 import { importLocalCover } from './covers'
-import { insertLibraryBook, findByContentHash, deleteLibraryBook, type LibraryBook } from './library'
+import {
+  insertLibraryBook,
+  findByContentHash,
+  deleteLibraryBook,
+  getLibraryBook,
+  upsertConversion,
+  setUploaded,
+  type LibraryBook
+} from './library'
+import { convert, type ConvertOptions } from './convert'
+import { uploadFile } from './deviceUpload'
+import type { KindleFormat } from './settings'
 
 export type AddStatus = 'added' | 'duplicate' | 'unsupported' | 'error'
 
@@ -120,4 +131,93 @@ async function addOneFile(filePath: string): Promise<AddResult> {
 export async function removeLibraryBook(id: string): Promise<void> {
   deleteLibraryBook(id)
   await fs.remove(itemDir(id))
+}
+
+// ─── Send to Kindle (convert + upload) ────────────────────────────────────────
+
+type ConvertFn = (inputPath: string, format: KindleFormat, options: ConvertOptions) => Promise<string>
+type UploadFn = (
+  source: string,
+  mountpoint: string,
+  targetFilename: string,
+  onProgress?: (percent: number) => void
+) => Promise<string>
+
+/** Progress payload pushed to the renderer during a send (keyed by libraryId). */
+export interface SendProgress {
+  libraryId: string
+  percent: number
+}
+
+export type SendEmit = (channel: string, payload: SendProgress) => void
+
+export interface SendDeps {
+  convert?: ConvertFn
+  uploadFile?: UploadFn
+}
+
+/** Makes a title safe to use as a device filename. */
+function sanitizeFilename(name: string): string {
+  const cleaned = name
+    .replace(/[/\\:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120)
+  return cleaned || 'book'
+}
+
+/**
+ * Converts (EPUB → the requested format) and uploads a library book to the
+ * device. Already-Kindle formats and PDFs are uploaded as-is. Progress is
+ * forwarded through `emit` (convert:progress then upload:progress). On success
+ * the book is stamped uploaded. `convert`/`uploadFile` are injectable for tests.
+ */
+export async function sendToKindle(
+  id: string,
+  mountpoint: string,
+  format: KindleFormat,
+  emit: SendEmit,
+  deps: SendDeps = {}
+): Promise<{ targetRelpath: string }> {
+  const convertFn = deps.convert ?? convert
+  const uploadFn = deps.uploadFile ?? uploadFile
+
+  const book = getLibraryBook(id)
+  if (!book) throw new Error(`Library book ${id} not found`)
+
+  let uploadSource: string
+  let targetFilename: string
+
+  if (book.sourceFormat === 'epub') {
+    const outputPath = path.join(itemDir(id), `converted.${format}`)
+    upsertConversion({ libraryId: id, format, status: 'converting' })
+    try {
+      await convertFn(book.originalPath, format, {
+        outputPath,
+        onProgress: (percent) => emit('convert:progress', { libraryId: id, percent })
+      })
+    } catch (err) {
+      upsertConversion({
+        libraryId: id,
+        format,
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err)
+      })
+      throw err
+    }
+    upsertConversion({ libraryId: id, format, status: 'done', outputPath })
+    uploadSource = outputPath
+    targetFilename = `${sanitizeFilename(book.title)}.${format}`
+  } else {
+    // Already Kindle-compatible (or PDF): upload the original untouched.
+    uploadSource = book.originalPath
+    targetFilename = book.filename
+  }
+
+  const targetRelpath = await uploadFn(uploadSource, mountpoint, targetFilename, (percent) =>
+    emit('upload:progress', { libraryId: id, percent })
+  )
+
+  setUploaded(id, targetRelpath)
+  return { targetRelpath }
 }

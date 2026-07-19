@@ -3,7 +3,7 @@ import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
 import type { BookMetadata, CoverStatus, EnsureCoverResult } from '../main/covers'
 import type { KindleFormat } from '../main/settings'
 import type { LibraryBook } from '../main/library'
-import type { AddResult } from '../main/libraryService'
+import type { AddResult, SendProgress } from '../main/libraryService'
 
 export type {
   KindleDrive,
@@ -14,7 +14,8 @@ export type {
   EnsureCoverResult,
   KindleFormat,
   LibraryBook,
-  AddResult
+  AddResult,
+  SendProgress
 }
 
 export interface KindleAPI {
@@ -63,6 +64,16 @@ export interface KindleAPI {
   getLibrary: () => Promise<LibraryBook[]>
   /** Removes a library book: its DB row, conversions, and on-disk files. */
   removeLibraryBook: (id: string) => Promise<void>
+  /**
+   * Converts (EPUB → format) and uploads a library book to the connected device.
+   * Format omitted → the persisted default. Progress arrives via
+   * onConvertProgress / onUploadProgress (keyed by libraryId).
+   */
+  uploadBook: (id: string, mountpoint: string, format?: KindleFormat) => Promise<{ targetRelpath: string }>
+  /** Subscribe to conversion progress (libraryId + percent). Returns unsubscribe. */
+  onConvertProgress: (callback: (progress: SendProgress) => void) => () => void
+  /** Subscribe to upload progress (libraryId + percent). Returns unsubscribe. */
+  onUploadProgress: (callback: (progress: SendProgress) => void) => () => void
   /** Rebuilds the native menu's custom labels in the active UI language. */
   setMenuLabels: (about: string, learnMore: string) => Promise<void>
   /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
@@ -154,6 +165,21 @@ export const kindleAPI: KindleAPI = {
   getLibrary: () => ipcRenderer.invoke('kindle:get-library'),
 
   removeLibraryBook: (id: string) => ipcRenderer.invoke('kindle:remove-library-book', id),
+
+  uploadBook: (id: string, mountpoint: string, format?: KindleFormat) =>
+    ipcRenderer.invoke('kindle:upload-book', id, mountpoint, format),
+
+  onConvertProgress: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, progress: SendProgress) => callback(progress)
+    ipcRenderer.on('convert:progress', handler)
+    return () => ipcRenderer.removeListener('convert:progress', handler)
+  },
+
+  onUploadProgress: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, progress: SendProgress) => callback(progress)
+    ipcRenderer.on('upload:progress', handler)
+    return () => ipcRenderer.removeListener('upload:progress', handler)
+  },
 
   setMenuLabels: (about: string, learnMore: string) =>
     ipcRenderer.invoke('menu:set-labels', about, learnMore),
