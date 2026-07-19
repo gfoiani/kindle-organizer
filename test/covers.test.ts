@@ -150,6 +150,49 @@ describe('ensureCover — background download + notifyCoverReady', () => {
   })
 })
 
+describe('ensureCover — terminal not-found → negative cache + notifyCoverMissing', () => {
+  test('confirmed no cover: writes a 0-byte marker and pushes ("cover:missing", key)', async () => {
+    const title = 'Absolutely No Such Book 9Z'
+    const author = 'No Such Author 9Z'
+    const key = cacheKeyFor(title, author)
+    const json = (body: unknown) => ({
+      statusCode: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+
+    // No ISBN → straight to the search providers; each returns zero candidates,
+    // so the outcome is a confirmed not-found (no network error).
+    const term = encodeURIComponent(`${title} ${author}`)
+    mockRoute(
+      `https://itunes.apple.com/search?term=${term}&entity=ebook&limit=5&country=us`,
+      json({ results: [] })
+    )
+    mockRoute(
+      `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&limit=5&fields=title,author_name,cover_i`,
+      json({ docs: [] })
+    )
+    const gbQuery = `intitle:${encodeURIComponent(title)}+inauthor:${encodeURIComponent(author)}`
+    mockRoute(
+      `https://www.googleapis.com/books/v1/volumes?q=${gbQuery}&maxResults=5&fields=items(volumeInfo(title,authors,imageLinks/thumbnail))`,
+      json({ items: [] })
+    )
+
+    const send = vi.fn()
+    setCoverWindowProvider(() => ({ isDestroyed: () => false, webContents: { send } }) as never)
+
+    const result = await ensureCover(title, author)
+    expect(result).toEqual({ key, status: 'pending' })
+
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('cover:missing', key))
+    // It must NOT masquerade as a ready cover.
+    expect(send).not.toHaveBeenCalledWith('cover:updated', key)
+    // A 0-byte negative-cache marker is on disk, so a later ensureCover is a hit.
+    const onDisk = readFileSync(cachePathFor(title, author))
+    expect(onDisk.length).toBe(0)
+  })
+})
+
 describe('clearCoverCache — async cache clearing', () => {
   test('removes every cached cover file via the async path', async () => {
     const coversDir = path.join(userData, 'covers')

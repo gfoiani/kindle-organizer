@@ -3,17 +3,27 @@ import { useTranslation } from 'react-i18next'
 import type { KindleBook, BookMetadata } from '../../../preload/api'
 import { formatSize } from '../utils/format'
 import { useFocusTrap } from '../hooks/useFocusTrap'
+import { useCover } from '../hooks/useCover'
 
 interface Props {
   book: KindleBook
+  /** Snapshot src from the card at select time; used only until useCover resolves. */
   cover: string | null
+  /** Cache-clear epoch, forwarded to useCover so a clear busts the cover. */
+  coverEpoch: number
   bookRelpath: string
   onClose: () => void
   onBookUpdated: (updatedBook: KindleBook) => void
 }
 
-export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpdated }: Props) {
+export function BookDetailSidebar({ book, cover, coverEpoch, bookRelpath, onClose, onBookUpdated }: Props) {
   const { t } = useTranslation()
+
+  // Resolve the cover reactively: if the panel was opened while the cover was
+  // still downloading, the snapshot `cover` is null — useCover follows the
+  // cover:updated / cover:missing pushes so it fills in when the image lands.
+  const { coverSrc } = useCover(book, coverEpoch)
+  const displaySrc = coverSrc ?? cover
   const [metadata, setMetadata] = useState<BookMetadata | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -150,8 +160,8 @@ export function BookDetailSidebar({ book, cover, bookRelpath, onClose, onBookUpd
         <div className="flex-1 overflow-y-auto">
           {/* Cover */}
           <div className="w-full aspect-[2/3] bg-gray-950 flex items-center justify-center overflow-hidden shrink-0">
-            {cover ? (
-              <img src={cover} alt={book.title} className="w-full h-full object-cover" />
+            {displaySrc ? (
+              <img src={displaySrc} alt={book.title} className="w-full h-full object-cover" />
             ) : (
               <span className="text-indigo-300 text-3xl font-bold">{book.extension}</span>
             )}

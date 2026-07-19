@@ -398,9 +398,23 @@ function notifyCoverReady(key: string): void {
   if (win && !win.isDestroyed()) win.webContents.send('cover:updated', key)
 }
 
+// Pushed on any TERMINAL "no cover" outcome (confirmed not-found or retries
+// exhausted). Key only — it moves a card out of its pending pulse and into the
+// extension-placeholder state without waiting for a remount to re-read the marker.
+function notifyCoverMissing(key: string): void {
+  const win = getMainWindow()
+  if (win && !win.isDestroyed()) win.webContents.send('cover:missing', key)
+}
+
 function notifyCoverCacheCleared(): void {
   const win = getMainWindow()
   if (win && !win.isDestroyed()) win.webContents.send('cover:cache-cleared')
+}
+
+/** Writes the 0-byte negative-cache marker for a key (ensuring the dir first). */
+async function writeNegativeCache(key: string): Promise<void> {
+  await fs.ensureDir(getCoverCacheDir())
+  await fs.writeFile(getCachePath(key), Buffer.alloc(0))
 }
 
 // Active downloads keyed by cache key. `controllers` lets the renderer cancel a
@@ -453,24 +467,41 @@ export async function ensureCover(
   }
 
   // Capture the storefront now so a mid-flight locale change can't shift it.
-  const country = itunesCountry
+  startCoverDownload(key, cachePath, title, author, isbn, itunesCountry)
+  return { key, status: 'pending' }
+}
+
+/**
+ * Sets up the controller/interest bookkeeping for a fresh key and kicks off the
+ * background download, wiring its terminal outcomes to the renderer pushes.
+ * Split out of `ensureCover` so the latter stays a short dispatcher.
+ */
+function startCoverDownload(
+  key: string,
+  cachePath: string,
+  title: string,
+  author: string | undefined,
+  isbn: string | undefined,
+  country: string
+): void {
   const controller = new AbortController()
   controllers.set(key, controller)
   interest.set(key, 1)
 
   const work = (async () => {
-    await fs.ensureDir(getCoverCacheDir())
     const result = await downloadCoverData(title, author, isbn, country, controller.signal)
 
     if (result.status === 'found') {
+      await fs.ensureDir(getCoverCacheDir())
       await fs.writeFile(cachePath, result.data)
       debug(`[cover] Cached "${title}" (${result.data.length} bytes)`)
       notifyCoverReady(key)
       return
     }
     if (result.status === 'not-found') {
-      await fs.writeFile(cachePath, Buffer.alloc(0)) // negative cache
+      await writeNegativeCache(key)
       debug(`[cover] No cover found for "${title}" — negative-cached`)
+      notifyCoverMissing(key)
       return
     }
     // Transient network error — retry later, never negative-cache.
@@ -498,7 +529,6 @@ export async function ensureCover(
     })
 
   inFlight.set(key, work)
-  return { key, status: 'pending' }
 }
 
 /**
@@ -528,13 +558,22 @@ export function cancelAllCovers(): void {
   resetScheduler()
 }
 
-function rescheduleOrGiveUp(key: string, entry: RetryEntry, nextAttempts: number): void {
+async function rescheduleOrGiveUp(
+  key: string,
+  entry: RetryEntry,
+  nextAttempts: number
+): Promise<void> {
   if (nextAttempts < RETRY_DELAYS_MS.length) {
     scheduleRetry(key, entry.title, entry.author, entry.isbn, nextAttempts)
-  } else {
-    retryRegistry.delete(key)
-    debug(`[cover] Max retries reached for "${entry.title}", giving up`)
+    return
   }
+  // Retries exhausted. Negative-cache so a later remount doesn't re-run the full
+  // provider search on every scroll-in, and push cover:missing so the card can
+  // leave its pulse now (the cache can be cleared to try again later).
+  await writeNegativeCache(key)
+  retryRegistry.delete(key)
+  notifyCoverMissing(key)
+  debug(`[cover] Max retries reached for "${entry.title}", giving up (negative-cached)`)
 }
 
 /**
@@ -565,13 +604,13 @@ async function runRetry(key: string, entry: RetryEntry, nextAttempts: number): P
       return
     }
     if (result.status === 'not-found') {
-      await fs.ensureDir(getCoverCacheDir())
-      await fs.writeFile(cachePath, Buffer.alloc(0))
+      await writeNegativeCache(key)
       retryRegistry.delete(key)
       debug(`[cover] Retry #${nextAttempts}: confirmed no cover for "${entry.title}"`)
+      notifyCoverMissing(key)
       return
     }
-    rescheduleOrGiveUp(key, entry, nextAttempts)
+    await rescheduleOrGiveUp(key, entry, nextAttempts)
   } catch (err) {
     if (isAbortError(err)) {
       // Cancelled (teardown / cache-clear). Drop the registry entry; if the app
@@ -583,7 +622,7 @@ async function runRetry(key: string, entry: RetryEntry, nextAttempts: number): P
       `[cover] Retry #${nextAttempts} for "${entry.title}" errored:`,
       err instanceof Error ? err.message : String(err)
     )
-    rescheduleOrGiveUp(key, entry, nextAttempts)
+    await rescheduleOrGiveUp(key, entry, nextAttempts)
   } finally {
     retryControllers.delete(controller)
   }

@@ -44,6 +44,13 @@ export interface KindleAPI {
    * Returns an unsubscribe function.
    */
   onCoverUpdated: (callback: (cacheKey: string) => void) => () => void
+  /**
+   * Subscribe to cover-missing pushes: a cover resolved to "none available"
+   * (confirmed not-found or retries exhausted). The callback receives only the
+   * cache key so the renderer can drop that card out of its pending state.
+   * Returns an unsubscribe function.
+   */
+  onCoverMissing: (callback: (cacheKey: string) => void) => () => void
   /** Fired after the cover cache is cleared so the renderer can reset. Returns unsubscribe. */
   onCoverCacheCleared: (callback: () => void) => () => void
   /** Fired when a Kindle is plugged in while the app is running. */
@@ -120,6 +127,12 @@ export const kindleAPI: KindleAPI = {
     const handler = (_: Electron.IpcRendererEvent, cacheKey: string) => callback(cacheKey)
     ipcRenderer.on('cover:updated', handler)
     return () => ipcRenderer.removeListener('cover:updated', handler)
+  },
+
+  onCoverMissing: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, cacheKey: string) => callback(cacheKey)
+    ipcRenderer.on('cover:missing', handler)
+    return () => ipcRenderer.removeListener('cover:missing', handler)
   },
 
   onCoverCacheCleared: (callback) => {

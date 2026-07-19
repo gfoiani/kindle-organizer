@@ -7,6 +7,13 @@ import { BookDetailSidebar } from './BookDetailSidebar'
 import { formatSize } from '../utils/format'
 import { buildCoverSrc } from '../utils/coverSrc'
 import { toBookRelpath } from '../utils/relpath'
+import {
+  columnsForWidth,
+  GRID_GAP_PX,
+  GRID_PADDING_PX,
+  CARD_INFO_HEIGHT_PX,
+  COVER_ASPECT
+} from '../utils/gridLayout'
 
 interface BooksGridProps {
   books: KindleBook[]
@@ -25,27 +32,17 @@ interface SelectedBook {
   bookRelpath: string
 }
 
-// Grid layout constants (kept in sync with the Tailwind gap/padding below so the
-// virtualizer's row-height estimate matches what actually renders).
-const GRID_GAP_PX = 16 // gap-4
-const GRID_PADDING_PX = 24 // p-6 (one side)
-const CARD_INFO_HEIGHT_PX = 72 // title + author + size block under the cover
-const COVER_ASPECT = 1.5 // 2:3 book cover → height = width * 1.5
+// Layout math (column count + row height) lives in utils/gridLayout so it stays
+// unit-testable without a DOM; the row-height estimate is derived from the same
+// constants the Tailwind gap/padding use, so it matches what actually renders.
 const OVERSCAN_ROWS = 3
-
-/** Responsive column count from the measured container width (mirrors the old sm/lg/xl grid). */
-function columnsForWidth(width: number): number {
-  if (width < 640) return 2
-  if (width < 1024) return 3
-  if (width < 1280) return 4
-  return 5
-}
 
 const BookCard = memo(function BookCard({
   book,
   bookRelpath,
   collections,
   coverVersions,
+  coverMissing,
   coverEpoch,
   onAddToCollection,
   onRemoveFromCollection,
@@ -55,6 +52,7 @@ const BookCard = memo(function BookCard({
   bookRelpath: string
   collections: Collection[]
   coverVersions: Map<string, number>
+  coverMissing: Set<string>
   coverEpoch: number
   onAddToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onRemoveFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
@@ -92,6 +90,9 @@ const BookCard = memo(function BookCard({
   }, [book.title, book.author, book.isbn, coverEpoch])
 
   const version = coverKey ? coverVersions.get(coverKey) : undefined
+  // A terminal "no cover" push (not-found / retries exhausted) moves the card out
+  // of its pulse into the extension placeholder without waiting for a remount.
+  const pushedMissing = coverKey !== null && coverMissing.has(coverKey)
 
   // A push (retry succeeded / cache busted) means the file exists now — clear a
   // prior load error so the new version is retried.
@@ -99,8 +100,10 @@ const BookCard = memo(function BookCard({
     if (version !== undefined) setImgFailed(false)
   }, [version])
 
-  const showImage = coverKey !== null && !imgFailed && (status === 'ready' || version !== undefined)
-  const coverSrc = showImage && coverKey ? buildCoverSrc(coverKey, version ?? 0) : null
+  const isMissing = status === 'missing' || pushedMissing
+  const showImage =
+    coverKey !== null && !imgFailed && !pushedMissing && (status === 'ready' || version !== undefined)
+  const coverSrc = showImage && coverKey ? buildCoverSrc(coverKey, version ?? 0, coverEpoch) : null
   const accessibleName = book.title.trim() || t('books.untitled')
 
   return (
@@ -129,7 +132,7 @@ const BookCard = memo(function BookCard({
             onError={() => setImgFailed(true)}
             className="absolute inset-0 w-full h-full object-cover"
           />
-        ) : status === 'missing' || imgFailed ? (
+        ) : isMissing || imgFailed ? (
           <div className="flex flex-col items-center gap-1">
             <span className="text-indigo-300 text-xl font-bold">{book.extension}</span>
           </div>
@@ -233,14 +236,16 @@ export function BooksGrid({
   const [selectedBook, setSelectedBook] = useState<SelectedBook | null>(null)
   // Cover cache-buster versions keyed on cache key: bumped by a retry-loop push.
   const [coverVersions, setCoverVersions] = useState<Map<string, number>>(new Map())
+  // Keys that resolved to "no cover" (not-found / retries exhausted): a terminal
+  // push that lets a pending card fall through to the extension placeholder.
+  const [coverMissing, setCoverMissing] = useState<Set<string>>(new Set())
   // Bumped when the cover cache is cleared, forcing every card to re-ensure.
   const [coverEpoch, setCoverEpoch] = useState(0)
 
-  const scrollRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
 
-  // Route retry-pushed cover updates into the version map (one listener for the
-  // whole grid); reset everything when the cache is cleared.
+  // Route pushed cover updates into the version/missing maps (one listener pair
+  // for the whole grid); reset everything when the cache is cleared.
   useEffect(() => {
     const offUpdated = window.kindleAPI.onCoverUpdated((cacheKey) => {
       setCoverVersions((prev) => {
@@ -248,13 +253,30 @@ export function BooksGrid({
         next.set(cacheKey, (prev.get(cacheKey) ?? 0) + 1)
         return next
       })
+      // A cover arriving supersedes any prior "missing" verdict for the key.
+      setCoverMissing((prev) => {
+        if (!prev.has(cacheKey)) return prev
+        const next = new Set(prev)
+        next.delete(cacheKey)
+        return next
+      })
+    })
+    const offMissing = window.kindleAPI.onCoverMissing((cacheKey) => {
+      setCoverMissing((prev) => {
+        if (prev.has(cacheKey)) return prev
+        const next = new Set(prev)
+        next.add(cacheKey)
+        return next
+      })
     })
     const offCleared = window.kindleAPI.onCoverCacheCleared(() => {
       setCoverVersions(new Map())
+      setCoverMissing(new Set())
       setCoverEpoch((e) => e + 1)
     })
     return () => {
       offUpdated()
+      offMissing()
       offCleared()
     }
   }, [])
@@ -267,15 +289,24 @@ export function BooksGrid({
     )
   }, [books])
 
-  // Measure the scroll container so we can compute the column count + row height.
-  useEffect(() => {
-    const el = scrollRef.current
+  // The scroll container only renders once there are books to show, so it is
+  // absent at mount. A one-shot effect keyed on `[]` would run against a null
+  // ref and never re-run when the container finally appears — leaving
+  // containerWidth stuck at 0 (→ a fixed fallback column count, no resize
+  // reflow). A callback ref instead fires exactly when the element mounts/
+  // unmounts, so we (re)attach the ResizeObserver at the right moment.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const resizeObserverRef = useRef<ResizeObserver | null>(null)
+  const setScrollEl = useCallback((el: HTMLDivElement | null) => {
+    resizeObserverRef.current?.disconnect()
+    resizeObserverRef.current = null
+    scrollRef.current = el
     if (!el) return
     const measure = (): void => setContainerWidth(el.clientWidth)
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
-    return () => ro.disconnect()
+    resizeObserverRef.current = ro
   }, [])
 
   const handleSelect = useCallback(
@@ -294,7 +325,7 @@ export function BooksGrid({
     )
   }, [books, query])
 
-  const columns = columnsForWidth(containerWidth || 1280)
+  const columns = columnsForWidth(containerWidth)
   const rowCount = Math.ceil(filtered.length / columns)
 
   // Row height estimate: cover height (card width × aspect) + info block + gap.
@@ -382,7 +413,7 @@ export function BooksGrid({
             </button>
           </div>
         ) : (
-          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          <div ref={setScrollEl} className="flex-1 overflow-y-auto">
             <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
               {virtualRows.map((virtualRow) => {
                 const start = virtualRow.index * columns
@@ -410,6 +441,7 @@ export function BooksGrid({
                         bookRelpath={toBookRelpath(book.path, documentsBase)}
                         collections={collections}
                         coverVersions={coverVersions}
+                        coverMissing={coverMissing}
                         coverEpoch={coverEpoch}
                         onAddToCollection={onAddBookToCollection}
                         onRemoveFromCollection={onRemoveBookFromCollection}
@@ -428,6 +460,7 @@ export function BooksGrid({
         <BookDetailSidebar
           book={selectedBook.book}
           cover={selectedBook.cover}
+          coverEpoch={coverEpoch}
           bookRelpath={selectedBook.bookRelpath}
           onClose={() => setSelectedBook(null)}
           onBookUpdated={(updatedBook) => {
