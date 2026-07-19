@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useTranslation } from 'react-i18next'
 import type { KindleBook, Collection, CoverStatus } from '../../../preload/api'
+import type { DisplayBook } from '../utils/mergeBooks'
 import { CollectionPicker } from './CollectionPicker'
 import { BookDetailSidebar } from './BookDetailSidebar'
 import { formatSize } from '../utils/format'
@@ -16,7 +17,7 @@ import {
 } from '../utils/gridLayout'
 
 interface BooksGridProps {
-  books: KindleBook[]
+  books: DisplayBook[]
   isLoading: boolean
   kindleConnected: boolean
   collections: Collection[]
@@ -27,7 +28,7 @@ interface BooksGridProps {
 }
 
 interface SelectedBook {
-  book: KindleBook
+  book: DisplayBook
   cover: string | null
   bookRelpath: string
 }
@@ -48,7 +49,7 @@ const BookCard = memo(function BookCard({
   onRemoveFromCollection,
   onSelect
 }: {
-  book: KindleBook
+  book: DisplayBook
   bookRelpath: string
   collections: Collection[]
   coverVersions: Map<string, number>
@@ -56,7 +57,7 @@ const BookCard = memo(function BookCard({
   coverEpoch: number
   onAddToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onRemoveFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
-  onSelect: (book: KindleBook, bookRelpath: string, cover: string | null) => void
+  onSelect: (book: DisplayBook, bookRelpath: string, cover: string | null) => void
 }) {
   const { t } = useTranslation()
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -145,8 +146,8 @@ const BookCard = memo(function BookCard({
           {book.extension}
         </span>
 
-        {/* Collection tag button */}
-        {collections.length > 0 && (
+        {/* Collection tag button — only device books belong to collections. */}
+        {collections.length > 0 && book.onDevice && (
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -161,6 +162,41 @@ const BookCard = memo(function BookCard({
             </svg>
           </button>
         )}
+
+        {/* Presence badge — on-device (green), in-library-only (amber), or a
+            transient converting/uploading state while a send is in flight. */}
+        <span
+          className={`absolute bottom-2 left-2 flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${
+            book.conversionStatus
+              ? 'bg-indigo-600/80 text-white'
+              : book.onDevice
+                ? 'bg-green-700/85 text-green-50'
+                : 'bg-amber-600/85 text-amber-50'
+          }`}
+        >
+          {book.conversionStatus ? (
+            <>
+              <svg aria-hidden="true" className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {book.conversionStatus === 'uploading' ? t('library.uploading') : t('library.converting')}
+            </>
+          ) : book.onDevice ? (
+            <>
+              <svg aria-hidden="true" className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              {t('books.onKindle')}
+            </>
+          ) : (
+            <>
+              <svg aria-hidden="true" className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              {t('books.inLibraryOnly')}
+            </>
+          )}
+        </span>
       </div>
 
       {/* Info area */}
@@ -310,7 +346,7 @@ export function BooksGrid({
   }, [])
 
   const handleSelect = useCallback(
-    (book: KindleBook, bookRelpath: string, cover: string | null) => {
+    (book: DisplayBook, bookRelpath: string, cover: string | null) => {
       setSelectedBook({ book, cover, bookRelpath })
     },
     []
@@ -436,7 +472,7 @@ export function BooksGrid({
                   >
                     {rowBooks.map((book) => (
                       <BookCard
-                        key={book.path}
+                        key={book.libraryId ?? book.path}
                         book={book}
                         bookRelpath={toBookRelpath(book.path, documentsBase)}
                         collections={collections}
@@ -464,7 +500,11 @@ export function BooksGrid({
           bookRelpath={selectedBook.bookRelpath}
           onClose={() => setSelectedBook(null)}
           onBookUpdated={(updatedBook) => {
-            setSelectedBook((prev) => (prev ? { ...prev, book: updatedBook } : null))
+            // Merge the edited KindleBook fields onto the DisplayBook so
+            // onDevice/libraryId survive a metadata edit.
+            setSelectedBook((prev) =>
+              prev ? { ...prev, book: { ...prev.book, ...updatedBook } } : null
+            )
             onBookUpdated(updatedBook)
           }}
         />

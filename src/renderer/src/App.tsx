@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Sidebar } from './components/Sidebar'
 import { BooksGrid } from './components/BooksGrid'
@@ -8,6 +8,7 @@ import { AutoClassifyModal } from './components/AutoClassifyModal'
 import { useClassifier, type ClassifyResult } from './hooks/useClassifier'
 import { STATUS_RESET_MS } from './utils/constants'
 import { toBookRelpath } from './utils/relpath'
+import { mergeBooks } from './utils/mergeBooks'
 import {
   buildAuthorSubcollections,
   isSubCollection,
@@ -17,12 +18,25 @@ import {
   normalizeKey,
   type AuthoredBook
 } from './utils/collectionHierarchy'
-import type { KindleDrive, KindleBook, Collection } from '../../preload/api'
+import type { KindleDrive, KindleBook, Collection, LibraryBook } from '../../preload/api'
+
+/** How long the drag-and-drop add summary toast stays up (ms). */
+const DROP_SUMMARY_RESET_MS = 6000
+
+interface DropSummary {
+  added: number
+  duplicate: number
+  unsupported: number
+  error: number
+}
 
 export function App() {
   const { t, i18n } = useTranslation()
   const [kindle, setKindle] = useState<KindleDrive | null>(null)
   const [books, setBooks] = useState<KindleBook[]>([])
+  const [libraryBooks, setLibraryBooks] = useState<LibraryBook[]>([])
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+  const [dropSummary, setDropSummary] = useState<DropSummary | null>(null)
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null)
   const [collectionBookPaths, setCollectionBookPaths] = useState<Set<string>>(new Set())
@@ -108,22 +122,84 @@ export function App() {
     }
   }, [])
 
-  useEffect(() => {
-    loadKindle()
-  }, [loadKindle])
-
-  // Prevent Chromium from navigating to a file dropped anywhere in the window,
-  // which would blow away the SPA. The scoped add-books drop overlay is wired
-  // separately; this is the always-on safety guard.
-  useEffect(() => {
-    const preventNav = (e: DragEvent): void => e.preventDefault()
-    window.addEventListener('dragover', preventNav)
-    window.addEventListener('drop', preventNav)
-    return () => {
-      window.removeEventListener('dragover', preventNav)
-      window.removeEventListener('drop', preventNav)
+  const loadLibrary = useCallback(async () => {
+    try {
+      const result = await window.kindleAPI.getLibrary()
+      setLibraryBooks(result)
+    } catch (err) {
+      console.error('Failed to load library:', err)
     }
   }, [])
+
+  useEffect(() => {
+    loadKindle()
+    loadLibrary()
+  }, [loadKindle, loadLibrary])
+
+  // Import files dropped anywhere in the window into the staging library, then
+  // refresh the library and announce a per-status summary.
+  const handleDroppedFiles = useCallback(
+    async (files: File[]) => {
+      const paths = files
+        .map((file) => window.kindleAPI.getPathForFile(file))
+        .filter((p) => p.length > 0)
+      if (paths.length === 0) return
+      try {
+        const results = await window.kindleAPI.addBooks(paths)
+        await loadLibrary()
+        setDropSummary({
+          added: results.filter((r) => r.status === 'added').length,
+          duplicate: results.filter((r) => r.status === 'duplicate').length,
+          unsupported: results.filter((r) => r.status === 'unsupported').length,
+          error: results.filter((r) => r.status === 'error').length
+        })
+        setTimeout(() => setDropSummary(null), DROP_SUMMARY_RESET_MS)
+      } catch (err) {
+        console.error('Failed to add dropped files:', err)
+      }
+    },
+    [loadLibrary]
+  )
+
+  // Window-wide file dropzone. Prevents Chromium from navigating to a dropped
+  // file (which would blow away the SPA), shows a translucent overlay while a
+  // file drag is in progress (ref-counted across nested dragenter/leave), and
+  // routes an actual drop into handleDroppedFiles.
+  useEffect(() => {
+    let dragDepth = 0
+    const hasFiles = (e: DragEvent): boolean =>
+      !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')
+    const onDragEnter = (e: DragEvent): void => {
+      e.preventDefault()
+      if (!hasFiles(e)) return
+      dragDepth += 1
+      setIsDraggingFiles(true)
+    }
+    const onDragOver = (e: DragEvent): void => e.preventDefault()
+    const onDragLeave = (e: DragEvent): void => {
+      e.preventDefault()
+      if (!hasFiles(e)) return
+      dragDepth = Math.max(0, dragDepth - 1)
+      if (dragDepth === 0) setIsDraggingFiles(false)
+    }
+    const onDrop = (e: DragEvent): void => {
+      e.preventDefault()
+      dragDepth = 0
+      setIsDraggingFiles(false)
+      const files = e.dataTransfer?.files
+      if (files && files.length > 0) void handleDroppedFiles(Array.from(files))
+    }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [handleDroppedFiles])
 
   // Keep the main process's cover storefront aligned with the UI language and
   // localize the native menu's custom items on every language change.
@@ -413,10 +489,32 @@ export function App() {
 
   const documentsBase = kindle ? `${kindle.mountpoint}/documents/` : ''
 
+  // The base list the grid renders: device books + staging library, reconciled
+  // so a book that's both on-device and in the library shows as a single card.
+  const displayBooks = useMemo(
+    () => mergeBooks(books, libraryBooks, documentsBase),
+    [books, libraryBooks, documentsBase]
+  )
+
   const filteredBooks =
     selectedCollectionId === null
-      ? books
-      : books.filter((book) => collectionBookPaths.has(toBookRelpath(book.path, documentsBase)))
+      ? displayBooks
+      : displayBooks.filter((book) =>
+          collectionBookPaths.has(toBookRelpath(book.path, documentsBase))
+        )
+
+  const dropSummaryText = dropSummary
+    ? [
+        dropSummary.added > 0 ? t('library.added', { count: dropSummary.added }) : null,
+        dropSummary.duplicate > 0 ? t('library.duplicate', { count: dropSummary.duplicate }) : null,
+        dropSummary.unsupported > 0
+          ? t('library.unsupported', { count: dropSummary.unsupported })
+          : null,
+        dropSummary.error > 0 ? t('library.addError', { count: dropSummary.error }) : null
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : ''
 
   return (
     <div className="flex h-screen bg-gray-900 text-white overflow-hidden">
@@ -566,6 +664,35 @@ export function App() {
           onApply={handleApplySuggestions}
           onClose={() => setIsAIModalOpen(false)}
         />
+      )}
+
+      {/* Drag-and-drop overlay while a file drag is over the window. */}
+      {isDraggingFiles && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-indigo-950/70 backdrop-blur-sm pointer-events-none">
+          <div className="border-2 border-dashed border-indigo-400 rounded-2xl px-10 py-8 text-center">
+            <svg
+              aria-hidden="true"
+              className="w-10 h-10 mx-auto mb-3 text-indigo-300"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            <p className="text-indigo-100 text-lg font-medium">{t('library.dropOverlay')}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Visually-hidden live region announces the add-books summary. */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {dropSummaryText}
+      </div>
+
+      {dropSummaryText && (
+        <div className="fixed bottom-4 right-4 z-40 bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-sm text-gray-200 shadow-lg max-w-xs">
+          {dropSummaryText}
+        </div>
       )}
     </div>
   )

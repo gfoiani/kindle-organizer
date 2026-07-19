@@ -62,7 +62,22 @@
     "booksCountFiltered": "{{filtered}} / {{total}} books",
     "searchPlaceholder": "Search by title or author…",
     "noResults": "No books found for \"{{query}}\"",
-    "removeFilter": "Remove filter"
+    "removeFilter": "Remove filter",
+    "onKindle": "On Kindle",
+    "inLibraryOnly": "In library only"
+  },
+  "library": {
+    "dropOverlay": "Drop EPUB or Kindle files to add them to your library",
+    "converting": "Converting…",
+    "uploading": "Uploading…",
+    "added_one": "{{count}} added",
+    "added_other": "{{count}} added",
+    "duplicate_one": "{{count}} already in library",
+    "duplicate_other": "{{count}} already in library",
+    "unsupported_one": "{{count}} unsupported",
+    "unsupported_other": "{{count}} unsupported",
+    "addError_one": "{{count}} failed",
+    "addError_other": "{{count}} failed"
   },
   "collectionPicker": {
     "loading": "Loading...",
