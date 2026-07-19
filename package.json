@@ -77,7 +77,8 @@
       "!**/node_modules/onnxruntime-node/**",
       "!**/node_modules/onnxruntime-web/**",
       "!**/node_modules/@xenova/**",
-      "!**/node_modules/sharp/**"
+      "!**/node_modules/sharp/**",
+      "!**/node_modules/better-sqlite3/bin/**"
     ],
     "directories": {
       "buildResources": "assets",
