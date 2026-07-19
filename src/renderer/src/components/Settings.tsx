@@ -1,12 +1,32 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18next from '../i18n'
 import { STATUS_RESET_MS } from '../utils/constants'
+import type { KindleFormat } from '../../../preload/api'
 
 export function Settings() {
   const { t } = useTranslation()
   const [isClearing, setIsClearing] = useState(false)
   const [clearResult, setClearResult] = useState<'success' | 'error' | null>(null)
+  const [kindleFormat, setKindleFormatState] = useState<KindleFormat | null>(null)
+
+  useEffect(() => {
+    window.kindleAPI
+      .getFormat()
+      .then(setKindleFormatState)
+      .catch((err) => console.error('Failed to load conversion format:', err))
+  }, [])
+
+  async function handleFormatChange(format: KindleFormat) {
+    const previous = kindleFormat
+    setKindleFormatState(format) // optimistic
+    try {
+      await window.kindleAPI.setFormat(format)
+    } catch (err) {
+      console.error('Failed to set conversion format:', err)
+      setKindleFormatState(previous) // revert on failure
+    }
+  }
 
   async function handleClearCache() {
     setIsClearing(true)
@@ -61,6 +81,37 @@ export function Settings() {
                 English
               </button>
             </div>
+          </div>
+
+          {/* Conversion Format Section */}
+          <div>
+            <h3 className="text-white font-semibold mb-4">{t('settings.conversionFormat')}</h3>
+            <p className="text-gray-400 text-sm mb-4">{t('settings.conversionFormatDescription')}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleFormatChange('azw3')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  kindleFormat === 'azw3'
+                    ? 'bg-indigo-600 text-white border border-indigo-500'
+                    : 'bg-gray-800 text-gray-300 border border-gray-600 hover:bg-gray-700'
+                }`}
+              >
+                AZW3
+              </button>
+              <button
+                onClick={() => handleFormatChange('mobi')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  kindleFormat === 'mobi'
+                    ? 'bg-indigo-600 text-white border border-indigo-500'
+                    : 'bg-gray-800 text-gray-300 border border-gray-600 hover:bg-gray-700'
+                }`}
+              >
+                MOBI
+              </button>
+            </div>
+            {kindleFormat === 'mobi' && (
+              <p className="text-amber-400/80 text-xs mt-3">{t('settings.formatMobiLegacy')}</p>
+            )}
           </div>
 
           {/* Cover Cache Section */}

@@ -5,6 +5,7 @@ import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLoc
 import { applyOverrides, setOverride } from './bookOverrides'
 import { setMenuLabels } from './menu'
 import { stripDocumentsBase } from './paths'
+import { getSettings, setKindleFormat, isKindleFormat, type KindleFormat } from './settings'
 import {
   getCollections,
   getCollectionBooks,
@@ -57,6 +58,12 @@ function assertCollectionMemberships(
     const rec = entry as Record<string, unknown>
     assertString(rec.name, `${name}[].name`)
     assertStringArray(rec.relpaths, `${name}[].relpaths`)
+  }
+}
+
+function assertKindleFormat(value: unknown, name: string): asserts value is KindleFormat {
+  if (!isKindleFormat(value)) {
+    throw new TypeError(`Expected "${name}" to be one of azw3, mobi, got ${String(value)}`)
   }
 }
 
@@ -285,6 +292,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     'kindle:get-app-version',
     withErrorLogging('kindle:get-app-version', async () => app.getVersion())
+  )
+
+  ipcMain.handle(
+    'kindle:get-format',
+    withErrorLogging('kindle:get-format', async () => getSettings().kindleFormat)
+  )
+
+  ipcMain.handle(
+    'kindle:set-format',
+    withErrorLogging('kindle:set-format', async (_, format: unknown) => {
+      assertKindleFormat(format, 'format')
+      setKindleFormat(format)
+    })
   )
 
   ipcMain.handle(

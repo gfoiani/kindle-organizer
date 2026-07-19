@@ -112,6 +112,19 @@ export function App() {
     loadKindle()
   }, [loadKindle])
 
+  // Prevent Chromium from navigating to a file dropped anywhere in the window,
+  // which would blow away the SPA. The scoped add-books drop overlay is wired
+  // separately; this is the always-on safety guard.
+  useEffect(() => {
+    const preventNav = (e: DragEvent): void => e.preventDefault()
+    window.addEventListener('dragover', preventNav)
+    window.addEventListener('drop', preventNav)
+    return () => {
+      window.removeEventListener('dragover', preventNav)
+      window.removeEventListener('drop', preventNav)
+    }
+  }, [])
+
   // Keep the main process's cover storefront aligned with the UI language and
   // localize the native menu's custom items on every language change.
   useEffect(() => {

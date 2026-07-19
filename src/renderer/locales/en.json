@@ -44,7 +44,10 @@
     "cacheCleared": "Cache cleared",
     "cacheError": "Error",
     "cacheInfo": "After clearing the cache, covers will be reloaded on the next library refresh.",
-    "language": "Language"
+    "language": "Language",
+    "conversionFormat": "Conversion format",
+    "conversionFormatDescription": "EPUBs you add are converted to this format before being sent to your Kindle. AZW3 is the modern, recommended format; MOBI is legacy and deprecated by Amazon.",
+    "formatMobiLegacy": "MOBI is legacy and no longer recommended by Amazon."
   },
   "books": {
     "addToCollection": "Add to collection",

@@ -1,8 +1,17 @@
-import { ipcRenderer } from 'electron'
+import { ipcRenderer, webUtils } from 'electron'
 import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
 import type { BookMetadata, CoverStatus, EnsureCoverResult } from '../main/covers'
+import type { KindleFormat } from '../main/settings'
 
-export type { KindleDrive, KindleBook, Collection, BookMetadata, CoverStatus, EnsureCoverResult }
+export type {
+  KindleDrive,
+  KindleBook,
+  Collection,
+  BookMetadata,
+  CoverStatus,
+  EnsureCoverResult,
+  KindleFormat
+}
 
 export interface KindleAPI {
   detectKindleDrives: () => Promise<KindleDrive[]>
@@ -34,6 +43,16 @@ export interface KindleAPI {
   setLocale: (lang: string) => Promise<void>
   /** Returns the running app version (from package.json via app.getVersion()). */
   getAppVersion: () => Promise<string>
+  /** Reads the configured Kindle conversion format (default 'azw3'). */
+  getFormat: () => Promise<KindleFormat>
+  /** Persists the Kindle conversion format. Rejects on an invalid value. */
+  setFormat: (format: KindleFormat) => Promise<void>
+  /**
+   * Resolves the absolute filesystem path of a dropped/selected File. Electron
+   * removed `File.path`; `webUtils.getPathForFile` is the sandbox-safe
+   * replacement. Synchronous — returns the path directly, not a Promise.
+   */
+  getPathForFile: (file: File) => string
   /** Rebuilds the native menu's custom labels in the active UI language. */
   setMenuLabels: (about: string, learnMore: string) => Promise<void>
   /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
@@ -113,6 +132,12 @@ export const kindleAPI: KindleAPI = {
   setLocale: (lang: string) => ipcRenderer.invoke('kindle:set-locale', lang),
 
   getAppVersion: () => ipcRenderer.invoke('kindle:get-app-version'),
+
+  getFormat: () => ipcRenderer.invoke('kindle:get-format'),
+
+  setFormat: (format: KindleFormat) => ipcRenderer.invoke('kindle:set-format', format),
+
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   setMenuLabels: (about: string, learnMore: string) =>
     ipcRenderer.invoke('menu:set-labels', about, learnMore),

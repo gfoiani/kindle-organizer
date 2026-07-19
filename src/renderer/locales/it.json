@@ -94,7 +94,10 @@
     "cacheCleared": "Cache cancellata",
     "cacheError": "Errore",
     "cacheInfo": "Dopo aver cancellato la cache, le copertine verranno ricaricate al prossimo aggiornamento della libreria.",
-    "language": "Lingua"
+    "language": "Lingua",
+    "conversionFormat": "Formato di conversione",
+    "conversionFormatDescription": "Gli EPUB che aggiungi vengono convertiti in questo formato prima di essere inviati al Kindle. AZW3 è il formato moderno e consigliato; MOBI è obsoleto e deprecato da Amazon.",
+    "formatMobiLegacy": "MOBI è un formato obsoleto e non più consigliato da Amazon."
   },
   "books": {
     "addToCollection": "Aggiungi a collezione",
