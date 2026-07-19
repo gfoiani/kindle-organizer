@@ -54,10 +54,17 @@ export function mergeBooks(
   const deviceCards: DisplayBook[] = deviceBooks.map((device) => {
     const relpath = toBookRelpath(device.path, documentsBase)
     const idKey = identityKey(device.title, device.author)
+    // Reconcile to at most one still-unused library entry (skipping ids already
+    // claimed by an earlier device card keeps two identical device books from
+    // sharing a libraryId — and thus a React key). Match on the recorded upload
+    // target, or — only for a book that was actually sent (`uploadedAt` set) — on
+    // identity, so a never-uploaded staged book that merely shares a title|author
+    // with an unrelated device book stays its own card and keeps its send/remove UI.
     const match = libraryBooks.find(
       (lib) =>
-        (lib.targetRelpath !== undefined && lib.targetRelpath === relpath) ||
-        identityKey(lib.title, lib.author) === idKey
+        !usedLibraryIds.has(lib.id) &&
+        ((lib.targetRelpath !== undefined && lib.targetRelpath === relpath) ||
+          (lib.uploadedAt !== undefined && identityKey(lib.title, lib.author) === idKey))
     )
     if (match) usedLibraryIds.add(match.id)
     return {

@@ -17,6 +17,7 @@ import {
 } from './library'
 import { convert, type ConvertOptions } from './convert'
 import { uploadFile } from './deviceUpload'
+import { titleFromFilename } from './titleFromFilename'
 import type { KindleFormat } from './settings'
 
 export type AddStatus = 'added' | 'duplicate' | 'unsupported' | 'error'
@@ -46,12 +47,6 @@ function hashFile(filePath: string): Promise<string> {
     stream.on('data', (chunk) => hash.update(chunk))
     stream.on('end', () => resolve(hash.digest('hex')))
   })
-}
-
-/** Readable fallback title from a filename (strip extension, underscores → spaces). */
-function titleFromFilename(filePath: string): string {
-  const base = path.basename(filePath, path.extname(filePath))
-  return base.replace(/_/g, ' ').trim() || base
 }
 
 /**

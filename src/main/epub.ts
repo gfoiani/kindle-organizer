@@ -2,6 +2,7 @@ import { app } from 'electron'
 import path from 'path'
 import StreamZip from 'node-stream-zip'
 import { XMLParser } from 'fast-xml-parser'
+import { titleFromFilename } from './titleFromFilename'
 
 // Dev-only verbose logging. Silent in packaged builds.
 const debug = (...args: unknown[]): void => {
@@ -17,12 +18,6 @@ export interface EpubMetadata {
 
 const CONTAINER_PATH = 'META-INF/container.xml'
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' })
-
-/** Falls back to a readable title derived from the filename. */
-function titleFromFilename(filePath: string): string {
-  const base = path.basename(filePath, path.extname(filePath))
-  return base.replace(/_/g, ' ').trim() || base
-}
 
 /**
  * Reads title/author and (when present) the embedded cover from an EPUB without

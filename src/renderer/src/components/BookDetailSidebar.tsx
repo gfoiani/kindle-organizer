@@ -82,7 +82,9 @@ export function BookDetailSidebar({
 
   async function handleSend() {
     if (!book.libraryId || !mountpoint) return
-    setSendPhase('converting')
+    // Already-Kindle formats skip conversion — open straight on 'uploading' so the
+    // button doesn't flash a bogus "Converting 0%" before the first progress push.
+    setSendPhase(willConvert ? 'converting' : 'uploading')
     setSendPercent(0)
     try {
       await window.kindleAPI.uploadBook(book.libraryId, mountpoint)

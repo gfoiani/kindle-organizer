@@ -63,15 +63,45 @@ describe('mergeBooks', () => {
     expect(result[0].libraryId).toBe('dune')
   })
 
-  test('reconciles by normalized title|author when relpath does not match', () => {
+  test('reconciles by normalized title|author for a previously-uploaded library book', () => {
     const device = deviceBook({ path: `${BASE}whatever.azw3`, title: 'The Hobbit', author: 'J.R.R. Tolkien' })
-    const lib = libraryBook({ id: 'hob', title: '  the hobbit ', author: 'j.r.r. tolkien' })
+    // uploadedAt set → this staged book really was sent, so an identity match is trusted.
+    const lib = libraryBook({ id: 'hob', title: '  the hobbit ', author: 'j.r.r. tolkien', uploadedAt: 111 })
 
     const result = mergeBooks([device], [lib], BASE)
 
     expect(result).toHaveLength(1)
     expect(result[0].libraryId).toBe('hob')
     expect(result[0].onDevice).toBe(true)
+  })
+
+  test('a never-uploaded staged book sharing a title|author stays library-only (not hidden)', () => {
+    const device = deviceBook({ path: `${BASE}whatever.azw3`, title: 'The Hobbit', author: 'J.R.R. Tolkien' })
+    // Same identity but never sent (no uploadedAt / targetRelpath): must NOT be
+    // swallowed by the device card, or the user loses all send/remove UI for it.
+    const lib = libraryBook({ id: 'hob', title: 'The Hobbit', author: 'J.R.R. Tolkien' })
+
+    const result = mergeBooks([device], [lib], BASE)
+
+    expect(result).toHaveLength(2)
+    const deviceCard = result.find((b) => b.onDevice)
+    const libraryCard = result.find((b) => !b.onDevice)
+    expect(deviceCard?.libraryId).toBeUndefined()
+    expect(libraryCard?.libraryId).toBe('hob')
+  })
+
+  test('a matched library book attaches to only one of several identical device books (unique keys)', () => {
+    const dupA = deviceBook({ path: `${BASE}Dune-1.azw3`, title: 'Dune', author: 'Herbert' })
+    const dupB = deviceBook({ path: `${BASE}Dune-2.azw3`, title: 'Dune', author: 'Herbert' })
+    const lib = libraryBook({ id: 'dune', title: 'Dune', author: 'Herbert', uploadedAt: 222 })
+
+    const result = mergeBooks([dupA, dupB], [lib], BASE)
+
+    expect(result).toHaveLength(2)
+    // The libraryId lands on exactly one card — no two cards share a React key.
+    expect(result.filter((b) => b.libraryId === 'dune')).toHaveLength(1)
+    const keys = result.map((b) => b.libraryId ?? b.path)
+    expect(new Set(keys).size).toBe(result.length)
   })
 
   test('does not merge two genuinely different titles', () => {
