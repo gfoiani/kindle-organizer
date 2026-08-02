@@ -15,6 +15,7 @@ import {
   cancelAllCovers,
   clearCoverCache,
   ensureCover,
+  getBookMetadata,
   importLocalCover,
   setCoverWindowProvider
 } from '../src/main/covers'
@@ -284,5 +285,96 @@ describe('clearCoverCache — async cache clearing', () => {
   test('resolves without throwing when the cache dir does not exist', async () => {
     expect(existsSync(path.join(userData, 'covers'))).toBe(false)
     await expect(clearCoverCache()).resolves.toBeUndefined()
+  })
+})
+
+describe('getBookMetadata — provider chain', () => {
+  /** The exact URL covers.ts builds for the iTunes storefront (default 'us'). */
+  function itunesUrl(title: string, author: string): string {
+    const term = encodeURIComponent(`${title} ${author}`)
+    return `https://itunes.apple.com/search?term=${term}&entity=ebook&limit=3&country=us`
+  }
+
+  function openLibraryUrl(title: string, author: string): string {
+    return `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&limit=1&fields=first_publish_year,subject,key`
+  }
+
+  test('asks iTunes first and returns its genre and de-HTMLed description', async () => {
+    // Arrange — the storefront answers; no other provider is even registered, so
+    // a fallback call would fail the request outright.
+    const title = 'Angeli e demoni'
+    const author = 'Dan Brown'
+    mockRoute(itunesUrl(title, author), {
+      body: JSON.stringify({
+        results: [
+          {
+            genres: ['Thriller e gialli', 'Libri', 'Narrativa e letteratura'],
+            description: '<p>Robert Langdon indaga su<br> un antico complotto.</p>',
+            releaseDate: '2004-05-18T07:00:00Z'
+          }
+        ]
+      })
+    })
+
+    // Act
+    const meta = await getBookMetadata(title, author)
+
+    // Assert
+    expect(meta?.genre).toBe('Thriller e gialli, Narrativa e letteratura')
+    expect(meta?.description).toBe('Robert Langdon indaga su un antico complotto.')
+    expect(meta?.year).toBe('2004')
+  })
+
+  test('keeps at most three genres', async () => {
+    const title = 'La mappa del destino'
+    const author = 'Glenn Cooper'
+    mockRoute(itunesUrl(title, author), {
+      body: JSON.stringify({
+        results: [
+          {
+            genres: ['Thriller e gialli', 'Gialli storici', 'Horror', 'Fantasy', 'Fantasy storico'],
+            description: 'Un thriller.'
+          }
+        ]
+      })
+    })
+
+    const meta = await getBookMetadata(title, author)
+
+    expect(meta?.genre).toBe('Thriller e gialli, Gialli storici, Horror')
+  })
+
+  test('falls through to Open Library when the storefront has nothing usable', async () => {
+    const title = 'Storie di errori memorabili'
+    const author = 'Piero Martin'
+    mockRoute(itunesUrl(title, author), { body: JSON.stringify({ results: [] }) })
+    mockRoute(openLibraryUrl(title, author), {
+      body: JSON.stringify({
+        docs: [{ first_publish_year: 2023, subject: ['Science'], key: '/works/OL1W' }]
+      })
+    })
+    mockRoute('https://openlibrary.org/works/OL1W.json', {
+      body: JSON.stringify({ description: 'Gli errori che hanno fatto la scienza.' })
+    })
+
+    const meta = await getBookMetadata(title, author)
+
+    expect(meta?.genre).toBe('Science')
+    expect(meta?.description).toBe('Gli errori che hanno fatto la scienza.')
+  })
+
+  test('ignores a storefront hit that carries neither genre nor description', async () => {
+    const title = 'Il calice della vita'
+    const author = 'Glenn Cooper'
+    mockRoute(itunesUrl(title, author), {
+      body: JSON.stringify({ results: [{ releaseDate: '2013-01-01T07:00:00Z' }] })
+    })
+    mockRoute(openLibraryUrl(title, author), {
+      body: JSON.stringify({ docs: [{ subject: ['Thrillers'] }] })
+    })
+
+    const meta = await getBookMetadata(title, author)
+
+    expect(meta?.genre).toBe('Thrillers')
   })
 })
