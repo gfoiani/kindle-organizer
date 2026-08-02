@@ -4,6 +4,8 @@ import type { BookMetadata, CoverStatus, EnsureCoverResult } from '../main/cover
 import type { KindleFormat } from '../main/settings'
 import type { LibraryBook } from '../main/library'
 import type { AddResult, SendProgress } from '../main/libraryService'
+import type { RenameTarget } from '../main/localCollections'
+import type { AppErrorCode } from '../main/appErrors'
 
 export type {
   KindleDrive,
@@ -15,10 +17,18 @@ export type {
   KindleFormat,
   LibraryBook,
   AddResult,
-  SendProgress
+  SendProgress,
+  RenameTarget,
+  AppErrorCode
 }
 
 export interface KindleAPI {
+  /**
+   * The host OS (`process.platform`). The renderer needs it to lay out the
+   * custom title bar: macOS keeps its traffic lights on the left, Windows and
+   * Linux draw their window controls on the right.
+   */
+  platform: NodeJS.Platform
   detectKindleDrives: () => Promise<KindleDrive[]>
   readDocuments: (kindleMountpoint: string) => Promise<KindleBook[]>
   syncCalibre: (mountpoint: string) => Promise<void>
@@ -27,8 +37,15 @@ export interface KindleAPI {
   getCollectionBooks: (collectionId: string) => Promise<string[]>
   getBookCollections: (bookRelpath: string) => Promise<string[]>
   createCollection: (name: string) => Promise<Collection>
-  renameCollection: (id: string, newName: string) => Promise<void>
-  deleteCollection: (id: string) => Promise<void>
+  /**
+   * Renames collections atomically (a genre + its author sub-collections; a
+   * single rename is a one-element batch). Rejects with COLLECTION_NAME_TAKEN /
+   * COLLECTION_NAME_EMPTY without applying ANY of them. Returns the refreshed
+   * collection list, so the caller needs no follow-up read.
+   */
+  renameCollections: (targets: RenameTarget[]) => Promise<Collection[]>
+  /** Deletes collections in one transaction. Returns the refreshed list. */
+  deleteCollections: (ids: string[]) => Promise<Collection[]>
   addBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   removeBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   /** Ensures each named collection exists and contains the given relpaths (idempotent batch). */
@@ -76,6 +93,12 @@ export interface KindleAPI {
   onUploadProgress: (callback: (progress: SendProgress) => void) => () => void
   /** Rebuilds the native menu's custom labels in the active UI language. */
   setMenuLabels: (about: string, learnMore: string) => Promise<void>
+  /**
+   * Opens the application menu at the given window coordinates. Needed only on
+   * Windows/Linux, where hiding the native title bar also removes the menu bar
+   * Electron would otherwise draw (see `popupAppMenu` in `main/menu.ts`).
+   */
+  popupAppMenu: (x: number, y: number) => Promise<void>
   /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
   onShowAbout: (callback: () => void) => () => void
   /**
@@ -100,6 +123,8 @@ export interface KindleAPI {
 }
 
 export const kindleAPI: KindleAPI = {
+  platform: process.platform,
+
   detectKindleDrives: () => ipcRenderer.invoke('kindle:detect-drives'),
 
   readDocuments: (kindleMountpoint: string) =>
@@ -119,10 +144,10 @@ export const kindleAPI: KindleAPI = {
 
   createCollection: (name: string) => ipcRenderer.invoke('kindle:create-collection', name),
 
-  renameCollection: (id: string, newName: string) =>
-    ipcRenderer.invoke('kindle:rename-collection', id, newName),
+  renameCollections: (targets: RenameTarget[]) =>
+    ipcRenderer.invoke('kindle:rename-collections', targets),
 
-  deleteCollection: (id: string) => ipcRenderer.invoke('kindle:delete-collection', id),
+  deleteCollections: (ids: string[]) => ipcRenderer.invoke('kindle:delete-collections', ids),
 
   addBookToCollection: (collectionId: string, bookRelpath: string) =>
     ipcRenderer.invoke('kindle:add-book-to-collection', collectionId, bookRelpath),
@@ -183,6 +208,8 @@ export const kindleAPI: KindleAPI = {
 
   setMenuLabels: (about: string, learnMore: string) =>
     ipcRenderer.invoke('menu:set-labels', about, learnMore),
+
+  popupAppMenu: (x: number, y: number) => ipcRenderer.invoke('menu:popup', x, y),
 
   onShowAbout: (callback: () => void) => {
     const handler = () => callback()

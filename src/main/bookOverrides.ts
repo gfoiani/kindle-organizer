@@ -1,8 +1,9 @@
-import Database from 'better-sqlite3'
+import type Database from 'better-sqlite3'
 import * as path from 'path'
 import { app } from 'electron'
 import type { KindleBook } from './kindle'
 import { stripDocumentsBase } from './paths'
+import { createCachedDb } from './sqlite'
 
 interface OverrideRow {
   book_path: string
@@ -10,28 +11,25 @@ interface OverrideRow {
   author: string | null
 }
 
-let _db: Database.Database | null = null
-
-function getDb(): Database.Database {
-  if (!_db) {
-    _db = new Database(path.join(app.getPath('userData'), 'overrides.db'))
-    _db.exec(`
-      CREATE TABLE IF NOT EXISTS book_override (
-        book_path TEXT PRIMARY KEY,
-        title     TEXT NOT NULL,
-        author    TEXT
-      )
-    `)
-  }
-  return _db
+function getDbPath(): string {
+  return path.join(app.getPath('userData'), 'overrides.db')
 }
+
+function initSchema(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS book_override (
+      book_path TEXT PRIMARY KEY,
+      title     TEXT NOT NULL,
+      author    TEXT
+    )
+  `)
+}
+
+const store = createCachedDb(getDbPath, initSchema)
 
 /** Closes the lazily-opened overrides DB handle. Called from `will-quit`. */
 export function closeOverridesDb(): void {
-  if (_db) {
-    _db.close()
-    _db = null
-  }
+  store.close()
 }
 
 export function setOverride(
@@ -39,7 +37,8 @@ export function setOverride(
   title: string,
   author: string | undefined
 ): void {
-  getDb()
+  store
+    .get()
     .prepare<[string, string, string | null]>(
       'INSERT OR REPLACE INTO book_override (book_path, title, author) VALUES (?, ?, ?)'
     )
@@ -47,7 +46,8 @@ export function setOverride(
 }
 
 export function applyOverrides(books: KindleBook[], documentsBase: string): KindleBook[] {
-  const rows = getDb()
+  const rows = store
+    .get()
     .prepare<[], OverrideRow>('SELECT book_path, title, author FROM book_override')
     .all()
 

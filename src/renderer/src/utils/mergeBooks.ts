@@ -16,9 +16,25 @@ export interface DisplayBook extends KindleBook {
   conversionStatus?: BookConversionState
 }
 
+/**
+ * Canonical Unicode form for any string that crossed the device filesystem.
+ *
+ * macOS hands back decomposed (NFD) names from the Kindle volume — "è" as
+ * `e` + U+0300 — while EPUB metadata and the names the app itself writes are
+ * composed (NFC). The two look identical and compare unequal, which silently
+ * broke reconciliation for every accented title: the book was uploaded and
+ * recorded, then still showed up as a second "library only" card.
+ *
+ * Comparison keys only. A real path must stay exactly as the filesystem gave
+ * it, or opening the file can fail.
+ */
+function canonical(value: string): string {
+  return value.normalize('NFC')
+}
+
 /** Normalizes a title|author pair into a stable reconciliation key. */
 function identityKey(title: string, author: string | undefined): string {
-  return `${title.trim().toLowerCase()}|${(author ?? '').trim().toLowerCase()}`
+  return `${canonical(title).trim().toLowerCase()}|${canonical(author ?? '').trim().toLowerCase()}`
 }
 
 /** Builds a library-only card: no device file, so path/size are placeholders. */
@@ -52,7 +68,7 @@ export function mergeBooks(
   const usedLibraryIds = new Set<string>()
 
   const deviceCards: DisplayBook[] = deviceBooks.map((device) => {
-    const relpath = toBookRelpath(device.path, documentsBase)
+    const relpath = canonical(toBookRelpath(device.path, documentsBase))
     const idKey = identityKey(device.title, device.author)
     // Reconcile to at most one still-unused library entry (skipping ids already
     // claimed by an earlier device card keeps two identical device books from
@@ -63,7 +79,7 @@ export function mergeBooks(
     const match = libraryBooks.find(
       (lib) =>
         !usedLibraryIds.has(lib.id) &&
-        ((lib.targetRelpath !== undefined && lib.targetRelpath === relpath) ||
+        ((lib.targetRelpath !== undefined && canonical(lib.targetRelpath) === relpath) ||
           (lib.uploadedAt !== undefined && identityKey(lib.title, lib.author) === idKey))
     )
     if (match) usedLibraryIds.add(match.id)

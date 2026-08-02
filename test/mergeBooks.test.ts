@@ -122,6 +122,43 @@ describe('mergeBooks', () => {
     expect(result.every((b) => b.onDevice === false)).toBe(true)
   })
 
+  // macOS hands back decomposed (NFD) filenames from the Kindle volume while the
+  // app writes and records composed (NFC) ones, so "Non è ciò che volevo" read
+  // off the device is a different string from the identical-looking one in the
+  // library DB. Without normalization the book was uploaded, recorded, and still
+  // showed up twice: once green on the device, once amber as "library only".
+  test('reconciles by targetRelpath when the device path is NFD and the record is NFC', () => {
+    const nfc = 'Non è ciò che volevo.azw3'.normalize('NFC')
+    const nfd = 'Non è ciò che volevo.azw3'.normalize('NFD')
+    const device = deviceBook({ path: `${BASE}${nfd}`, title: 'Non è ciò che volevo'.normalize('NFD') })
+    const lib = libraryBook({ id: 'accented', title: 'Non è ciò che volevo', targetRelpath: nfc })
+
+    const result = mergeBooks([device], [lib], BASE)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].onDevice).toBe(true)
+    expect(result[0].libraryId).toBe('accented')
+  })
+
+  test('reconciles by identity when device and library titles differ only in Unicode form', () => {
+    const device = deviceBook({
+      path: `${BASE}elsewhere.azw3`,
+      title: 'Non è ciò che volevo'.normalize('NFD'),
+      author: 'Enzo Celli'
+    })
+    const lib = libraryBook({
+      id: 'accented-id',
+      title: 'Non è ciò che volevo'.normalize('NFC'),
+      author: 'Enzo Celli',
+      uploadedAt: 222
+    })
+
+    const result = mergeBooks([device], [lib], BASE)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].libraryId).toBe('accented-id')
+  })
+
   test('mixed: device-only, reconciled, and library-only in one pass', () => {
     const deviceOnly = deviceBook({ path: `${BASE}DeviceOnly.azw3`, title: 'Device Only', author: 'D' })
     const reconciledDevice = deviceBook({ path: `${BASE}Shared.azw3`, title: 'Shared', author: 'S' })

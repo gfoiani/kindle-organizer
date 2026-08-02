@@ -1,4 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron'
+import type { BrowserWindowConstructorOptions } from 'electron'
 import path from 'path'
 import { registerIpcHandlers } from './ipc'
 import { setupMenu } from './menu'
@@ -6,9 +7,57 @@ import { startCoverRetryLoop, cancelAllCovers } from './covers'
 import { registerCoverSchemePrivileges, registerCoverProtocol } from './coverProtocol'
 import { startKindleWatcher } from './kindle'
 import { closeOverridesDb } from './bookOverrides'
+import { closeCollectionsDb } from './localCollections'
+import { closeLibraryDb } from './library'
 
 const WINDOW_WIDTH = 1200
 const WINDOW_HEIGHT = 780
+
+/**
+ * Window-chrome theme. The native title bar is hidden on every platform and the
+ * renderer paints its own (`components/TitleBar.tsx`), so the bar is the same
+ * colour as the app instead of following the OS light/dark appearance.
+ *
+ * `THEME_BACKGROUND` must stay in sync with the renderer's `bg-gray-900`, and
+ * `TITLE_BAR_HEIGHT` with `TITLE_BAR_HEIGHT_PX` in `TitleBar.tsx` — on
+ * Windows/Linux the native control overlay is drawn at exactly this height.
+ */
+const THEME_BACKGROUND = '#111827'
+const THEME_SYMBOL_COLOR = '#e5e7eb'
+const TITLE_BAR_HEIGHT = 38
+/** macOS traffic-light group: its box size, used to centre it in the bar. */
+const TRAFFIC_LIGHT_SIZE = 16
+const TRAFFIC_LIGHT_INSET_X = 16
+
+type WindowChrome = Pick<
+  BrowserWindowConstructorOptions,
+  'titleBarStyle' | 'titleBarOverlay' | 'trafficLightPosition'
+>
+
+/**
+ * Hides the native title bar so the renderer can draw a themed one. macOS keeps
+ * its traffic lights (centred in our bar); Windows/Linux get a native
+ * minimise/maximise/close overlay painted in the theme colours.
+ */
+function themedWindowChrome(): WindowChrome {
+  if (process.platform === 'darwin') {
+    return {
+      titleBarStyle: 'hidden',
+      trafficLightPosition: {
+        x: TRAFFIC_LIGHT_INSET_X,
+        y: Math.round((TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2)
+      }
+    }
+  }
+  return {
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: THEME_BACKGROUND,
+      symbolColor: THEME_SYMBOL_COLOR,
+      height: TITLE_BAR_HEIGHT
+    }
+  }
+}
 
 // Schemes we allow to be opened in the user's external browser.
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['https:', 'http:'])
@@ -36,7 +85,8 @@ function createWindow(): BrowserWindow {
     minWidth: 800,
     minHeight: 600,
     title: 'Kindle Organizer',
-    backgroundColor: '#1a1a2e',
+    backgroundColor: THEME_BACKGROUND,
+    ...themedWindowChrome(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -118,11 +168,13 @@ app.whenReady().then(() => {
   )
 
   // Single teardown point for every long-lived resource: the retry interval,
-  // the hot-plug poll, and the lazily-opened overrides DB handle.
+  // the hot-plug poll, and the three cached SQLite handles.
   app.on('will-quit', () => {
     stopRetryLoop()
     stopWatcher()
     closeOverridesDb()
+    closeCollectionsDb()
+    closeLibraryDb()
     cancelAllCovers()
   })
 

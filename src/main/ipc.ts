@@ -3,7 +3,7 @@ import { detectKindleDrives, readDocuments } from './kindle'
 import { readCalibreMetadata, writeCalibreMetadata, readCalibreIsbnMap } from './calibre'
 import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
 import { applyOverrides, setOverride } from './bookOverrides'
-import { setMenuLabels } from './menu'
+import { setMenuLabels, popupAppMenu } from './menu'
 import { stripDocumentsBase } from './paths'
 import { getSettings, setKindleFormat, isKindleFormat, type KindleFormat } from './settings'
 import { addDroppedFiles, removeLibraryBook, sendToKindle, type SendProgress } from './libraryService'
@@ -14,12 +14,13 @@ import {
   getBookCollections,
   getAllBookTags,
   createCollection,
-  renameCollection,
-  deleteCollection,
+  renameCollections,
+  deleteCollections,
   addBookToCollection,
   removeBookFromCollection,
   ensureCollectionsContain,
-  importFromCalibre
+  importFromCalibre,
+  type RenameTarget
 } from './localCollections'
 
 // ─── Boundary validation ────────────────────────────────────────────────────
@@ -46,6 +47,12 @@ function assertStringArray(value: unknown, name: string): asserts value is strin
   }
 }
 
+function assertFiniteNumber(value: unknown, name: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError(`Expected "${name}" to be a finite number, got ${String(value)}`)
+  }
+}
+
 function assertCollectionMemberships(
   value: unknown,
   name: string
@@ -60,6 +67,20 @@ function assertCollectionMemberships(
     const rec = entry as Record<string, unknown>
     assertString(rec.name, `${name}[].name`)
     assertStringArray(rec.relpaths, `${name}[].relpaths`)
+  }
+}
+
+function assertRenameTargets(value: unknown, name: string): asserts value is RenameTarget[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`Expected "${name}" to be an array`)
+  }
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new TypeError(`Expected each "${name}" entry to be an object`)
+    }
+    const rec = entry as Record<string, unknown>
+    assertString(rec.id, `${name}[].id`)
+    assertString(rec.newName, `${name}[].newName`)
   }
 }
 
@@ -183,20 +204,24 @@ export function registerIpcHandlers(): void {
     })
   )
 
+  // Rename/delete are batch-only. A cascade over a genre and its author
+  // sub-collections used to be one IPC round-trip (and one SQLite transaction)
+  // PER collection, so a mid-way failure left a half-renamed tree; these apply
+  // the whole set atomically and return the refreshed list in one hop. A single
+  // collection is just a one-element batch.
   ipcMain.handle(
-    'kindle:rename-collection',
-    withErrorLogging('kindle:rename-collection', async (_, id: unknown, newName: unknown) => {
-      assertString(id, 'id')
-      assertString(newName, 'newName')
-      renameCollection(id, newName)
+    'kindle:rename-collections',
+    withErrorLogging('kindle:rename-collections', async (_, targets: unknown) => {
+      assertRenameTargets(targets, 'targets')
+      return renameCollections(targets)
     })
   )
 
   ipcMain.handle(
-    'kindle:delete-collection',
-    withErrorLogging('kindle:delete-collection', async (_, id: unknown) => {
-      assertString(id, 'id')
-      deleteCollection(id)
+    'kindle:delete-collections',
+    withErrorLogging('kindle:delete-collections', async (_, ids: unknown) => {
+      assertStringArray(ids, 'ids')
+      return deleteCollections(ids)
     })
   )
 
@@ -356,6 +381,17 @@ export function registerIpcHandlers(): void {
       assertString(about, 'about')
       assertString(learnMore, 'learnMore')
       setMenuLabels({ about, learnMore })
+    })
+  )
+
+  // Opens the application menu under the title bar's menu button. Only the
+  // renderer's Windows/Linux title bar calls this — see `popupAppMenu`.
+  ipcMain.handle(
+    'menu:popup',
+    withErrorLogging('menu:popup', async (_, x: unknown, y: unknown) => {
+      assertFiniteNumber(x, 'x')
+      assertFiniteNumber(y, 'y')
+      popupAppMenu(Math.round(x), Math.round(y))
     })
   )
 }

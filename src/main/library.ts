@@ -1,14 +1,14 @@
 import { app } from 'electron'
-import Database from 'better-sqlite3'
+import type Database from 'better-sqlite3'
 import path from 'path'
+import { createCachedDb } from './sqlite'
 
 /**
  * SQLite store for the local staging library — books the user added to the app
  * (by drag-and-drop) that may or may not yet live on a connected Kindle.
  *
- * Follows the open-per-call pattern of localCollections.ts (fresh connection per
- * call, WAL + foreign_keys pragmas re-applied every open, close() in finally),
- * NOT the cached-singleton style of bookOverrides.ts.
+ * Uses the shared cached-connection helper (see sqlite.ts), like every other
+ * store in the app: one handle for the process lifetime, closed on `will-quit`.
  */
 
 /** Lifecycle of a per-format conversion of a library book. */
@@ -67,13 +67,6 @@ function getDbPath(): string {
   return path.join(app.getPath('userData'), 'library.db')
 }
 
-function openDb(): Database.Database {
-  const db = new Database(getDbPath())
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-  return db
-}
-
 function initSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS library_books (
@@ -98,6 +91,13 @@ function initSchema(db: Database.Database): void {
       PRIMARY KEY (library_id, format)
     );
   `)
+}
+
+const store = createCachedDb(getDbPath, initSchema)
+
+/** Closes the library DB handle. Called from `will-quit`. */
+export function closeLibraryDb(): void {
+  store.close()
 }
 
 interface LibraryBookRow {
@@ -149,16 +149,16 @@ function toConversion(row: ConversionRow): LibraryConversion {
 }
 
 export function insertLibraryBook(input: LibraryBookInput): LibraryBook {
-  const db = openDb()
-  try {
-    initSchema(db)
-    const createdAt = Date.now()
-    db.prepare(
+  const createdAt = Date.now()
+  store
+    .get()
+    .prepare(
       `INSERT INTO library_books
          (id, content_hash, original_path, filename, title, author,
           source_format, cover_key, target_relpath, uploaded_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`
-    ).run(
+    )
+    .run(
       input.id,
       input.contentHash,
       input.originalPath,
@@ -170,128 +170,83 @@ export function insertLibraryBook(input: LibraryBookInput): LibraryBook {
       input.targetRelpath ?? null,
       createdAt
     )
-    return {
-      id: input.id,
-      contentHash: input.contentHash,
-      originalPath: input.originalPath,
-      filename: input.filename,
-      title: input.title,
-      ...(input.author ? { author: input.author } : {}),
-      sourceFormat: input.sourceFormat,
-      ...(input.coverKey ? { coverKey: input.coverKey } : {}),
-      ...(input.targetRelpath ? { targetRelpath: input.targetRelpath } : {}),
-      createdAt
-    }
-  } finally {
-    db.close()
+  return {
+    id: input.id,
+    contentHash: input.contentHash,
+    originalPath: input.originalPath,
+    filename: input.filename,
+    title: input.title,
+    ...(input.author ? { author: input.author } : {}),
+    sourceFormat: input.sourceFormat,
+    ...(input.coverKey ? { coverKey: input.coverKey } : {}),
+    ...(input.targetRelpath ? { targetRelpath: input.targetRelpath } : {}),
+    createdAt
   }
 }
 
 export function findByContentHash(contentHash: string): LibraryBook | null {
-  const db = openDb()
-  try {
-    initSchema(db)
-    const row = db
-      .prepare<[string], LibraryBookRow>('SELECT * FROM library_books WHERE content_hash = ?')
-      .get(contentHash)
-    return row ? toLibraryBook(row) : null
-  } finally {
-    db.close()
-  }
+  const row = store
+    .get()
+    .prepare<[string], LibraryBookRow>('SELECT * FROM library_books WHERE content_hash = ?')
+    .get(contentHash)
+  return row ? toLibraryBook(row) : null
 }
 
 export function getLibraryBook(id: string): LibraryBook | null {
-  const db = openDb()
-  try {
-    initSchema(db)
-    const row = db
-      .prepare<[string], LibraryBookRow>('SELECT * FROM library_books WHERE id = ?')
-      .get(id)
-    return row ? toLibraryBook(row) : null
-  } finally {
-    db.close()
-  }
+  const row = store
+    .get()
+    .prepare<[string], LibraryBookRow>('SELECT * FROM library_books WHERE id = ?')
+    .get(id)
+  return row ? toLibraryBook(row) : null
 }
 
 export function listLibraryBooks(): LibraryBook[] {
-  const db = openDb()
-  try {
-    initSchema(db)
-    const rows = db
-      .prepare<[], LibraryBookRow>('SELECT * FROM library_books ORDER BY created_at DESC, rowid DESC')
-      .all()
-    return rows.map(toLibraryBook)
-  } finally {
-    db.close()
-  }
+  const rows = store
+    .get()
+    .prepare<[], LibraryBookRow>('SELECT * FROM library_books ORDER BY created_at DESC, rowid DESC')
+    .all()
+  return rows.map(toLibraryBook)
 }
 
 export function deleteLibraryBook(id: string): void {
-  const db = openDb()
-  try {
-    initSchema(db)
-    db.prepare('DELETE FROM library_books WHERE id = ?').run(id)
-  } finally {
-    db.close()
-  }
+  store.get().prepare('DELETE FROM library_books WHERE id = ?').run(id)
 }
 
 export function upsertConversion(input: ConversionInput): LibraryConversion {
-  const db = openDb()
-  try {
-    initSchema(db)
-    db.prepare(
+  store
+    .get()
+    .prepare(
       `INSERT INTO library_conversions (library_id, format, output_path, status, error)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(library_id, format) DO UPDATE SET
          output_path = excluded.output_path,
          status = excluded.status,
          error = excluded.error`
-    ).run(
-      input.libraryId,
-      input.format,
-      input.outputPath ?? null,
-      input.status,
-      input.error ?? null
     )
-    return {
-      libraryId: input.libraryId,
-      format: input.format,
-      status: input.status,
-      ...(input.outputPath ? { outputPath: input.outputPath } : {}),
-      ...(input.error ? { error: input.error } : {})
-    }
-  } finally {
-    db.close()
+    .run(input.libraryId, input.format, input.outputPath ?? null, input.status, input.error ?? null)
+  return {
+    libraryId: input.libraryId,
+    format: input.format,
+    status: input.status,
+    ...(input.outputPath ? { outputPath: input.outputPath } : {}),
+    ...(input.error ? { error: input.error } : {})
   }
 }
 
 export function getConversion(libraryId: string, format: string): LibraryConversion | null {
-  const db = openDb()
-  try {
-    initSchema(db)
-    const row = db
-      .prepare<[string, string], ConversionRow>(
-        'SELECT * FROM library_conversions WHERE library_id = ? AND format = ?'
-      )
-      .get(libraryId, format)
-    return row ? toConversion(row) : null
-  } finally {
-    db.close()
-  }
+  const row = store
+    .get()
+    .prepare<[string, string], ConversionRow>(
+      'SELECT * FROM library_conversions WHERE library_id = ? AND format = ?'
+    )
+    .get(libraryId, format)
+  return row ? toConversion(row) : null
 }
 
 /** Marks a book as uploaded: stamps uploaded_at (now) and the device relpath. */
 export function setUploaded(id: string, targetRelpath: string): void {
-  const db = openDb()
-  try {
-    initSchema(db)
-    db.prepare('UPDATE library_books SET uploaded_at = ?, target_relpath = ? WHERE id = ?').run(
-      Date.now(),
-      targetRelpath,
-      id
-    )
-  } finally {
-    db.close()
-  }
+  store
+    .get()
+    .prepare('UPDATE library_books SET uploaded_at = ?, target_relpath = ? WHERE id = ?')
+    .run(Date.now(), targetRelpath, id)
 }

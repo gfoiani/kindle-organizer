@@ -1,14 +1,17 @@
 import { afterAll, beforeEach, describe, expect, test } from 'vitest'
 import { cleanupUserDataDirs, freshUserData } from './setup/electron-mock'
 import type { CalibreBook } from '../src/main/calibre'
+import { AppError } from '../src/main/appErrors'
 import {
   addBookToCollection,
   createCollection,
+  deleteCollections,
   ensureCollectionsContain,
   getAllBookTags,
   getCollectionBooks,
   getCollections,
-  importFromCalibre
+  importFromCalibre,
+  renameCollections
 } from '../src/main/localCollections'
 
 // Each test gets an isolated userData dir (fresh collections.db).
@@ -251,5 +254,178 @@ describe('ensureCollectionsContain — generic batch writer', () => {
       { name: 'Thriller / Glenn Cooper', relpaths: ['Cooper/A.azw3'] }
     ])
     expect(result.find((c) => c.name === 'Thriller / Glenn Cooper')?.bookCount).toBe(1)
+  })
+})
+
+describe('createCollection — name validation', () => {
+  test('rejects a duplicate name with COLLECTION_NAME_TAKEN', () => {
+    // Arrange
+    createCollection('Thriller')
+
+    // Act / Assert — a raw SQLITE_CONSTRAINT leaks an untranslatable message,
+    // so the store maps it to a code the renderer can localize.
+    expect(() => createCollection('Thriller')).toThrow(AppError)
+    expect(() => createCollection('Thriller')).toThrow('COLLECTION_NAME_TAKEN')
+  })
+
+  test('rejects a blank name with COLLECTION_NAME_EMPTY', () => {
+    expect(() => createCollection('   ')).toThrow('COLLECTION_NAME_EMPTY')
+    expect(getCollections()).toHaveLength(0)
+  })
+
+  test('stores the trimmed name', () => {
+    const created = createCollection('  Sci-Fi  ')
+    expect(created.name).toBe('Sci-Fi')
+    expect(findCollection('Sci-Fi')).toBeDefined()
+  })
+})
+
+describe('renameCollections — name validation', () => {
+  test('rejects a rename onto an existing name with COLLECTION_NAME_TAKEN', () => {
+    // Arrange
+    const thriller = createCollection('Thriller')
+    createCollection('Horror')
+
+    // Act / Assert
+    expect(() => renameCollections([{ id: thriller.id, newName: 'Horror' }])).toThrow(
+      'COLLECTION_NAME_TAKEN'
+    )
+    expect(findCollection('Thriller')).toBeDefined()
+  })
+
+  test('rejects a blank name with COLLECTION_NAME_EMPTY', () => {
+    const thriller = createCollection('Thriller')
+    expect(() => renameCollections([{ id: thriller.id, newName: '  ' }])).toThrow(
+      'COLLECTION_NAME_EMPTY'
+    )
+    expect(findCollection('Thriller')).toBeDefined()
+  })
+
+  test('allows renaming a collection to its own (trimmed) name', () => {
+    const thriller = createCollection('Thriller')
+    expect(() => renameCollections([{ id: thriller.id, newName: ' Thriller ' }])).not.toThrow()
+    expect(findCollection('Thriller')?.id).toBe(thriller.id)
+  })
+})
+
+describe('deleteCollections — transactional batch', () => {
+  test('deletes every id in one call and returns the refreshed list', () => {
+    // Arrange — a genre plus its author sub-collections (the cascade-delete shape).
+    const genre = createCollection('Thriller')
+    const a = createCollection('Thriller / Glenn Cooper')
+    const b = createCollection('Thriller / Lee Child')
+    createCollection('Horror')
+
+    // Act
+    const remaining = deleteCollections([genre.id, a.id, b.id])
+
+    // Assert
+    expect(remaining.map((c) => c.name)).toEqual(['Horror'])
+  })
+
+  test('ignores unknown ids instead of throwing', () => {
+    createCollection('Horror')
+    expect(() => deleteCollections(['does-not-exist'])).not.toThrow()
+    expect(getCollections()).toHaveLength(1)
+  })
+
+  test('cascades the membership rows of the deleted collections', () => {
+    const genre = createCollection('Thriller')
+    addBookToCollection(genre.id, 'A/Book.azw3')
+
+    deleteCollections([genre.id])
+
+    expect(getAllBookTags(['A/Book.azw3']).get('A/Book.azw3')).toEqual([])
+  })
+
+  test('an empty id list is a no-op', () => {
+    createCollection('Horror')
+    expect(deleteCollections([])).toHaveLength(1)
+  })
+})
+
+describe('renameCollections — transactional batch', () => {
+  test('renames a genre and its author sub-collections in one call', () => {
+    // Arrange
+    const genre = createCollection('Thriller')
+    const child = createCollection('Thriller / Glenn Cooper')
+
+    // Act
+    const after = renameCollections([
+      { id: genre.id, newName: 'Giallo' },
+      { id: child.id, newName: 'Giallo / Glenn Cooper' }
+    ])
+
+    // Assert — ids are stable, so UI state keyed on them survives.
+    expect(after.map((c) => c.name).sort()).toEqual(['Giallo', 'Giallo / Glenn Cooper'])
+    expect(findCollection('Giallo')?.id).toBe(genre.id)
+    expect(findCollection('Giallo / Glenn Cooper')?.id).toBe(child.id)
+  })
+
+  test('rolls back ENTIRELY when one target collides with an existing name', () => {
+    // Arrange — "Horror" is taken, so the second rename must fail...
+    const genre = createCollection('Thriller')
+    const child = createCollection('Thriller / Glenn Cooper')
+    createCollection('Horror')
+
+    // Act / Assert
+    expect(() =>
+      renameCollections([
+        { id: child.id, newName: 'Giallo / Glenn Cooper' },
+        { id: genre.id, newName: 'Horror' }
+      ])
+    ).toThrow('COLLECTION_NAME_TAKEN')
+
+    // ...and the FIRST rename must not survive: a half-renamed tree is the bug
+    // the per-item loop used to leave behind.
+    expect(findCollection('Thriller')?.id).toBe(genre.id)
+    expect(findCollection('Thriller / Glenn Cooper')?.id).toBe(child.id)
+    expect(findCollection('Giallo / Glenn Cooper')).toBeUndefined()
+  })
+
+  test('tolerates a rename sequence that reuses a name freed within the batch', () => {
+    // Arrange — "Thriller" is only free because the first target vacates it.
+    const first = createCollection('Thriller')
+    const second = createCollection('Giallo')
+
+    // Act
+    renameCollections([
+      { id: first.id, newName: 'Crime' },
+      { id: second.id, newName: 'Thriller' }
+    ])
+
+    // Assert
+    expect(findCollection('Crime')?.id).toBe(first.id)
+    expect(findCollection('Thriller')?.id).toBe(second.id)
+  })
+
+  test('rejects a blank target name with COLLECTION_NAME_EMPTY', () => {
+    const genre = createCollection('Thriller')
+    expect(() => renameCollections([{ id: genre.id, newName: '  ' }])).toThrow(
+      'COLLECTION_NAME_EMPTY'
+    )
+    expect(findCollection('Thriller')).toBeDefined()
+  })
+
+  test('an empty target list is a no-op', () => {
+    createCollection('Horror')
+    expect(renameCollections([])).toHaveLength(1)
+  })
+})
+
+describe('connection caching', () => {
+  test('a userData switch retires the stale handle instead of writing the old DB', () => {
+    // Arrange — populate the first profile.
+    createCollection('Thriller')
+    expect(getCollections()).toHaveLength(1)
+
+    // Act — the app never swaps userData, but the test harness does; the cached
+    // handle must follow the path or every later test would read this DB.
+    freshUserData()
+
+    // Assert
+    expect(getCollections()).toEqual([])
+    createCollection('Thriller')
+    expect(getCollections()).toHaveLength(1)
   })
 })
