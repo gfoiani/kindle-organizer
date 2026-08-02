@@ -4,6 +4,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-08-03
+
+### Added
+
+- **Staging library** — drag books into the app and keep them there whether or not a Kindle is attached. Device and library are merged into one grid with presence badges ("on Kindle" / "in library only"), and books can be converted and sent to the device on demand, in the format you choose (AZW3 or MOBI).
+- **EPUB support in the library** — EPUB metadata is parsed on import and the cover cache is seeded from the file's own embedded artwork, so staged books look right before they ever reach the device.
+- **Bulk actions** — turn on multi-selection (or long-press a book) to send, remove or add many books to a collection at once, with progress and a stop button.
+- **Eject** — a button next to "Write to Kindle" unmounts the device so it can be safely unplugged.
+- **One-click filter reset** — the sidebar's "All books" entry is now pinned to the top and, while anything is narrowing the grid, turns into a "clear filters" action that lifts the collection, the search box and the presence chips together.
+- A custom title bar and in-app notices, replacing silent console-only failures.
+
+### Changed
+
+- **AI organization is genuinely usable** — the confidence score was recalibrated (per-label centering, an author prior and per-book normalization), genres are sent to the model with a short gloss, and online book descriptions are used by default. Measured on a real library: top-1 accuracy went from 15–23% to 50% offline and 77% with online metadata, and the median confidence from 8% to ~59%, so the threshold slider finally means something.
+- **Better book metadata** — the lookup chain now asks the iTunes storefront first, which is the only provider with real coverage of localized editions (26/26 vs 3/16 for Open Library on an Italian library).
+- Collections, overrides and the library share one cached SQLite connection per store instead of opening and closing the database on every call.
+
+### Fixed
+
+- **AI organization could not start at all** — the renderer's Content-Security-Policy refused to create the classifier worker, and a CSP-blocked worker reports an empty error, so the failure surfaced as a generic "could not start the classification engine".
+- A missing or undownloadable AI model now says so, instead of sharing the generic engine-failure message.
+- Device and library reconciliation: duplicate entries after a send, stale presence badges, and the book count settling as a refresh completes.
+
+### Internal
+
+- Main-process failures travel to the UI as machine-readable codes mapped through an exhaustive table, so a missing translation is a compile error.
+- New unit tests for scoring, error mapping, eject argv construction, bulk selection, presence filtering and loading phases.
+- `yarn fix-electron` repairs a missing Electron binary without a full reinstall.
+
 ## [0.3.0] - 2026-07-19
 
 ### Added
