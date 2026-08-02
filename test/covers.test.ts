@@ -11,7 +11,14 @@ const { httpGet, httpsGet } = vi.hoisted(() => ({ httpGet: vi.fn(), httpsGet: vi
 vi.mock('http', () => ({ get: httpGet }))
 vi.mock('https', () => ({ get: httpsGet }))
 
-import { cancelAllCovers, clearCoverCache, ensureCover, setCoverWindowProvider } from '../src/main/covers'
+import {
+  cancelAllCovers,
+  clearCoverCache,
+  ensureCover,
+  getBookMetadata,
+  importLocalCover,
+  setCoverWindowProvider
+} from '../src/main/covers'
 import { httpGetImpl, mockRoute, resetHttpMock } from './setup/httpMock'
 
 let userData: string
@@ -193,6 +200,74 @@ describe('ensureCover — terminal not-found → negative cache + notifyCoverMis
   })
 })
 
+describe('importLocalCover — seed the cache from an embedded image', () => {
+  test('writes the image under the (title, author) key and returns that key', async () => {
+    // Arrange
+    const title = 'Locally Sourced'
+    const author = 'Anna Author'
+    const image = fakeJpeg()
+
+    // Act
+    const key = await importLocalCover(title, author, image)
+
+    // Assert
+    expect(key).toBe(cacheKeyFor(title, author))
+    const onDisk = readFileSync(cachePathFor(title, author))
+    expect(onDisk.equals(image)).toBe(true)
+    expect(httpGet).not.toHaveBeenCalled()
+    expect(httpsGet).not.toHaveBeenCalled()
+  })
+
+  test('a subsequent ensureCover(title, author) is a "ready" hit with no network', async () => {
+    const title = 'Seeded Book'
+    const author = 'Someone'
+    await importLocalCover(title, author, fakeJpeg())
+
+    const result = await ensureCover(title, author)
+
+    expect(result).toEqual({ key: cacheKeyFor(title, author), status: 'ready' })
+    expect(httpGet).not.toHaveBeenCalled()
+    expect(httpsGet).not.toHaveBeenCalled()
+  })
+
+  test('returns null and writes nothing for an invalid image buffer', async () => {
+    const title = 'Bad Image'
+    const author = 'Nobody'
+
+    const key = await importLocalCover(title, author, Buffer.from('not an image'))
+
+    expect(key).toBeNull()
+    expect(existsSync(cachePathFor(title, author))).toBe(false)
+  })
+
+  test('pushes ("cover:updated", key) so the renderer re-fetches the bytes', async () => {
+    const title = 'Push Me'
+    const author = 'Author X'
+    const send = vi.fn()
+    setCoverWindowProvider(() => ({ isDestroyed: () => false, webContents: { send } }) as never)
+
+    const key = await importLocalCover(title, author, fakeJpeg())
+
+    expect(send).toHaveBeenCalledWith('cover:updated', key)
+  })
+
+  test('overwrites a negative-cache marker with the real image', async () => {
+    const title = 'Was Missing'
+    const author = 'Now Found'
+    // Seed a 0-byte negative-cache marker first.
+    const cachePath = cachePathFor(title, author)
+    mkdirSync(path.dirname(cachePath), { recursive: true })
+    writeFileSync(cachePath, Buffer.alloc(0))
+    expect((await ensureCover(title, author)).status).toBe('missing')
+
+    // Importing a real cover replaces the marker.
+    await importLocalCover(title, author, fakeJpeg())
+
+    expect(readFileSync(cachePath).length).toBeGreaterThan(0)
+    expect((await ensureCover(title, author)).status).toBe('ready')
+  })
+})
+
 describe('clearCoverCache — async cache clearing', () => {
   test('removes every cached cover file via the async path', async () => {
     const coversDir = path.join(userData, 'covers')
@@ -210,5 +285,96 @@ describe('clearCoverCache — async cache clearing', () => {
   test('resolves without throwing when the cache dir does not exist', async () => {
     expect(existsSync(path.join(userData, 'covers'))).toBe(false)
     await expect(clearCoverCache()).resolves.toBeUndefined()
+  })
+})
+
+describe('getBookMetadata — provider chain', () => {
+  /** The exact URL covers.ts builds for the iTunes storefront (default 'us'). */
+  function itunesUrl(title: string, author: string): string {
+    const term = encodeURIComponent(`${title} ${author}`)
+    return `https://itunes.apple.com/search?term=${term}&entity=ebook&limit=3&country=us`
+  }
+
+  function openLibraryUrl(title: string, author: string): string {
+    return `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&limit=1&fields=first_publish_year,subject,key`
+  }
+
+  test('asks iTunes first and returns its genre and de-HTMLed description', async () => {
+    // Arrange — the storefront answers; no other provider is even registered, so
+    // a fallback call would fail the request outright.
+    const title = 'Angeli e demoni'
+    const author = 'Dan Brown'
+    mockRoute(itunesUrl(title, author), {
+      body: JSON.stringify({
+        results: [
+          {
+            genres: ['Thriller e gialli', 'Libri', 'Narrativa e letteratura'],
+            description: '<p>Robert Langdon indaga su<br> un antico complotto.</p>',
+            releaseDate: '2004-05-18T07:00:00Z'
+          }
+        ]
+      })
+    })
+
+    // Act
+    const meta = await getBookMetadata(title, author)
+
+    // Assert
+    expect(meta?.genre).toBe('Thriller e gialli, Narrativa e letteratura')
+    expect(meta?.description).toBe('Robert Langdon indaga su un antico complotto.')
+    expect(meta?.year).toBe('2004')
+  })
+
+  test('keeps at most three genres', async () => {
+    const title = 'La mappa del destino'
+    const author = 'Glenn Cooper'
+    mockRoute(itunesUrl(title, author), {
+      body: JSON.stringify({
+        results: [
+          {
+            genres: ['Thriller e gialli', 'Gialli storici', 'Horror', 'Fantasy', 'Fantasy storico'],
+            description: 'Un thriller.'
+          }
+        ]
+      })
+    })
+
+    const meta = await getBookMetadata(title, author)
+
+    expect(meta?.genre).toBe('Thriller e gialli, Gialli storici, Horror')
+  })
+
+  test('falls through to Open Library when the storefront has nothing usable', async () => {
+    const title = 'Storie di errori memorabili'
+    const author = 'Piero Martin'
+    mockRoute(itunesUrl(title, author), { body: JSON.stringify({ results: [] }) })
+    mockRoute(openLibraryUrl(title, author), {
+      body: JSON.stringify({
+        docs: [{ first_publish_year: 2023, subject: ['Science'], key: '/works/OL1W' }]
+      })
+    })
+    mockRoute('https://openlibrary.org/works/OL1W.json', {
+      body: JSON.stringify({ description: 'Gli errori che hanno fatto la scienza.' })
+    })
+
+    const meta = await getBookMetadata(title, author)
+
+    expect(meta?.genre).toBe('Science')
+    expect(meta?.description).toBe('Gli errori che hanno fatto la scienza.')
+  })
+
+  test('ignores a storefront hit that carries neither genre nor description', async () => {
+    const title = 'Il calice della vita'
+    const author = 'Glenn Cooper'
+    mockRoute(itunesUrl(title, author), {
+      body: JSON.stringify({ results: [{ releaseDate: '2013-01-01T07:00:00Z' }] })
+    })
+    mockRoute(openLibraryUrl(title, author), {
+      body: JSON.stringify({ docs: [{ subject: ['Thrillers'] }] })
+    })
+
+    const meta = await getBookMetadata(title, author)
+
+    expect(meta?.genre).toBe('Thrillers')
   })
 })

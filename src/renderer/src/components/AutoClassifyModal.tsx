@@ -1,12 +1,14 @@
-import { useState, useRef, useEffect, useMemo, useId } from 'react'
+import { useState, useRef, useEffect, useMemo, useId, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ClassifyResult, ModelLoadingStage, UseClassifierReturn } from '../hooks/useClassifier'
 import type { KindleBook, Collection } from '../../../preload/api'
 import { useFocusTrap } from '../hooks/useFocusTrap'
+import { classifierErrorKey } from '../utils/classifierError'
 
 interface Label {
   key: string      // stable identifier (React key + dedup); English for the defaults
   display: string  // localized name shown in the UI, sent to the multilingual model, and used as the collection name
+  hint?: string    // one-line gloss sent to the model with the label (built-ins only)
 }
 
 const DEFAULT_GENRE_KEYS: Array<{ key: string; i18nKey: string }> = [
@@ -55,13 +57,16 @@ export function AutoClassifyModal({
   onClose
 }: AutoClassifyModalProps) {
   const { t } = useTranslation()
-  const { classify, results, progress, modelStatus, modelProgress, modelStage, isClassifying, error, reset } =
+  const { classify, cancel, results, progress, modelStatus, modelProgress, modelStage, isClassifying, error, reset } =
     classifier
 
   const [labels, setLabels] = useState<Label[]>(() =>
     DEFAULT_GENRE_KEYS.map(({ key, i18nKey }) => ({
       key,
-      display: t(`aiClassify.genres.${i18nKey}`)
+      display: t(`aiClassify.genres.${i18nKey}`),
+      // A bare genre noun is too weak a query for the embedder — see the gloss
+      // rationale in classifier.worker.ts.
+      hint: t(`aiClassify.genreHints.${i18nKey}`)
     }))
   )
   const [newLabelInput, setNewLabelInput] = useState('')
@@ -70,7 +75,10 @@ export function AutoClassifyModal({
   const [threshold, setThreshold] = useState(40)
   const [deleteExisting, setDeleteExisting] = useState(false)
   const [isApplying, setIsApplying] = useState(false)
-  const [useDescriptions, setUseDescriptions] = useState(false)
+  // On by default: the online genre + description are what actually make the
+  // classification usable (top-1 accuracy 50% → 69% on a real library). It stays
+  // switchable because it costs one metadata lookup per book.
+  const [useDescriptions, setUseDescriptions] = useState(true)
   const [groupByAuthor, setGroupByAuthor] = useState(true)
   const [descFetch, setDescFetch] = useState<{ current: number; total: number } | null>(null)
   const [applyError, setApplyError] = useState<string | null>(null)
@@ -99,10 +107,37 @@ export function AutoClassifyModal({
   const modelStageText = useMemo(() => translateModelStage(modelStage, t), [modelStage, t])
 
   // Map the worker's machine-readable error codes to localized messages.
-  const displayError = useMemo(() => translateClassifierError(error, t), [error, t])
+  const displayError = useMemo(() => (error ? t(classifierErrorKey(error)) : null), [error, t])
+
+  // Aborts the description loop below, which is a plain `await` loop with no
+  // cancellation point of its own. A ref (not state) because the running loop
+  // must observe the change without a re-render.
+  const cancelledRef = useRef(false)
+
+  // Work that can genuinely be aborted. An in-flight apply is excluded: it is a
+  // single batched write that completes in the main process either way.
+  const isCancellable = isClassifying || descFetch !== null
+
+  /** Stops the in-flight run and leaves the modal open, ready for another try. */
+  const stopWork = useCallback(() => {
+    cancelledRef.current = true
+    setDescFetch(null)
+    cancel()
+  }, [cancel])
+
+  /**
+   * Always available, even mid-run. Every exit from this dialog used to be
+   * disabled while busy — with no way to abort a model download that can take
+   * minutes on a first run, that left the whole app unusable until it was
+   * force-quit.
+   */
+  const handleClose = useCallback(() => {
+    if (isCancellable) stopWork()
+    onClose()
+  }, [isCancellable, stopWork, onClose])
 
   // Focus containment + restore focus on close.
-  useFocusTrap(dialogRef, { onEscape: isBusy ? undefined : onClose, trapTab: true })
+  useFocusTrap(dialogRef, { onEscape: handleClose, trapTab: true })
 
   // Auto-scroll results as they arrive
   useEffect(() => {
@@ -127,34 +162,43 @@ export function AutoClassifyModal({
   }
 
   async function handleAnalyze() {
+    cancelledRef.current = false
     reset()
     setApplyError(null)
     setDescFetch(null)
     // Send the localized display labels: the multilingual model matches them
     // against book titles in any language, and they double as collection names.
     const displayLabels = labels.map((l) => l.display)
+    const hints = Object.fromEntries(
+      labels.filter((l) => l.hint).map((l) => [l.display, l.hint as string])
+    )
 
     if (!useDescriptions) {
-      classify(books, displayLabels)
+      classify(books, displayLabels, { hints })
       return
     }
 
-    // Opt-in: fetch a short online description per book to give the classifier
-    // more signal than the title alone. Rate-limited, so we show progress.
+    // Fetch online context per book — the provider's own genre first (it is the
+    // single strongest signal) then the blurb. Rate-limited, so we show progress.
     setDescFetch({ current: 0, total: books.length })
     const descriptions: Record<string, string> = {}
     for (let i = 0; i < books.length; i++) {
+      // The loop's only cancellation point — without it, closing the modal left
+      // this running (and hammering the metadata providers) in the background.
+      if (cancelledRef.current) return
       const book = books[i]
       try {
         const meta = await window.kindleAPI.getBookMetadata(book.title, book.author)
-        if (meta?.description) descriptions[book.path] = meta.description
+        const context = [meta?.genre, meta?.description].filter(Boolean).join('. ')
+        if (context) descriptions[book.path] = context
       } catch (err) {
         console.error('Failed to fetch description:', err)
       }
       setDescFetch({ current: i + 1, total: books.length })
     }
+    if (cancelledRef.current) return
     setDescFetch(null)
-    classify(books, displayLabels, descriptions)
+    classify(books, displayLabels, { hints, descriptions })
   }
 
   async function handleApply() {
@@ -189,7 +233,11 @@ export function AutoClassifyModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      // `app-no-drag` because this backdrop covers the title bar's drag region:
+      // Chromium computes the draggable area as drag-rects minus no-drag-rects,
+      // so without it a click in the top 38px would move the window instead of
+      // reaching `handleOverlayClick`. Painting above the bar is not enough.
+      className="app-no-drag fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
       onClick={handleOverlayClick}
     >
       <div
@@ -213,10 +261,9 @@ export function AutoClassifyModal({
             <h2 id={titleId} className="text-white font-semibold">{t('aiClassify.title')}</h2>
           </div>
           <button
-            onClick={onClose}
-            disabled={isBusy}
+            onClick={handleClose}
             aria-label={t('aiClassify.close')}
-            className="text-gray-400 hover:text-gray-300 transition-colors disabled:opacity-40 p-1 rounded"
+            className="text-gray-400 hover:text-gray-300 transition-colors p-1 rounded"
           >
             <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -385,16 +432,23 @@ export function AutoClassifyModal({
                 )}
 
                 {isClassifying && !progress && modelStatus !== 'loading' && (
-                  <div className="flex items-center gap-2 text-gray-400 text-xs">
-                    <svg aria-hidden="true" className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                      />
-                    </svg>
-                    {t('aiClassify.preparingModel')}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-gray-400 text-xs">
+                      <svg aria-hidden="true" className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                      {t('aiClassify.preparingModel')}
+                    </div>
+                    {/* No provider reports progress until the first file starts
+                        downloading, so say what the silence means. */}
+                    <p className="text-gray-500 text-[11px] leading-relaxed">
+                      {t('aiClassify.firstRunHint')}
+                    </p>
                   </div>
                 )}
               </div>
@@ -497,12 +551,13 @@ export function AutoClassifyModal({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Mid-run this stops the work but keeps the dialog open, so the
+                labels can be adjusted and the run retried. X and Escape close. */}
             <button
-              onClick={onClose}
-              disabled={isBusy}
-              className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors disabled:opacity-40"
+              onClick={isCancellable ? stopWork : onClose}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
             >
-              {t('aiClassify.cancel')}
+              {isCancellable ? t('aiClassify.stop') : t('aiClassify.cancel')}
             </button>
             {results.length > 0 && (
               <button
@@ -547,23 +602,5 @@ function translateModelStage(
       return t('aiClassify.modelReady')
     default:
       return ''
-  }
-}
-
-/** Maps worker error codes to localized, user-friendly messages. */
-function translateClassifierError(
-  error: string | null,
-  t: (key: string) => string
-): string | null {
-  if (!error) return null
-  switch (error) {
-    case 'NEED_TWO_LABELS':
-      return t('aiClassify.needMoreLabels')
-    case 'WORKER_INIT_FAILED':
-      return t('aiClassify.workerInitFailed')
-    case 'WORKER_MESSAGE_DESERIALIZE_FAILED':
-      return t('aiClassify.workerError')
-    default:
-      return error
   }
 }

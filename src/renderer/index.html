@@ -3,9 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      worker-src needs 'self': the classifier worker is loaded from a real URL
+      (the Vite dev server in dev, assets/ under file: in production), not from a
+      blob. With `worker-src blob:` alone Chromium refuses to create it — and a
+      CSP-blocked worker fires an error event with an EMPTY message, which the UI
+      could only report as the generic "could not start the classification
+      engine". blob: stays for the ONNX Runtime threading workers.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob: cover-cache:; connect-src 'self' https:"
+      content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob: cover-cache:; connect-src 'self' https:"
     />
     <title>Kindle Organizer</title>
   </head>

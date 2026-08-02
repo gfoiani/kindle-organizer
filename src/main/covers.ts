@@ -431,6 +431,39 @@ const interest = new Map<string, number>()
 const retryControllers = new Set<AbortController>()
 
 /**
+ * Seeds the cover cache directly from a locally-extracted image (e.g. an EPUB's
+ * embedded cover), bypassing the network. Because the key is derived from
+ * (title, author) exactly as in ensureCover, a later ensureCover(title, author)
+ * finds this file already on disk and serves it via cover-cache:// with no
+ * network round-trip.
+ *
+ * Returns the cache key on success, or null when the buffer is not a valid image
+ * (the caller then falls back to the normal online lookup). The key omits ISBN:
+ * library books are keyed on (title, author), so the renderer must read them back
+ * with ensureCover(title, author) (no isbn) for the keys to agree.
+ */
+export async function importLocalCover(
+  title: string,
+  author: string | undefined,
+  image: Buffer
+): Promise<string | null> {
+  if (!isValidImage(image)) return null
+
+  const key = getCacheKey(title, author)
+
+  // Cancel any in-flight download and drop any scheduled retry for this key so a
+  // losing network race can't later overwrite the imported image (or stamp a
+  // negative-cache marker over it).
+  controllers.get(key)?.abort()
+  retryRegistry.delete(key)
+
+  await fs.ensureDir(getCoverCacheDir())
+  await fs.writeFile(getCachePath(key), image)
+  notifyCoverReady(key)
+  return key
+}
+
+/**
  * Ensures a cover for (title, author, isbn) exists on disk, returning its cache
  * key and current status WITHOUT ever blocking on the network:
  *  - 'ready'   → a cached image is on disk (serve it via cover-cache://covers/<key>)
@@ -777,6 +810,71 @@ async function searchGoogleBooksMetadata(
   }
 }
 
+interface ItunesMetadataSearch {
+  results?: { description?: string; genres?: string[]; releaseDate?: string }[]
+}
+
+/** Strips the HTML iTunes wraps its blurbs in, and collapses the whitespace. */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// The storefront's own genre words ("Thriller e gialli", "Fantascienza") are the
+// strongest single signal the classifier gets, so they lead the metadata string.
+const MAX_ITUNES_GENRES = 3
+
+/**
+ * iTunes metadata, queried against the storefront already used for covers.
+ *
+ * First in the chain because it is the only provider with real coverage of
+ * localized editions: on a 26-book Italian library it returned a genre AND a
+ * description for 26/26, against 3/16 for Open Library (Google Books answers
+ * with HTTP 429 once its keyless daily quota is spent).
+ */
+async function searchItunesMetadata(
+  title: string,
+  author: string | undefined
+): Promise<BookMetadata | null> {
+  let term = title
+  if (author) term += ` ${author}`
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=ebook&limit=3&country=${encodeURIComponent(itunesCountry)}`
+
+  try {
+    const json = await fetchJson<ItunesMetadataSearch>(url)
+    const hit = json?.results?.find((r) => r.description || r.genres?.length)
+    if (!hit) return null
+
+    // "Libri"/"Books" is the storefront's top-level bucket, not a genre.
+    const genres = (hit.genres ?? []).filter((g) => !/^(libri|books)$/i.test(g))
+    const metadata: BookMetadata = {
+      year: hit.releaseDate?.slice(0, 4),
+      genre: genres.slice(0, MAX_ITUNES_GENRES).join(', ') || undefined,
+      description: hit.description ? stripHtml(hit.description) : undefined
+    }
+
+    if (!metadata.year && !metadata.genre && !metadata.description) return null
+
+    debug(
+      `[searchItunesMetadata] Found: genre=${metadata.genre}, desc=${metadata.description ? 'yes' : 'no'}`
+    )
+    return metadata
+  } catch (err) {
+    // Transient failures and aborts must propagate so the caller never caches
+    // "not found" for a lookup that didn't actually complete.
+    if (
+      err instanceof Error &&
+      (err.name === 'NetworkError' || err.name === 'RateLimitError' || err.name === 'AbortError')
+    ) {
+      throw err
+    }
+    debug(`[searchItunesMetadata] Error: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
 export async function getBookMetadata(
   title: string,
   author: string | undefined
@@ -785,7 +883,10 @@ export async function getBookMetadata(
   if (metadataCache.has(key)) return metadataCache.get(key) ?? null
 
   try {
-    let result = await searchOpenLibraryMetadata(title, author)
+    let result = await searchItunesMetadata(title, author)
+    if (!result) {
+      result = await searchOpenLibraryMetadata(title, author)
+    }
     if (!result) {
       result = await searchGoogleBooksMetadata(title, author)
     }

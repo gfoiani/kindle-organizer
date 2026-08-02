@@ -1,20 +1,53 @@
-import { ipcRenderer } from 'electron'
+import { ipcRenderer, webUtils } from 'electron'
 import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
 import type { BookMetadata, CoverStatus, EnsureCoverResult } from '../main/covers'
+import type { KindleFormat } from '../main/settings'
+import type { LibraryBook } from '../main/library'
+import type { AddResult, SendProgress } from '../main/libraryService'
+import type { RenameTarget } from '../main/localCollections'
+import type { AppErrorCode } from '../main/appErrors'
 
-export type { KindleDrive, KindleBook, Collection, BookMetadata, CoverStatus, EnsureCoverResult }
+export type {
+  KindleDrive,
+  KindleBook,
+  Collection,
+  BookMetadata,
+  CoverStatus,
+  EnsureCoverResult,
+  KindleFormat,
+  LibraryBook,
+  AddResult,
+  SendProgress,
+  RenameTarget,
+  AppErrorCode
+}
 
 export interface KindleAPI {
+  /**
+   * The host OS (`process.platform`). The renderer needs it to lay out the
+   * custom title bar: macOS keeps its traffic lights on the left, Windows and
+   * Linux draw their window controls on the right.
+   */
+  platform: NodeJS.Platform
   detectKindleDrives: () => Promise<KindleDrive[]>
   readDocuments: (kindleMountpoint: string) => Promise<KindleBook[]>
   syncCalibre: (mountpoint: string) => Promise<void>
   writeToKindle: (mountpoint: string) => Promise<boolean>
+  /** Unmounts and powers down the connected Kindle so it can be safely unplugged. */
+  ejectKindle: (mountpoint: string) => Promise<void>
   getLocalCollections: () => Promise<Collection[]>
   getCollectionBooks: (collectionId: string) => Promise<string[]>
   getBookCollections: (bookRelpath: string) => Promise<string[]>
   createCollection: (name: string) => Promise<Collection>
-  renameCollection: (id: string, newName: string) => Promise<void>
-  deleteCollection: (id: string) => Promise<void>
+  /**
+   * Renames collections atomically (a genre + its author sub-collections; a
+   * single rename is a one-element batch). Rejects with COLLECTION_NAME_TAKEN /
+   * COLLECTION_NAME_EMPTY without applying ANY of them. Returns the refreshed
+   * collection list, so the caller needs no follow-up read.
+   */
+  renameCollections: (targets: RenameTarget[]) => Promise<Collection[]>
+  /** Deletes collections in one transaction. Returns the refreshed list. */
+  deleteCollections: (ids: string[]) => Promise<Collection[]>
   addBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   removeBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   /** Ensures each named collection exists and contains the given relpaths (idempotent batch). */
@@ -34,8 +67,40 @@ export interface KindleAPI {
   setLocale: (lang: string) => Promise<void>
   /** Returns the running app version (from package.json via app.getVersion()). */
   getAppVersion: () => Promise<string>
+  /** Reads the configured Kindle conversion format (default 'azw3'). */
+  getFormat: () => Promise<KindleFormat>
+  /** Persists the Kindle conversion format. Rejects on an invalid value. */
+  setFormat: (format: KindleFormat) => Promise<void>
+  /**
+   * Resolves the absolute filesystem path of a dropped/selected File. Electron
+   * removed `File.path`; `webUtils.getPathForFile` is the sandbox-safe
+   * replacement. Synchronous — returns the path directly, not a Promise.
+   */
+  getPathForFile: (file: File) => string
+  /** Imports dropped files into the staging library; one AddResult per input path. */
+  addBooks: (filePaths: string[]) => Promise<AddResult[]>
+  /** Lists every book in the staging library (newest first). */
+  getLibrary: () => Promise<LibraryBook[]>
+  /** Removes a library book: its DB row, conversions, and on-disk files. */
+  removeLibraryBook: (id: string) => Promise<void>
+  /**
+   * Converts (EPUB → format) and uploads a library book to the connected device.
+   * Format omitted → the persisted default. Progress arrives via
+   * onConvertProgress / onUploadProgress (keyed by libraryId).
+   */
+  uploadBook: (id: string, mountpoint: string, format?: KindleFormat) => Promise<{ targetRelpath: string }>
+  /** Subscribe to conversion progress (libraryId + percent). Returns unsubscribe. */
+  onConvertProgress: (callback: (progress: SendProgress) => void) => () => void
+  /** Subscribe to upload progress (libraryId + percent). Returns unsubscribe. */
+  onUploadProgress: (callback: (progress: SendProgress) => void) => () => void
   /** Rebuilds the native menu's custom labels in the active UI language. */
   setMenuLabels: (about: string, learnMore: string) => Promise<void>
+  /**
+   * Opens the application menu at the given window coordinates. Needed only on
+   * Windows/Linux, where hiding the native title bar also removes the menu bar
+   * Electron would otherwise draw (see `popupAppMenu` in `main/menu.ts`).
+   */
+  popupAppMenu: (x: number, y: number) => Promise<void>
   /** Fired when the "About" menu item is selected. Returns an unsubscribe function. */
   onShowAbout: (callback: () => void) => () => void
   /**
@@ -60,6 +125,8 @@ export interface KindleAPI {
 }
 
 export const kindleAPI: KindleAPI = {
+  platform: process.platform,
+
   detectKindleDrives: () => ipcRenderer.invoke('kindle:detect-drives'),
 
   readDocuments: (kindleMountpoint: string) =>
@@ -68,6 +135,7 @@ export const kindleAPI: KindleAPI = {
   syncCalibre: (mountpoint: string) => ipcRenderer.invoke('kindle:sync-calibre', mountpoint),
 
   writeToKindle: (mountpoint: string) => ipcRenderer.invoke('kindle:write-to-kindle', mountpoint),
+  ejectKindle: (mountpoint: string) => ipcRenderer.invoke('kindle:eject', mountpoint),
 
   getLocalCollections: () => ipcRenderer.invoke('kindle:get-local-collections'),
 
@@ -79,10 +147,10 @@ export const kindleAPI: KindleAPI = {
 
   createCollection: (name: string) => ipcRenderer.invoke('kindle:create-collection', name),
 
-  renameCollection: (id: string, newName: string) =>
-    ipcRenderer.invoke('kindle:rename-collection', id, newName),
+  renameCollections: (targets: RenameTarget[]) =>
+    ipcRenderer.invoke('kindle:rename-collections', targets),
 
-  deleteCollection: (id: string) => ipcRenderer.invoke('kindle:delete-collection', id),
+  deleteCollections: (ids: string[]) => ipcRenderer.invoke('kindle:delete-collections', ids),
 
   addBookToCollection: (collectionId: string, bookRelpath: string) =>
     ipcRenderer.invoke('kindle:add-book-to-collection', collectionId, bookRelpath),
@@ -114,8 +182,37 @@ export const kindleAPI: KindleAPI = {
 
   getAppVersion: () => ipcRenderer.invoke('kindle:get-app-version'),
 
+  getFormat: () => ipcRenderer.invoke('kindle:get-format'),
+
+  setFormat: (format: KindleFormat) => ipcRenderer.invoke('kindle:set-format', format),
+
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
+
+  addBooks: (filePaths: string[]) => ipcRenderer.invoke('kindle:add-books', filePaths),
+
+  getLibrary: () => ipcRenderer.invoke('kindle:get-library'),
+
+  removeLibraryBook: (id: string) => ipcRenderer.invoke('kindle:remove-library-book', id),
+
+  uploadBook: (id: string, mountpoint: string, format?: KindleFormat) =>
+    ipcRenderer.invoke('kindle:upload-book', id, mountpoint, format),
+
+  onConvertProgress: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, progress: SendProgress) => callback(progress)
+    ipcRenderer.on('convert:progress', handler)
+    return () => ipcRenderer.removeListener('convert:progress', handler)
+  },
+
+  onUploadProgress: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, progress: SendProgress) => callback(progress)
+    ipcRenderer.on('upload:progress', handler)
+    return () => ipcRenderer.removeListener('upload:progress', handler)
+  },
+
   setMenuLabels: (about: string, learnMore: string) =>
     ipcRenderer.invoke('menu:set-labels', about, learnMore),
+
+  popupAppMenu: (x: number, y: number) => ipcRenderer.invoke('menu:popup', x, y),
 
   onShowAbout: (callback: () => void) => {
     const handler = () => callback()

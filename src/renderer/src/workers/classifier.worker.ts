@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 import { pipeline, env, type FeatureExtractionPipeline, type Tensor } from '@xenova/transformers'
-import type { ClassifyRequest, WorkerMessage } from './messages'
+import type { ClassifierErrorCode, ClassifyRequest, WorkerMessage } from './messages'
+import { modelErrorCode } from './modelErrors'
+import { scoreLibrary, type SimilarityMatrix } from './scoring'
 
 // Multilingual sentence-embedding model (100+ languages). We classify a book by
 // embedding its text and each genre label, then comparing them with cosine
@@ -9,14 +11,11 @@ import type { ClassifyRequest, WorkerMessage } from './messages'
 // is coherent with whatever language the app/labels are in.
 const MODEL_ID = 'Xenova/multilingual-e5-small'
 
-// e5 models expect inputs to be prefixed. "query: " is recommended for short
-// texts; we use it for both the book text and the labels (symmetric matching).
-const E5_PREFIX = 'query: '
-
-// Temperature for turning raw cosine similarities into a relative confidence.
-// e5 similarities cluster in a narrow high range, so we sharpen with a small
-// temperature before softmax. Lower = more decisive. Tunable.
-const SOFTMAX_TEMPERATURE = 0.05
+// e5 models expect prefixed inputs, and the asymmetric pairing measured better
+// than treating both sides the same: a genre is the question, a book is the
+// document being retrieved.
+const E5_QUERY_PREFIX = 'query: '
+const E5_PASSAGE_PREFIX = 'passage: '
 
 const debug = (...args: unknown[]): void => {
   if (import.meta.env.DEV) console.log('[worker]', ...args)
@@ -25,6 +24,12 @@ const debug = (...args: unknown[]): void => {
 /** Type-safe wrapper around self.postMessage for worker→hook messages. */
 function post(message: WorkerMessage): void {
   self.postMessage(message)
+}
+
+/** Reports a failure as a code the UI localizes; the detail stays in the log. */
+function postError(code: ClassifierErrorCode, err?: unknown): void {
+  if (err !== undefined) console.error(`[worker] ${code}:`, err)
+  post({ type: 'error', code })
 }
 
 interface ProgressData {
@@ -84,9 +89,9 @@ async function getExtractor(): Promise<FeatureExtractionPipeline> {
   return extractorPipeline
 }
 
-/** Embeds a single text into a normalized vector (cosine-ready). */
+/** Embeds an already-prefixed text into a normalized vector (cosine-ready). */
 async function embed(extractor: FeatureExtractionPipeline, text: string): Promise<Float32Array> {
-  const output: Tensor = await extractor(`${E5_PREFIX}${text}`, { pooling: 'mean', normalize: true })
+  const output: Tensor = await extractor(text, { pooling: 'mean', normalize: true })
   // Copy out of the tensor so the underlying buffer can be reused/freed.
   return Float32Array.from(output.data)
 }
@@ -98,72 +103,80 @@ function cosine(a: Float32Array, b: Float32Array): number {
   return dot
 }
 
-/** Softmax over similarities with temperature → relative confidence summing to 1. */
-function softmax(values: number[], temperature: number): number[] {
-  const scaled = values.map((v) => v / temperature)
-  const max = Math.max(...scaled)
-  const exps = scaled.map((v) => Math.exp(v - max))
-  const sum = exps.reduce((acc, v) => acc + v, 0)
-  return exps.map((v) => v / sum)
+/**
+ * A bare genre noun is a weak query: "Storia" sits close to almost any Italian
+ * title. Pairing the label with a one-line gloss ("saggi di storia, eventi
+ * storici…") lifted top-1 accuracy from 23% to 42% on a real library, so the UI
+ * ships a gloss for its built-in genres. Custom labels have none and stay bare.
+ */
+function labelPrompt(label: string, hint: string | undefined): string {
+  return `${E5_QUERY_PREFIX}${hint ? `${label}: ${hint}` : label}`
 }
 
-// Cap how much description text feeds the embedder — enough for genre signal,
-// short enough to stay fast and within the model's context.
-const MAX_DESCRIPTION_CHARS = 500
+// Cap the online context fed to the embedder — enough for genre signal, short
+// enough to stay fast and within the model's window.
+const MAX_CONTEXT_CHARS = 500
+
+function bookPrompt(title: string, author: string | undefined, context: string | undefined): string {
+  const text = [title, author, context?.slice(0, MAX_CONTEXT_CHARS)].filter(Boolean).join('. ').trim()
+  return `${E5_PASSAGE_PREFIX}${text}`
+}
 
 self.onmessage = async (event: MessageEvent<ClassifyRequest>) => {
-  const { type, books, labels, descriptions } = event.data
+  const { type, books, labels, hints, descriptions } = event.data
 
   if (type !== 'classify') return
 
   // Embedding-based classification needs ≥2 labels to be meaningful: with a
   // single label every book trivially scores 100%. The UI also guards this.
   if (!Array.isArray(labels) || labels.length < 2) {
-    post({ type: 'error', message: 'NEED_TWO_LABELS' })
+    postError('NEED_TWO_LABELS')
+    return
+  }
+
+  // Getting the model is the only step that fails for reasons the user can act
+  // on — a build without the bundled model downloads ~110 MB on first use — so
+  // it is reported apart from a genuine classification failure.
+  let extractor: FeatureExtractionPipeline
+  try {
+    extractor = await getExtractor()
+  } catch (err) {
+    postError(modelErrorCode(err), err)
     return
   }
 
   try {
-    const extractor = await getExtractor()
-
     // Embed every label once up front.
     const labelVectors: Float32Array[] = []
     for (const label of labels) {
-      labelVectors.push(await embed(extractor, label))
+      labelVectors.push(await embed(extractor, labelPrompt(label, hints?.[label])))
     }
 
+    // Phase 1 — embed the whole library. Scoring is corpus-relative (see
+    // scoring.ts), so no book can be labelled before every book is measured.
     const total = books.length
-
+    const similarities: SimilarityMatrix = []
     for (let i = 0; i < total; i++) {
       const book = books[i]
-      const description = descriptions?.[book.path]?.slice(0, MAX_DESCRIPTION_CHARS)
-      const text = [book.title, book.author, description].filter(Boolean).join('. ').trim()
-      const bookVector = await embed(extractor, text)
-
-      const sims = labelVectors.map((labelVec) => cosine(bookVector, labelVec))
-      const confidences = softmax(sims, SOFTMAX_TEMPERATURE)
-
-      let bestIdx = 0
-      for (let j = 1; j < confidences.length; j++) {
-        if (confidences[j] > confidences[bestIdx]) bestIdx = j
-      }
-
-      post({
-        type: 'result',
-        book,
-        label: labels[bestIdx],
-        score: confidences[bestIdx],
-        current: i + 1,
-        total
-      })
+      const bookVector = await embed(
+        extractor,
+        bookPrompt(book.title, book.author, descriptions?.[book.path])
+      )
+      similarities.push(labelVectors.map((labelVector) => cosine(bookVector, labelVector)))
+      post({ type: 'progress', current: i + 1, total })
     }
+
+    // Phase 2 — score the corpus and report each verdict.
+    const scored = scoreLibrary(
+      similarities,
+      books.map((book) => book.author ?? '')
+    )
+    scored.forEach(({ labelIndex, confidence }, i) => {
+      post({ type: 'result', book: books[i], label: labels[labelIndex], score: confidence })
+    })
 
     post({ type: 'complete' })
   } catch (err) {
-    console.error('[worker] caught error:', err)
-    post({
-      type: 'error',
-      message: err instanceof Error ? err.message : String(err)
-    })
+    postError('CLASSIFY_FAILED', err)
   }
 }

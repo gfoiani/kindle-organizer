@@ -11,8 +11,15 @@ interface SidebarProps {
   collections: Collection[]
   selectedCollectionId: string | null
   onSelectCollection: (id: string | null) => void
+  /** True while a collection, the search box or a presence chip narrows the grid. */
+  hasActiveFilters: boolean
+  /** Lifts every filter at once — the way back to the full list. */
+  onShowAllBooks: () => void
   isLoading: boolean
+  /** Books on the device — gates the AI / group-by-author actions below. */
   booksCount: number
+  /** What "All books" actually shows: device books plus library-only ones. */
+  allBooksCount: number
   onCreateCollection: (name: string) => Promise<void>
   onRenameCollection: (id: string, newName: string) => Promise<void>
   onDeleteCollection: (id: string) => Promise<void>
@@ -307,8 +314,11 @@ export function Sidebar({
   collections,
   selectedCollectionId,
   onSelectCollection,
+  hasActiveFilters,
+  onShowAllBooks,
   isLoading,
   booksCount,
+  allBooksCount,
   onCreateCollection,
   onRenameCollection,
   onDeleteCollection,
@@ -322,7 +332,9 @@ export function Sidebar({
 }: SidebarProps) {
   const { t } = useTranslation()
   const [isCreating, setIsCreating] = useState(false)
-  const isAllSelected = selectedCollectionId === null
+  // Three states, not two: the full list is showing, a filter is on (so this row
+  // is an action), or a collection is selected (so it is just the way back).
+  const isShowingEverything = selectedCollectionId === null && !hasActiveFilters
   const groups = groupCollections(collections)
 
   async function handleCreate(name: string) {
@@ -338,19 +350,45 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 overflow-y-auto p-2">
-        <div className="mb-4">
+        {/* Sticky: with the collection tree expanded this block scrolls away, and
+            it is the only way back to the unfiltered list. */}
+        <div className="mb-4 sticky top-0 z-10 bg-gray-900 pb-2">
           <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider px-2 mb-1">
             {t('sidebar.library')}
           </p>
           <button
-            onClick={() => onSelectCollection(null)}
-            className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-              isAllSelected
+            onClick={onShowAllBooks}
+            aria-current={isShowingEverything ? 'true' : undefined}
+            title={hasActiveFilters ? t('sidebar.clearFilters') : undefined}
+            className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center justify-between gap-2 ${
+              isShowingEverything
                 ? 'bg-indigo-600 text-white'
-                : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                : hasActiveFilters
+                  ? 'bg-indigo-900/40 text-indigo-200 ring-1 ring-indigo-500/60 hover:bg-indigo-800/60 hover:text-white'
+                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
             }`}
           >
-            {t('sidebar.allBooks')}
+            <span className="flex items-center gap-1.5 min-w-0">
+              {hasActiveFilters && (
+                // Funnel with a slash: this click drops the active filters.
+                <svg aria-hidden="true" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 4h18l-7 8v5l-4 2v-7L3 4zM4 20L20 4"
+                  />
+                </svg>
+              )}
+              <span className="truncate">
+                {hasActiveFilters ? t('sidebar.clearFilters') : t('sidebar.allBooks')}
+              </span>
+            </span>
+            <span
+              className={`text-xs shrink-0 ${isShowingEverything ? 'text-indigo-200' : 'text-gray-500'}`}
+            >
+              {allBooksCount}
+            </span>
           </button>
           <button
             onClick={onAIOrganize}

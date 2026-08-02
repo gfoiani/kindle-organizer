@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* ─── Custom window chrome ──────────────────────────────────────────── */
+/* The native title bar is hidden (see `themedWindowChrome` in main/index.ts),
+   so the app declares its own drag surface. Anything clickable placed inside a
+   drag region must opt back out with `.app-no-drag`. */
+.app-drag-region {
+  -webkit-app-region: drag;
+  user-select: none;
+  cursor: default;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 /* ─── Custom scrollbars (Chromium/Electron) ─────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;

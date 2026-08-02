@@ -1,22 +1,28 @@
 import { app, ipcMain } from 'electron'
 import { detectKindleDrives, readDocuments } from './kindle'
+import { ejectDrive } from './eject'
+import { AppError } from './appErrors'
 import { readCalibreMetadata, writeCalibreMetadata, readCalibreIsbnMap } from './calibre'
 import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
 import { applyOverrides, setOverride } from './bookOverrides'
-import { setMenuLabels } from './menu'
+import { setMenuLabels, popupAppMenu } from './menu'
 import { stripDocumentsBase } from './paths'
+import { getSettings, setKindleFormat, isKindleFormat, type KindleFormat } from './settings'
+import { addDroppedFiles, removeLibraryBook, sendToKindle, type SendProgress } from './libraryService'
+import { listLibraryBooks } from './library'
 import {
   getCollections,
   getCollectionBooks,
   getBookCollections,
   getAllBookTags,
   createCollection,
-  renameCollection,
-  deleteCollection,
+  renameCollections,
+  deleteCollections,
   addBookToCollection,
   removeBookFromCollection,
   ensureCollectionsContain,
-  importFromCalibre
+  importFromCalibre,
+  type RenameTarget
 } from './localCollections'
 
 // ─── Boundary validation ────────────────────────────────────────────────────
@@ -43,6 +49,12 @@ function assertStringArray(value: unknown, name: string): asserts value is strin
   }
 }
 
+function assertFiniteNumber(value: unknown, name: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError(`Expected "${name}" to be a finite number, got ${String(value)}`)
+  }
+}
+
 function assertCollectionMemberships(
   value: unknown,
   name: string
@@ -57,6 +69,26 @@ function assertCollectionMemberships(
     const rec = entry as Record<string, unknown>
     assertString(rec.name, `${name}[].name`)
     assertStringArray(rec.relpaths, `${name}[].relpaths`)
+  }
+}
+
+function assertRenameTargets(value: unknown, name: string): asserts value is RenameTarget[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`Expected "${name}" to be an array`)
+  }
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) {
+      throw new TypeError(`Expected each "${name}" entry to be an object`)
+    }
+    const rec = entry as Record<string, unknown>
+    assertString(rec.id, `${name}[].id`)
+    assertString(rec.newName, `${name}[].newName`)
+  }
+}
+
+function assertKindleFormat(value: unknown, name: string): asserts value is KindleFormat {
+  if (!isKindleFormat(value)) {
+    throw new TypeError(`Expected "${name}" to be one of azw3, mobi, got ${String(value)}`)
   }
 }
 
@@ -131,6 +163,20 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    'kindle:eject',
+    withErrorLogging('kindle:eject', async (_, mountpoint: unknown) => {
+      assertString(mountpoint, 'mountpoint')
+      // The mountpoint is handed to a system tool, so it is never trusted as
+      // given: only a volume that a live detection still reports as a Kindle can
+      // be ejected. A stale mountpoint (already unplugged) lands here too.
+      const drives = await detectKindleDrives()
+      const drive = drives.find((candidate) => candidate.mountpoint === mountpoint)
+      if (!drive) throw new AppError('DEVICE_NOT_FOUND')
+      await ejectDrive(drive)
+    })
+  )
+
+  ipcMain.handle(
     'kindle:write-to-kindle',
     withErrorLogging('kindle:write-to-kindle', async (_, mountpoint: unknown) => {
       assertString(mountpoint, 'mountpoint')
@@ -174,20 +220,24 @@ export function registerIpcHandlers(): void {
     })
   )
 
+  // Rename/delete are batch-only. A cascade over a genre and its author
+  // sub-collections used to be one IPC round-trip (and one SQLite transaction)
+  // PER collection, so a mid-way failure left a half-renamed tree; these apply
+  // the whole set atomically and return the refreshed list in one hop. A single
+  // collection is just a one-element batch.
   ipcMain.handle(
-    'kindle:rename-collection',
-    withErrorLogging('kindle:rename-collection', async (_, id: unknown, newName: unknown) => {
-      assertString(id, 'id')
-      assertString(newName, 'newName')
-      renameCollection(id, newName)
+    'kindle:rename-collections',
+    withErrorLogging('kindle:rename-collections', async (_, targets: unknown) => {
+      assertRenameTargets(targets, 'targets')
+      return renameCollections(targets)
     })
   )
 
   ipcMain.handle(
-    'kindle:delete-collection',
-    withErrorLogging('kindle:delete-collection', async (_, id: unknown) => {
-      assertString(id, 'id')
-      deleteCollection(id)
+    'kindle:delete-collections',
+    withErrorLogging('kindle:delete-collections', async (_, ids: unknown) => {
+      assertStringArray(ids, 'ids')
+      return deleteCollections(ids)
     })
   )
 
@@ -288,11 +338,76 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
+    'kindle:get-format',
+    withErrorLogging('kindle:get-format', async () => getSettings().kindleFormat)
+  )
+
+  ipcMain.handle(
+    'kindle:set-format',
+    withErrorLogging('kindle:set-format', async (_, format: unknown) => {
+      assertKindleFormat(format, 'format')
+      setKindleFormat(format)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:add-books',
+    withErrorLogging('kindle:add-books', async (_, filePaths: unknown) => {
+      assertStringArray(filePaths, 'filePaths')
+      return addDroppedFiles(filePaths)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:get-library',
+    withErrorLogging('kindle:get-library', async () => listLibraryBooks())
+  )
+
+  ipcMain.handle(
+    'kindle:remove-library-book',
+    withErrorLogging('kindle:remove-library-book', async (_, id: unknown) => {
+      assertString(id, 'id')
+      await removeLibraryBook(id)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:upload-book',
+    withErrorLogging(
+      'kindle:upload-book',
+      async (event, id: unknown, mountpoint: unknown, format: unknown) => {
+        assertString(id, 'id')
+        assertString(mountpoint, 'mountpoint')
+        assertOptionalString(format, 'format')
+        // Omitted/invalid format falls back to the persisted default.
+        const fmt = isKindleFormat(format) ? format : getSettings().kindleFormat
+        // This push is request-scoped (tied to this invoke), so event.sender is
+        // the right target — guarded against a renderer that navigated away.
+        const emit = (channel: string, payload: SendProgress): void => {
+          if (!event.sender.isDestroyed()) event.sender.send(channel, payload)
+        }
+        return sendToKindle(id, mountpoint, fmt, emit)
+      }
+    )
+  )
+
+  ipcMain.handle(
     'menu:set-labels',
     withErrorLogging('menu:set-labels', async (_, about: unknown, learnMore: unknown) => {
       assertString(about, 'about')
       assertString(learnMore, 'learnMore')
       setMenuLabels({ about, learnMore })
+    })
+  )
+
+  // Opens the application menu under the title bar's menu button. Only the
+  // renderer's Windows/Linux title bar calls this — see `popupAppMenu`.
+  ipcMain.handle(
+    'menu:popup',
+    withErrorLogging('menu:popup', async (_, x: unknown, y: unknown) => {
+      assertFiniteNumber(x, 'x')
+      assertFiniteNumber(y, 'y')
+      popupAppMenu(Math.round(x), Math.round(y))
     })
   )
 }

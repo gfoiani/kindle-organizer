@@ -1,12 +1,22 @@
-import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useTranslation } from 'react-i18next'
-import type { KindleBook, Collection, CoverStatus } from '../../../preload/api'
-import { CollectionPicker } from './CollectionPicker'
+import type { KindleBook, Collection } from '../../../preload/api'
+import type { DisplayBook } from '../utils/mergeBooks'
+import { BookCard } from './BookCard'
 import { BookDetailSidebar } from './BookDetailSidebar'
-import { formatSize } from '../utils/format'
-import { buildCoverSrc } from '../utils/coverSrc'
 import { toBookRelpath } from '../utils/relpath'
+import { countPresence, filterByPresence, type PresenceFilter } from '../utils/presenceFilter'
+import type { LoadingPhase } from '../utils/loadingPhase'
+import {
+  bookKey,
+  collectableBooks,
+  removableBooks,
+  selectedBooks,
+  sendableBooks
+} from '../utils/bulkSelection'
+import { SelectionToolbar, type BulkProgress } from './SelectionToolbar'
+import type { NoticeKind } from '../hooks/useNotice'
 import {
   columnsForWidth,
   GRID_GAP_PX,
@@ -16,18 +26,38 @@ import {
 } from '../utils/gridLayout'
 
 interface BooksGridProps {
-  books: KindleBook[]
-  isLoading: boolean
+  books: DisplayBook[]
+  /**
+   * Non-null while the device state is still unknown — the grid holds its
+   * content back, because presence badges would be wrong until then. Null on
+   * every later refresh, so a populated grid is never blanked (see
+   * utils/loadingPhase).
+   */
+  loadingPhase: LoadingPhase | null
   kindleConnected: boolean
+  /** Connected device mountpoint, or null when no Kindle is attached. */
+  mountpoint: string | null
   collections: Collection[]
   documentsBase: string
+  /** Search text, owned by App so "All books" can clear every filter at once. */
+  query: string
+  onQueryChange: (query: string) => void
+  /** Presence facets, owned by App for the same reason. */
+  presence: PresenceFilter
+  onPresenceChange: (presence: PresenceFilter) => void
   onAddBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onRemoveBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onBookUpdated: (updatedBook: KindleBook) => void
+  /** Rescans device + library after a send/remove so badges reconcile. */
+  onLibraryChanged: () => void
+  /** Refreshed collection list after a bulk add-to-collection. */
+  onCollectionsChanged: (collections: Collection[]) => void
+  /** Surfaces a bulk-action outcome through the app-level toast. */
+  onNotify: (kind: NoticeKind, message: string) => void
 }
 
 interface SelectedBook {
-  book: KindleBook
+  book: DisplayBook
   cover: string | null
   bookRelpath: string
 }
@@ -37,153 +67,103 @@ interface SelectedBook {
 // constants the Tailwind gap/padding use, so it matches what actually renders.
 const OVERSCAN_ROWS = 3
 
-const BookCard = memo(function BookCard({
-  book,
-  bookRelpath,
-  collections,
-  coverVersions,
-  coverMissing,
-  coverEpoch,
-  onAddToCollection,
-  onRemoveFromCollection,
-  onSelect
+
+/** Which presence facet a toggle controls — mirrors the card badge it matches. */
+type PresenceTone = 'device' | 'library'
+
+const PRESENCE_TONES: Record<PresenceTone, string> = {
+  device: 'bg-green-700/80 border-green-600 text-green-50',
+  library: 'bg-amber-600/80 border-amber-500 text-amber-50'
+}
+
+/**
+ * A presence filter chip, colour-matched to the badge it selects so the link
+ * between chip and card is obvious.
+ *
+ * `aria-pressed` rather than a checkbox: it toggles a view, it does not submit a
+ * value. Disabled at zero so the filter cannot produce a deliberately empty
+ * grid — but never while active, or turning it back off would be impossible
+ * once its count dropped to zero.
+ */
+function PresenceToggle({
+  tone,
+  label,
+  count,
+  active,
+  onToggle
 }: {
-  book: KindleBook
-  bookRelpath: string
-  collections: Collection[]
-  coverVersions: Map<string, number>
-  coverMissing: Set<string>
-  coverEpoch: number
-  onAddToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
-  onRemoveFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
-  onSelect: (book: KindleBook, bookRelpath: string, cover: string | null) => void
+  tone: PresenceTone
+  label: string
+  count: number
+  active: boolean
+  onToggle: () => void
 }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={count === 0 && !active}
+      aria-pressed={active}
+      title={label}
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-md text-xs whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+        active
+          ? PRESENCE_TONES[tone]
+          : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+      }`}
+    >
+      <svg aria-hidden="true" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        {tone === 'device' ? (
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        ) : (
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+        )}
+      </svg>
+      {label}
+      <span
+        className={`px-1 rounded text-[10px] font-medium ${
+          active ? 'bg-black/25' : 'bg-gray-900/70 text-gray-500'
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  )
+}
+
+/**
+ * Shown while the device state is still unknown. Says which of the two waits is
+ * running — drive detection or the documents scan — because they have very
+ * different durations and a bare spinner for both reads as a hang.
+ */
+function LoadingState({ phase }: { phase: LoadingPhase }) {
   const { t } = useTranslation()
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [coverKey, setCoverKey] = useState<string | null>(null)
-  const [status, setStatus] = useState<CoverStatus | null>(null)
-  const [imgFailed, setImgFailed] = useState(false)
-
-  // The card only mounts when its row is virtualized into view (+ overscan), so
-  // ensureCover runs exactly when the cover is (about to be) needed. On unmount
-  // — a scroll past the overscan window — cancelCover aborts any in-flight
-  // download so fast scrolling doesn't flood the network. `coverEpoch` bumps on
-  // a cache-clear to force a fresh ensure.
-  useEffect(() => {
-    let cancelled = false
-    setImgFailed(false)
-    window.kindleAPI
-      .ensureCover(book.title, book.author, book.isbn)
-      .then((r) => {
-        if (!cancelled) {
-          setCoverKey(r.key)
-          setStatus(r.status)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) console.error('ensureCover failed:', err)
-      })
-    return () => {
-      cancelled = true
-      window.kindleAPI.cancelCover(book.title, book.author, book.isbn)
-    }
-  }, [book.title, book.author, book.isbn, coverEpoch])
-
-  const version = coverKey ? coverVersions.get(coverKey) : undefined
-  // A terminal "no cover" push (not-found / retries exhausted) moves the card out
-  // of its pulse into the extension placeholder without waiting for a remount.
-  const pushedMissing = coverKey !== null && coverMissing.has(coverKey)
-
-  // A push (retry succeeded / cache busted) means the file exists now — clear a
-  // prior load error so the new version is retried.
-  useEffect(() => {
-    if (version !== undefined) setImgFailed(false)
-  }, [version])
-
-  const isMissing = status === 'missing' || pushedMissing
-  const showImage =
-    coverKey !== null && !imgFailed && !pushedMissing && (status === 'ready' || version !== undefined)
-  const coverSrc = showImage && coverKey ? buildCoverSrc(coverKey, version ?? 0, coverEpoch) : null
-  const accessibleName = book.title.trim() || t('books.untitled')
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={accessibleName}
-      className="relative bg-gray-800 border border-gray-700 rounded-lg overflow-hidden hover:border-indigo-500 transition-colors cursor-pointer group flex flex-col focus:outline-none focus:ring-2 focus:ring-indigo-500"
-      onClick={() => onSelect(book, bookRelpath, coverSrc)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect(book, bookRelpath, coverSrc)
-        }
-      }}
+      role="status"
+      aria-live="polite"
+      className="flex flex-col items-center justify-center h-full text-center p-8"
     >
-      {/* Cover area — 2:3 book aspect ratio */}
-      <div className="relative w-full aspect-[2/3] bg-gray-900 flex items-center justify-center overflow-hidden shrink-0">
-        {coverSrc ? (
-          <img
-            key={`${coverKey}:${version ?? 0}`}
-            src={coverSrc}
-            alt=""
-            decoding="async"
-            loading="lazy"
-            onError={() => setImgFailed(true)}
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-        ) : isMissing || imgFailed ? (
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-indigo-300 text-xl font-bold">{book.extension}</span>
-          </div>
-        ) : (
-          <div className="absolute inset-0 bg-gray-800 animate-pulse" />
-        )}
-
-        {/* Format badge */}
-        <span className="absolute top-2 left-2 bg-black/60 text-indigo-300 text-[10px] font-bold px-1.5 py-0.5 rounded">
-          {book.extension}
-        </span>
-
-        {/* Collection tag button */}
-        {collections.length > 0 && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setPickerOpen((v) => !v)
-            }}
-            aria-label={t('books.manageCollections')}
-            title={t('books.manageCollections')}
-            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded bg-black/60 text-gray-300 hover:text-indigo-300"
-          >
-            <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-            </svg>
-          </button>
-        )}
-      </div>
-
-      {/* Info area */}
-      <div className="p-3 flex flex-col gap-0.5">
-        <h3 className="text-white text-xs font-medium leading-tight line-clamp-2 group-hover:text-indigo-300 transition-colors">
-          {book.title}
-        </h3>
-        {book.author && <p className="text-gray-400 text-[11px] truncate">{book.author}</p>}
-        <p className="text-gray-400 text-[10px] mt-0.5">{formatSize(book.size)}</p>
-      </div>
-
-      {pickerOpen && (
-        <CollectionPicker
-          bookRelpath={bookRelpath}
-          collections={collections}
-          onAdd={onAddToCollection}
-          onRemove={onRemoveFromCollection}
-          onClose={() => setPickerOpen(false)}
+      <svg
+        aria-hidden="true"
+        className="w-8 h-8 text-gray-500 animate-spin mb-4"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
         />
-      )}
+      </svg>
+      <p className="text-gray-400 text-sm">
+        {phase === 'detecting' ? t('books.detectingDevice') : t('books.readingBooks')}
+      </p>
     </div>
   )
-})
+}
 
 function EmptyState({ kindleConnected }: { kindleConnected: boolean }) {
   const { t } = useTranslation()
@@ -217,23 +197,48 @@ function EmptyState({ kindleConnected }: { kindleConnected: boolean }) {
           <p className="text-gray-400 text-sm mt-1">{t('emptyState.connectKindle')}</p>
         </>
       )}
+      <p className="text-gray-500 text-xs mt-3">{t('library.emptyHint')}</p>
     </div>
   )
 }
 
 export function BooksGrid({
   books,
-  isLoading,
+  loadingPhase,
   kindleConnected,
+  mountpoint,
   collections,
   documentsBase,
+  query,
+  onQueryChange,
+  presence,
+  onPresenceChange,
   onAddBookToCollection,
   onRemoveBookFromCollection,
-  onBookUpdated
+  onBookUpdated,
+  onLibraryChanged,
+  onCollectionsChanged,
+  onNotify
 }: BooksGridProps) {
   const { t } = useTranslation()
-  const [query, setQuery] = useState('')
+  // Search and presence are owned by App together with the collection filter, so
+  // "All books" can clear all three at once and the sidebar can tell whether any
+  // filter is active. Both presence facets false (the default) means "show all".
+  const { showOnDevice, showLibraryOnly } = presence
   const [selectedBook, setSelectedBook] = useState<SelectedBook | null>(null)
+
+  // Multi-selection. `isSelectionMode` is explicit rather than derived from a
+  // non-empty set, so clearing the last card keeps the toolbar up instead of
+  // silently dropping the user back out of the mode.
+  const [isSelectionMode, setIsSelectionMode] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [isRunning, setIsRunning] = useState(false)
+  const [progress, setProgress] = useState<BulkProgress | null>(null)
+  /** libraryId of the book currently being sent, for its card badge. */
+  const [sendingId, setSendingId] = useState<string | null>(null)
+  // A ref, not state: the running loop reads it between books and must see the
+  // latest value without waiting for a re-render.
+  const stopRef = useRef(false)
   // Cover cache-buster versions keyed on cache key: bumped by a retry-loop push.
   const [coverVersions, setCoverVersions] = useState<Map<string, number>>(new Map())
   // Keys that resolved to "no cover" (not-found / retries exhausted): a terminal
@@ -310,13 +315,13 @@ export function BooksGrid({
   }, [])
 
   const handleSelect = useCallback(
-    (book: KindleBook, bookRelpath: string, cover: string | null) => {
+    (book: DisplayBook, bookRelpath: string, cover: string | null) => {
       setSelectedBook({ book, cover, bookRelpath })
     },
     []
   )
 
-  const filtered = useMemo(() => {
+  const searched = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return books
     return books.filter(
@@ -324,6 +329,204 @@ export function BooksGrid({
         b.title.toLowerCase().includes(q) || (b.author ?? '').toLowerCase().includes(q)
     )
   }, [books, query])
+
+  // Facet counts are taken AFTER the search so they stay truthful while typing.
+  const presenceCounts = useMemo(() => countPresence(searched), [searched])
+
+  const filtered = useMemo(() => filterByPresence(searched, presence), [searched, presence])
+
+  const hasQuery = query.trim() !== ''
+
+  // Clears only what this grid owns the controls for; the collection filter is
+  // cleared from the sidebar's "All books" entry.
+  const clearFilters = useCallback(() => {
+    onQueryChange('')
+    onPresenceChange({ showOnDevice: false, showLibraryOnly: false })
+  }, [onQueryChange, onPresenceChange])
+
+  // ─── Multi-selection ───────────────────────────────────────────────────────
+  // Selection is keyed by bookKey, NOT by index or object identity: cards unmount
+  // as they scroll out of the virtualizer, and the whole list is rebuilt after
+  // every rescan. Keys also mean a selection survives the search/presence
+  // filters — a filtered-out book stays selected and still counts.
+
+  // The chosen books, resolved against the full (unfiltered) list so nothing is
+  // silently dropped by a filter the user changed after selecting.
+  const chosen = useMemo(() => selectedBooks(books, selectedKeys), [books, selectedKeys])
+  const sendable = useMemo(() => sendableBooks(chosen), [chosen])
+  const removable = useMemo(() => removableBooks(chosen), [chosen])
+  const collectable = useMemo(() => collectableBooks(chosen), [chosen])
+
+  const enterSelection = useCallback((book: DisplayBook) => {
+    setIsSelectionMode(true)
+    setSelectedKeys(new Set([bookKey(book)]))
+  }, [])
+
+  const toggleSelect = useCallback((book: DisplayBook) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      const key = bookKey(book)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  const exitSelection = useCallback(() => {
+    setIsSelectionMode(false)
+    setSelectedKeys(new Set())
+  }, [])
+
+  // Escape leaves selection mode, matching the modals. Ignored mid-run: the
+  // toolbar's explicit Stop is the way out of a send in progress.
+  useEffect(() => {
+    if (!isSelectionMode) return
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && !isRunning) exitSelection()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [isSelectionMode, isRunning, exitSelection])
+
+  // ─── Bulk actions ──────────────────────────────────────────────────────────
+
+  /**
+   * Sends the eligible books ONE AT A TIME.
+   *
+   * Not parallel on purpose: each send spawns Calibre (CPU-bound) and then
+   * streams to a single FAT32 volume, so concurrency would only make them
+   * contend. Stopping takes effect between books — `sendToKindle` does not yet
+   * accept an AbortSignal, so a conversion already running is left to finish.
+   */
+  const runBulkSend = useCallback(async () => {
+    if (!mountpoint || sendable.length === 0) return
+    stopRef.current = false
+    setIsRunning(true)
+
+    const total = sendable.length
+    let sent = 0
+    let failed = 0
+    let stopped = false
+
+    for (const [index, book] of sendable.entries()) {
+      if (stopRef.current) {
+        stopped = true
+        break
+      }
+      const libraryId = book.libraryId
+      if (libraryId === undefined) continue
+
+      setSendingId(libraryId)
+      setProgress({ done: index, total, phase: 'converting', percent: 0 })
+      try {
+        await window.kindleAPI.uploadBook(libraryId, mountpoint)
+        sent++
+      } catch (err) {
+        console.error(`[bulk-send] "${book.title}" failed:`, err)
+        failed++
+      }
+    }
+
+    setSendingId(null)
+    setProgress(null)
+    setIsRunning(false)
+
+    const summary = [
+      sent > 0 ? t('selection.sentCount', { count: sent }) : null,
+      failed > 0 ? t('selection.failedCount', { count: failed }) : null,
+      stopped ? t('selection.stopped') : null
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    if (summary) onNotify(failed > 0 ? 'error' : 'info', summary)
+
+    if (sent > 0) {
+      onLibraryChanged()
+      exitSelection()
+    }
+  }, [mountpoint, sendable, t, onNotify, onLibraryChanged, exitSelection])
+
+  const runBulkRemove = useCallback(async () => {
+    if (removable.length === 0) return
+    if (!window.confirm(t('selection.confirmRemove', { count: removable.length }))) return
+
+    setIsRunning(true)
+    let removed = 0
+    let failed = 0
+    for (const book of removable) {
+      if (book.libraryId === undefined) continue
+      try {
+        await window.kindleAPI.removeLibraryBook(book.libraryId)
+        removed++
+      } catch (err) {
+        console.error(`[bulk-remove] "${book.title}" failed:`, err)
+        failed++
+      }
+    }
+    setIsRunning(false)
+
+    const summary = [
+      removed > 0 ? t('selection.removedCount', { count: removed }) : null,
+      failed > 0 ? t('selection.failedCount', { count: failed }) : null
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    if (summary) onNotify(failed > 0 ? 'error' : 'info', summary)
+
+    onLibraryChanged()
+    exitSelection()
+  }, [removable, t, onNotify, onLibraryChanged, exitSelection])
+
+  /**
+   * Adds every eligible selected book to one collection in a SINGLE transaction
+   * (ensureCollectionsContain is idempotent, so re-adding a member is a no-op).
+   */
+  const runBulkAddToCollection = useCallback(
+    async (collectionId: string) => {
+      const collection = collections.find((c) => c.id === collectionId)
+      if (!collection || collectable.length === 0) return
+
+      setIsRunning(true)
+      try {
+        const relpaths = collectable.map((book) => toBookRelpath(book.path, documentsBase))
+        const next = await window.kindleAPI.ensureCollectionsContain([
+          { name: collection.name, relpaths }
+        ])
+        onCollectionsChanged(next)
+        onNotify(
+          'info',
+          t('selection.addedToCollection', { count: relpaths.length, name: collection.name })
+        )
+        exitSelection()
+      } catch (err) {
+        console.error('[bulk-add-to-collection] failed:', err)
+        onNotify('error', t('errors.addToCollection'))
+      } finally {
+        setIsRunning(false)
+      }
+    },
+    [collections, collectable, documentsBase, onCollectionsChanged, onNotify, t, exitSelection]
+  )
+
+  // Follow the convert/upload pushes for the book currently being sent, so the
+  // toolbar shows both which book it is on and how far into that book it is.
+  useEffect(() => {
+    if (sendingId === null) return
+    const applyPhase = (phase: 'converting' | 'uploading', libraryId: string, percent: number) => {
+      if (libraryId !== sendingId) return
+      setProgress((prev) => (prev ? { ...prev, phase, percent } : prev))
+    }
+    const offConvert = window.kindleAPI.onConvertProgress((p) =>
+      applyPhase('converting', p.libraryId, p.percent)
+    )
+    const offUpload = window.kindleAPI.onUploadProgress((p) =>
+      applyPhase('uploading', p.libraryId, p.percent)
+    )
+    return () => {
+      offConvert()
+      offUpload()
+    }
+  }, [sendingId])
 
   const columns = columnsForWidth(containerWidth)
   const rowCount = Math.ceil(filtered.length / columns)
@@ -345,12 +548,8 @@ export function BooksGrid({
     rowVirtualizer.measure()
   }, [columns, estimatedRowHeight, rowVirtualizer])
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-gray-400 text-sm">{t('books.noBooks')}</div>
-      </div>
-    )
+  if (loadingPhase) {
+    return <LoadingState phase={loadingPhase} />
   }
 
   if (books.length === 0) {
@@ -362,13 +561,64 @@ export function BooksGrid({
   return (
     <div className="flex h-full overflow-hidden">
       <div className="flex-1 flex flex-col p-6 overflow-hidden">
-        <div className="flex items-center justify-between mb-4 shrink-0">
+        {isSelectionMode ? (
+          <SelectionToolbar
+            selectedCount={chosen.length}
+            sendableCount={sendable.length}
+            removableCount={removable.length}
+            collectableCount={collectable.length}
+            collections={collections}
+            isDeviceConnected={mountpoint !== null}
+            progress={progress}
+            isRunning={isRunning}
+            onSelectAll={() => setSelectedKeys(new Set(filtered.map(bookKey)))}
+            onClear={() => setSelectedKeys(new Set())}
+            onExit={exitSelection}
+            onSend={runBulkSend}
+            onRemove={runBulkRemove}
+            onAddToCollection={runBulkAddToCollection}
+            onStop={() => {
+              stopRef.current = true
+            }}
+          />
+        ) : (
+        <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
           <p className="text-gray-400 text-sm shrink-0">
             {filtered.length === books.length
               ? t('books.booksCount', { count: books.length })
               : t('books.booksCountFiltered', { filtered: filtered.length, total: books.length })}
           </p>
-          <div className="relative ml-4 w-56">
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* A long press is undiscoverable on its own, and unreachable from a
+                keyboard — this is the visible way into selection mode. */}
+            <button
+              type="button"
+              onClick={() => setIsSelectionMode(true)}
+              title={t('selection.enterHint')}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-md text-xs text-gray-400 hover:text-gray-200 whitespace-nowrap transition-colors"
+            >
+              <svg aria-hidden="true" className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {t('selection.enter')}
+            </button>
+            <PresenceToggle
+              tone="device"
+              label={t('books.onKindle')}
+              count={presenceCounts.onDevice}
+              active={showOnDevice}
+              onToggle={() => onPresenceChange({ ...presence, showOnDevice: !showOnDevice })}
+            />
+            <PresenceToggle
+              tone="library"
+              label={t('books.inLibraryOnly')}
+              count={presenceCounts.libraryOnly}
+              active={showLibraryOnly}
+              onToggle={() => onPresenceChange({ ...presence, showLibraryOnly: !showLibraryOnly })}
+            />
+
+          <div className="relative w-56">
             <svg
               aria-hidden="true"
               className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
@@ -386,14 +636,14 @@ export function BooksGrid({
             <input
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => onQueryChange(e.target.value)}
               placeholder={t('books.searchPlaceholder')}
               aria-label={t('books.searchPlaceholder')}
               className="w-full bg-gray-800 border border-gray-700 rounded-md pl-8 pr-8 py-1.5 text-xs text-gray-200 placeholder-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
             />
             {query && (
               <button
-                onClick={() => setQuery('')}
+                onClick={() => onQueryChange('')}
                 aria-label={t('books.clearSearch')}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
               >
@@ -402,13 +652,18 @@ export function BooksGrid({
                 </svg>
               </button>
             )}
+            </div>
           </div>
         </div>
+        )}
 
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <p className="text-gray-300 text-sm">{t('books.noResults', { query })}</p>
-            <button onClick={() => setQuery('')} className="mt-2 text-indigo-400 text-xs hover:underline">
+            {/* Without a query the old message read 'No books found for ""'. */}
+            <p className="text-gray-300 text-sm">
+              {hasQuery ? t('books.noResults', { query }) : t('books.noResultsFilter')}
+            </p>
+            <button onClick={clearFilters} className="mt-2 text-indigo-400 text-xs hover:underline">
               {t('books.removeFilter')}
             </button>
           </div>
@@ -436,13 +691,22 @@ export function BooksGrid({
                   >
                     {rowBooks.map((book) => (
                       <BookCard
-                        key={book.path}
+                        key={bookKey(book)}
                         book={book}
                         bookRelpath={toBookRelpath(book.path, documentsBase)}
                         collections={collections}
                         coverVersions={coverVersions}
                         coverMissing={coverMissing}
                         coverEpoch={coverEpoch}
+                        isSelectionMode={isSelectionMode}
+                        isSelected={selectedKeys.has(bookKey(book))}
+                        sendPhase={
+                          sendingId !== null && book.libraryId === sendingId
+                            ? progress?.phase ?? 'converting'
+                            : null
+                        }
+                        onLongPress={enterSelection}
+                        onToggleSelect={toggleSelect}
                         onAddToCollection={onAddBookToCollection}
                         onRemoveFromCollection={onRemoveBookFromCollection}
                         onSelect={handleSelect}
@@ -462,11 +726,18 @@ export function BooksGrid({
           cover={selectedBook.cover}
           coverEpoch={coverEpoch}
           bookRelpath={selectedBook.bookRelpath}
+          mountpoint={mountpoint}
           onClose={() => setSelectedBook(null)}
           onBookUpdated={(updatedBook) => {
-            setSelectedBook((prev) => (prev ? { ...prev, book: updatedBook } : null))
+            // Merge the edited KindleBook fields onto the DisplayBook so
+            // onDevice/libraryId survive a metadata edit.
+            setSelectedBook((prev) =>
+              prev ? { ...prev, book: { ...prev.book, ...updatedBook } } : null
+            )
             onBookUpdated(updatedBook)
           }}
+          onSent={onLibraryChanged}
+          onRemoved={onLibraryChanged}
         />
       )}
     </div>

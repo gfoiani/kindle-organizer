@@ -35,7 +35,8 @@ export interface Collection {
 }
 
 const KINDLE_IDENTIFIERS = ['kindle', 'amazon']
-const SUPPORTED_EXTENSIONS = ['.mobi', '.azw', '.azw3', '.kfx', '.epub', '.pdf']
+/** File formats a Kindle can hold — used both to scan the device and to filter dropped files. */
+export const SUPPORTED_EXTENSIONS = ['.mobi', '.azw', '.azw3', '.kfx', '.epub', '.pdf']
 
 export async function detectKindleDrives(): Promise<KindleDrive[]> {
   const devices = await si.blockDevices()
@@ -126,8 +127,23 @@ const SORT_ARTICLES = [
   'An', 'I', 'A',
 ]
 
+/**
+ * Composed (NFC) form for text read off the device filesystem.
+ *
+ * macOS returns decomposed (NFD) names — "è" as `e` + U+0300 — while EPUB
+ * metadata, the staging library and anything the user types are composed. The
+ * two look identical and compare unequal, so an uploaded book failed to
+ * reconcile with its device copy and accented searches found nothing.
+ *
+ * Applied to the derived title/author only. `path` and `filename` stay
+ * byte-for-byte as the filesystem gave them — that is what has to open the file.
+ */
+function composed(value: string): string {
+  return value.normalize('NFC')
+}
+
 function sanitizeTitle(filename: string, author?: string): string {
-  let t = filename
+  let t = composed(filename)
 
   // 1. Replace underscores with spaces
   t = t.replace(/_/g, ' ')
@@ -189,7 +205,7 @@ async function scanBooks(dirPath: string, author?: string): Promise<KindleBook[]
 
     if (entry.isDirectory()) {
       if (JUNK_EXTENSIONS.includes(path.extname(entry.name).toLowerCase())) continue
-      const subBooks = await scanBooks(path.join(dirPath, entry.name), entry.name)
+      const subBooks = await scanBooks(path.join(dirPath, entry.name), composed(entry.name))
       books.push(...subBooks)
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase()
