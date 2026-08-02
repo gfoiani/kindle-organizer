@@ -33,6 +33,8 @@ export interface KindleAPI {
   readDocuments: (kindleMountpoint: string) => Promise<KindleBook[]>
   syncCalibre: (mountpoint: string) => Promise<void>
   writeToKindle: (mountpoint: string) => Promise<boolean>
+  /** Unmounts and powers down the connected Kindle so it can be safely unplugged. */
+  ejectKindle: (mountpoint: string) => Promise<void>
   getLocalCollections: () => Promise<Collection[]>
   getCollectionBooks: (collectionId: string) => Promise<string[]>
   getBookCollections: (bookRelpath: string) => Promise<string[]>
@@ -133,6 +135,7 @@ export const kindleAPI: KindleAPI = {
   syncCalibre: (mountpoint: string) => ipcRenderer.invoke('kindle:sync-calibre', mountpoint),
 
   writeToKindle: (mountpoint: string) => ipcRenderer.invoke('kindle:write-to-kindle', mountpoint),
+  ejectKindle: (mountpoint: string) => ipcRenderer.invoke('kindle:eject', mountpoint),
 
   getLocalCollections: () => ipcRenderer.invoke('kindle:get-local-collections'),
 

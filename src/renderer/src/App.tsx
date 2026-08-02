@@ -13,6 +13,7 @@ import { STATUS_RESET_MS } from './utils/constants'
 import { toBookRelpath } from './utils/relpath'
 import { mergeBooks } from './utils/mergeBooks'
 import { selectLoadingPhase } from './utils/loadingPhase'
+import { isPresenceFiltered, type PresenceFilter } from './utils/presenceFilter'
 import { errorMessageKey } from './utils/appError'
 import {
   buildAuthorSubcollections,
@@ -41,6 +42,14 @@ export function App() {
   const [collections, setCollections] = useState<Collection[]>([])
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null)
   const [collectionBookPaths, setCollectionBookPaths] = useState<Set<string>>(new Set())
+  // The grid's search box and presence chips live here, next to the collection
+  // filter: all three narrow the same list, so "All books" can lift all three at
+  // once and the sidebar can highlight itself while any of them is on.
+  const [query, setQuery] = useState('')
+  const [presence, setPresence] = useState<PresenceFilter>({
+    showOnDevice: false,
+    showLibraryOnly: false
+  })
   const [isLoadingDrive, setIsLoadingDrive] = useState(true)
   // Whether the first detect+scan cycle has finished. Gates the grid's initial
   // render (see utils/loadingPhase) and never goes back to false, so later
@@ -49,6 +58,7 @@ export function App() {
   const [isLoadingBooks, setIsLoadingBooks] = useState(false)
   const [isLoadingCollections, setIsLoadingCollections] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isEjecting, setIsEjecting] = useState(false)
   const [syncResult, setSyncResult] = useState<'success' | 'error' | null>(null)
   const [isShowingSettings, setIsShowingSettings] = useState(false)
   const [isShowingAbout, setIsShowingAbout] = useState(false)
@@ -407,6 +417,25 @@ export function App() {
     }
   }
 
+  /**
+   * Ejects the device. No optimistic clearing of `kindle`: the watcher's
+   * disconnect push is what removes it, so a failed eject leaves the UI honest
+   * about the device still being mounted.
+   */
+  async function handleEject() {
+    if (!kindle) return
+    setIsEjecting(true)
+    try {
+      await window.kindleAPI.ejectKindle(kindle.mountpoint)
+      showInfo(t('header.ejected'))
+    } catch (err) {
+      console.error('Failed to eject the Kindle:', err)
+      showError(t(errorMessageKey(err, 'errors.ejectFailed')))
+    } finally {
+      setIsEjecting(false)
+    }
+  }
+
   async function handleApplySuggestions(
     suggestions: ClassifyResult[],
     threshold: number,
@@ -579,6 +608,20 @@ export function App() {
           collectionBookPaths.has(toBookRelpath(book.path, documentsBase))
         )
 
+  // Drives the sidebar's "All books" entry: while anything is narrowing the list
+  // it stops looking like the current view and becomes the way back out.
+  const hasActiveFilters =
+    selectedCollectionId !== null || query.trim() !== '' || isPresenceFiltered(presence)
+
+  /** The one place that lifts every filter at once. */
+  const handleShowAllBooks = useCallback(() => {
+    setSelectedCollectionId(null)
+    setQuery('')
+    setPresence({ showOnDevice: false, showLibraryOnly: false })
+    setIsShowingSettings(false)
+    setIsShowingAbout(false)
+  }, [])
+
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-white overflow-hidden">
       <TitleBar />
@@ -592,8 +635,11 @@ export function App() {
             setIsShowingSettings(false)
             setIsShowingAbout(false)
           }}
+          hasActiveFilters={hasActiveFilters}
+          onShowAllBooks={handleShowAllBooks}
           isLoading={isLoadingCollections}
           booksCount={books.length}
+          allBooksCount={displayBooks.length}
           onCreateCollection={handleCreateCollection}
           onRenameCollection={handleRenameCollection}
           onDeleteCollection={handleDeleteCollection}
@@ -675,6 +721,28 @@ export function App() {
                     </button>
                   )}
 
+                  {kindle && (
+                    <button
+                      onClick={handleEject}
+                      disabled={isEjecting || isSyncing}
+                      title={t('header.ejectHint')}
+                      aria-label={t('header.eject')}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-md text-sm text-gray-300 transition-colors disabled:opacity-50"
+                    >
+                      {isEjecting ? (
+                        <svg aria-hidden="true" className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      ) : (
+                        // The standard eject glyph: triangle over a bar.
+                        <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l7-7 7 7H5zM5 18h14" />
+                        </svg>
+                      )}
+                      {isEjecting ? t('header.ejecting') : t('header.eject')}
+                    </button>
+                  )}
+
                   <button
                     onClick={loadKindle}
                     disabled={isRefreshingDevice}
@@ -716,6 +784,10 @@ export function App() {
                 mountpoint={kindle?.mountpoint ?? null}
                 collections={collections}
                 documentsBase={documentsBase}
+                query={query}
+                onQueryChange={setQuery}
+                presence={presence}
+                onPresenceChange={setPresence}
                 onAddBookToCollection={handleAddBookToCollection}
                 onRemoveBookFromCollection={handleRemoveBookFromCollection}
                 onBookUpdated={handleBookUpdated}

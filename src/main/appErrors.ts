@@ -13,7 +13,12 @@
  * Adding a code here is a compile error in the renderer until it is given a
  * message: the mapping table there is typed `Record<AppErrorCode, string>`.
  */
-export type AppErrorCode = 'COLLECTION_NAME_TAKEN' | 'COLLECTION_NAME_EMPTY'
+export type AppErrorCode =
+  | 'COLLECTION_NAME_TAKEN'
+  | 'COLLECTION_NAME_EMPTY'
+  | 'DEVICE_NOT_FOUND'
+  | 'EJECT_BUSY'
+  | 'EJECT_FAILED'
 
 /** An error whose message is a stable code the renderer can translate. */
 export class AppError extends Error {

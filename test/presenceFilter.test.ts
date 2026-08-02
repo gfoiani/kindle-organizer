@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest'
-import { countPresence, filterByPresence } from '../src/renderer/src/utils/presenceFilter'
+import {
+  countPresence,
+  filterByPresence,
+  isPresenceFiltered
+} from '../src/renderer/src/utils/presenceFilter'
 import type { DisplayBook } from '../src/renderer/src/utils/mergeBooks'
 
 function book(title: string, onDevice: boolean): DisplayBook {
@@ -68,5 +72,27 @@ describe('filterByPresence', () => {
     const input = [...BOOKS]
     filterByPresence(input, { showOnDevice: true, showLibraryOnly: false })
     expect(input).toEqual(BOOKS)
+  })
+})
+
+describe('isPresenceFiltered', () => {
+  test('reports a filter only when exactly one facet is selected', () => {
+    expect(isPresenceFiltered({ showOnDevice: true, showLibraryOnly: false })).toBe(true)
+    expect(isPresenceFiltered({ showOnDevice: false, showLibraryOnly: true })).toBe(true)
+  })
+
+  test('treats neither and both as "show everything"', () => {
+    expect(isPresenceFiltered({ showOnDevice: false, showLibraryOnly: false })).toBe(false)
+    expect(isPresenceFiltered({ showOnDevice: true, showLibraryOnly: true })).toBe(false)
+  })
+
+  test('agrees with filterByPresence about when nothing is excluded', () => {
+    for (const showOnDevice of [false, true]) {
+      for (const showLibraryOnly of [false, true]) {
+        const filter = { showOnDevice, showLibraryOnly }
+        const untouched = filterByPresence(BOOKS, filter) === BOOKS
+        expect(untouched).toBe(!isPresenceFiltered(filter))
+      }
+    }
   })
 })

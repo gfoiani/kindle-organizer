@@ -49,6 +49,7 @@ Three Electron layers, kept strictly separated:
   - `index.ts` — bootstrap, window; registers the `cover-cache://` scheme (privileged, before `ready`) and its protocol handler, starts the cover-retry loop and Kindle hot-plug watcher, and tears them down on `will-quit` (`cancelAllCovers`).
   - `ipc.ts` — the single registry of `ipcMain.handle` channels; the only bridge the renderer can call.
   - `kindle.ts` — drive detection (`systeminformation`), `documents/` scanning, filename→title sanitization, hot-plug watcher.
+  - `eject.ts` — safe-eject per platform. `ejectCommand()` is pure so the argv is unit-tested; everything runs via `execFile` (no shell), and the Windows path — the only one that must interpolate into a PowerShell string — accepts a bare drive letter or nothing. The IPC layer re-detects and matches the mountpoint before calling it, so a renderer-supplied path never reaches a system tool.
   - `calibre.ts` — read/write the device's `metadata.calibre` (atomic write).
   - `localCollections.ts` / `bookOverrides.ts` / `library.ts` — better-sqlite3 stores in `userData/` (collections; user title/author edits; staging library). All three go through `sqlite.ts`.
   - `sqlite.ts` — `createCachedDb(resolvePath, initSchema)`: one cached connection per store instead of an open/init/close cycle per call, keyed on the resolved path so a `userData` swap (the test harness) retires the stale handle. Closed from `will-quit`.

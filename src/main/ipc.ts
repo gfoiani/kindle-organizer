@@ -1,5 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { detectKindleDrives, readDocuments } from './kindle'
+import { ejectDrive } from './eject'
+import { AppError } from './appErrors'
 import { readCalibreMetadata, writeCalibreMetadata, readCalibreIsbnMap } from './calibre'
 import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
 import { applyOverrides, setOverride } from './bookOverrides'
@@ -157,6 +159,20 @@ export function registerIpcHandlers(): void {
       assertString(mountpoint, 'mountpoint')
       const calibreBooks = readCalibreMetadata(mountpoint)
       importFromCalibre(calibreBooks)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:eject',
+    withErrorLogging('kindle:eject', async (_, mountpoint: unknown) => {
+      assertString(mountpoint, 'mountpoint')
+      // The mountpoint is handed to a system tool, so it is never trusted as
+      // given: only a volume that a live detection still reports as a Kindle can
+      // be ejected. A stale mountpoint (already unplugged) lands here too.
+      const drives = await detectKindleDrives()
+      const drive = drives.find((candidate) => candidate.mountpoint === mountpoint)
+      if (!drive) throw new AppError('DEVICE_NOT_FOUND')
+      await ejectDrive(drive)
     })
   )
 

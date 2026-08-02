@@ -28,6 +28,15 @@ export function countPresence(books: DisplayBook[]): PresenceCounts {
  * downstream keeps its reference and the grid does not re-render needlessly.
  */
 export function filterByPresence(books: DisplayBook[], filter: PresenceFilter): DisplayBook[] {
-  if (filter.showOnDevice === filter.showLibraryOnly) return books
+  if (!isPresenceFiltered(filter)) return books
   return books.filter((book) => (filter.showOnDevice ? book.onDevice : !book.onDevice))
+}
+
+/**
+ * Whether the chips actually narrow the list — the same union rule as above, so
+ * "both on" counts as no filter. The sidebar reads this to decide whether its
+ * "All books" entry has anything to clear.
+ */
+export function isPresenceFiltered(filter: PresenceFilter): boolean {
+  return filter.showOnDevice !== filter.showLibraryOnly
 }

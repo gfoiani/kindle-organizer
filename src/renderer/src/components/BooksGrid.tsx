@@ -6,7 +6,7 @@ import type { DisplayBook } from '../utils/mergeBooks'
 import { BookCard } from './BookCard'
 import { BookDetailSidebar } from './BookDetailSidebar'
 import { toBookRelpath } from '../utils/relpath'
-import { countPresence, filterByPresence } from '../utils/presenceFilter'
+import { countPresence, filterByPresence, type PresenceFilter } from '../utils/presenceFilter'
 import type { LoadingPhase } from '../utils/loadingPhase'
 import {
   bookKey,
@@ -39,6 +39,12 @@ interface BooksGridProps {
   mountpoint: string | null
   collections: Collection[]
   documentsBase: string
+  /** Search text, owned by App so "All books" can clear every filter at once. */
+  query: string
+  onQueryChange: (query: string) => void
+  /** Presence facets, owned by App for the same reason. */
+  presence: PresenceFilter
+  onPresenceChange: (presence: PresenceFilter) => void
   onAddBookToCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onRemoveBookFromCollection: (collectionId: string, bookRelpath: string) => Promise<void>
   onBookUpdated: (updatedBook: KindleBook) => void
@@ -203,6 +209,10 @@ export function BooksGrid({
   mountpoint,
   collections,
   documentsBase,
+  query,
+  onQueryChange,
+  presence,
+  onPresenceChange,
   onAddBookToCollection,
   onRemoveBookFromCollection,
   onBookUpdated,
@@ -211,10 +221,10 @@ export function BooksGrid({
   onNotify
 }: BooksGridProps) {
   const { t } = useTranslation()
-  const [query, setQuery] = useState('')
-  // Presence facets. Both false (the default) means "show everything".
-  const [showOnDevice, setShowOnDevice] = useState(false)
-  const [showLibraryOnly, setShowLibraryOnly] = useState(false)
+  // Search and presence are owned by App together with the collection filter, so
+  // "All books" can clear all three at once and the sidebar can tell whether any
+  // filter is active. Both presence facets false (the default) means "show all".
+  const { showOnDevice, showLibraryOnly } = presence
   const [selectedBook, setSelectedBook] = useState<SelectedBook | null>(null)
 
   // Multi-selection. `isSelectionMode` is explicit rather than derived from a
@@ -323,18 +333,16 @@ export function BooksGrid({
   // Facet counts are taken AFTER the search so they stay truthful while typing.
   const presenceCounts = useMemo(() => countPresence(searched), [searched])
 
-  const filtered = useMemo(
-    () => filterByPresence(searched, { showOnDevice, showLibraryOnly }),
-    [searched, showOnDevice, showLibraryOnly]
-  )
+  const filtered = useMemo(() => filterByPresence(searched, presence), [searched, presence])
 
   const hasQuery = query.trim() !== ''
 
+  // Clears only what this grid owns the controls for; the collection filter is
+  // cleared from the sidebar's "All books" entry.
   const clearFilters = useCallback(() => {
-    setQuery('')
-    setShowOnDevice(false)
-    setShowLibraryOnly(false)
-  }, [])
+    onQueryChange('')
+    onPresenceChange({ showOnDevice: false, showLibraryOnly: false })
+  }, [onQueryChange, onPresenceChange])
 
   // ─── Multi-selection ───────────────────────────────────────────────────────
   // Selection is keyed by bookKey, NOT by index or object identity: cards unmount
@@ -600,14 +608,14 @@ export function BooksGrid({
               label={t('books.onKindle')}
               count={presenceCounts.onDevice}
               active={showOnDevice}
-              onToggle={() => setShowOnDevice((v) => !v)}
+              onToggle={() => onPresenceChange({ ...presence, showOnDevice: !showOnDevice })}
             />
             <PresenceToggle
               tone="library"
               label={t('books.inLibraryOnly')}
               count={presenceCounts.libraryOnly}
               active={showLibraryOnly}
-              onToggle={() => setShowLibraryOnly((v) => !v)}
+              onToggle={() => onPresenceChange({ ...presence, showLibraryOnly: !showLibraryOnly })}
             />
 
           <div className="relative w-56">
@@ -628,14 +636,14 @@ export function BooksGrid({
             <input
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => onQueryChange(e.target.value)}
               placeholder={t('books.searchPlaceholder')}
               aria-label={t('books.searchPlaceholder')}
               className="w-full bg-gray-800 border border-gray-700 rounded-md pl-8 pr-8 py-1.5 text-xs text-gray-200 placeholder-gray-400 focus:outline-none focus:border-indigo-500 transition-colors"
             />
             {query && (
               <button
-                onClick={() => setQuery('')}
+                onClick={() => onQueryChange('')}
                 aria-label={t('books.clearSearch')}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
               >

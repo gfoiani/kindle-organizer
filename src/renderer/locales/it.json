@@ -12,6 +12,7 @@
     "subtitle": "La tua libreria Kindle",
     "library": "Libreria",
     "allBooks": "Tutti i libri",
+    "clearFilters": "Tutti i libri — rimuovi i filtri",
     "collections": "Collezioni",
     "newCollection": "Nuova collezione",
     "collectionPlaceholder": "Nome collezione...",
@@ -108,6 +109,10 @@
     "saved": "Salvato",
     "error": "Errore",
     "writeKindle": "Scrivi su Kindle",
+    "eject": "Espelli",
+    "ejectHint": "Espelli il Kindle per scollegarlo in sicurezza",
+    "ejecting": "Espulsione...",
+    "ejected": "Kindle espulso: ora puoi scollegarlo.",
     "refresh": "Aggiorna",
     "refreshLoading": "Aggiornamento..."
   },
@@ -251,6 +256,9 @@
     "loadCollections": "Impossibile caricare le collezioni.",
     "loadBooks": "Impossibile leggere i libri dal Kindle.",
     "detectDrives": "Impossibile rilevare il Kindle collegato.",
-    "addBooks": "Impossibile aggiungere i file trascinati."
+    "addBooks": "Impossibile aggiungere i file trascinati.",
+    "deviceNotFound": "Kindle non trovato: potrebbe essere già stato scollegato.",
+    "ejectBusy": "Il Kindle è ancora in uso: chiudi eventuali file aperti dal dispositivo e riprova.",
+    "ejectFailed": "Impossibile espellere il Kindle. Riprova; se persiste, espellilo dal Finder."
   }
 }

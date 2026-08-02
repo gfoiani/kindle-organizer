@@ -12,6 +12,7 @@
     "subtitle": "Your Kindle library",
     "library": "Library",
     "allBooks": "All books",
+    "clearFilters": "All books — clear filters",
     "collections": "Collections",
     "newCollection": "New collection",
     "collectionPlaceholder": "Collection name...",
@@ -33,6 +34,10 @@
     "saved": "Saved",
     "error": "Error",
     "writeKindle": "Write to Kindle",
+    "eject": "Eject",
+    "ejectHint": "Eject the Kindle so it can be safely unplugged",
+    "ejecting": "Ejecting…",
+    "ejected": "Kindle ejected — you can unplug it now.",
     "refresh": "Refresh",
     "refreshLoading": "Refreshing..."
   },
@@ -251,6 +256,9 @@
     "loadCollections": "Could not load the collections.",
     "loadBooks": "Could not read the books from the Kindle.",
     "detectDrives": "Could not detect the connected Kindle.",
-    "addBooks": "Could not add the dropped files."
+    "addBooks": "Could not add the dropped files.",
+    "deviceNotFound": "Kindle not found — it may already be disconnected.",
+    "ejectBusy": "The Kindle is still in use — close any files still open from the device and try again.",
+    "ejectFailed": "Could not eject the Kindle. Try again; if it persists, eject it from the Finder."
   }
 }

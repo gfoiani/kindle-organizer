@@ -9,7 +9,10 @@ import type { AppErrorCode } from '../../../preload/api'
  */
 const CODE_MESSAGE_KEYS: Record<AppErrorCode, string> = {
   COLLECTION_NAME_TAKEN: 'errors.collectionNameTaken',
-  COLLECTION_NAME_EMPTY: 'errors.collectionNameEmpty'
+  COLLECTION_NAME_EMPTY: 'errors.collectionNameEmpty',
+  DEVICE_NOT_FOUND: 'errors.deviceNotFound',
+  EJECT_BUSY: 'errors.ejectBusy',
+  EJECT_FAILED: 'errors.ejectFailed'
 }
 
 /**
