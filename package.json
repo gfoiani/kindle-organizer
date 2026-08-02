@@ -1,6 +1,6 @@
 {
   "name": "kindle-manager",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Manage and organize your Kindle library",
   "main": "out/main/index.js",
   "author": "",
