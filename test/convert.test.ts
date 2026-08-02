@@ -39,7 +39,19 @@ function setExisting(paths: string[]): void {
   existsSyncMock.mockImplementation((p: string) => set.has(p))
 }
 
+/**
+ * `findCalibre()` reads `process.platform` when it runs, and the canonical-path
+ * list is empty on Linux — so on a Linux CI runner the PATH fallback would win
+ * and every assertion about the macOS binary would be checking the wrong thing.
+ * Pin the platform per test instead of inheriting the host's.
+ */
+const HOST_PLATFORM = process.platform
+function setPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true })
+}
+
 beforeEach(() => {
+  setPlatform('darwin')
   resetEngineCache()
   execFileMock.mockReset()
   execFileSyncMock.mockReset()
@@ -47,6 +59,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  setPlatform(HOST_PLATFORM)
   resetEngineCache()
 })
 
@@ -54,6 +67,19 @@ describe('detectEngine', () => {
   test('detects calibre when the canonical macOS binary exists', () => {
     setExisting([CALIBRE_MAC])
     expect(detectEngine()).toBe('calibre')
+  })
+
+  test('falls back to the PATH binary where there is no canonical location', () => {
+    // Arrange — Linux has no canonical calibre path, so detection must lean on
+    // `ebook-convert --version` succeeding on PATH. This is the case that used to
+    // make the assertions below silently platform-dependent.
+    setPlatform('linux')
+    setExisting([])
+    execFileSyncMock.mockReturnValue(undefined)
+
+    // Act / Assert
+    expect(detectEngine()).toBe('calibre')
+    expect(execFileSyncMock).toHaveBeenCalledWith('ebook-convert', ['--version'], expect.any(Object))
   })
 
   test('returns "none" when no calibre and no bundled binary exist', () => {
