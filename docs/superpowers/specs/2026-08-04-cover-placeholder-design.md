@@ -112,10 +112,18 @@ interface CoverPlaceholderProps {
 }
 ```
 
-Renders `absolute inset-0` inside the existing cover container: an
-`<svg viewBox="0 0 200 300">` filling the box, painting a rect with a linear
-gradient between the tint's two stops, and over it the silhouette of a book
-(cover outline, spine, two short "text" lines) stroked in white at ~14% opacity.
+Renders an `<svg viewBox="0 0 200 300">` filling the existing cover container,
+painting a rect with a linear gradient between the tint's two stops, and over it
+the silhouette of a book (cover outline, spine, two short "text" lines) stroked
+in white at ~14% opacity.
+
+Sized with `w-full h-full`, not `absolute inset-0`: the card's cover box is
+`relative` (`BookCard.tsx:145`) but the panel's is not
+(`BookDetailSidebar.tsx:252`), so an absolutely-positioned placeholder would
+anchor to the panel's `<aside>` and break its layout. `w-full h-full` depends on
+nothing about the parent's positioning and works in both without touching the
+panel's container classes. The container is already `aspect-[2/3]`, matching the
+viewBox exactly, so nothing letterboxes.
 
 Illustration only — no SVG text. That keeps it scaling cleanly from the card's
 ~180 px to the sidebar's ~400 px with no per-call-site font sizing, and avoids
