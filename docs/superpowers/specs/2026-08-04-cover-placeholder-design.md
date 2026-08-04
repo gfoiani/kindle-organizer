@@ -142,10 +142,34 @@ The card's top-left format badge and the sidebar's size/format row both stay.
 | `pending` | `animate-pulse` skeleton | **unchanged** |
 | `missing` / pushed-missing / `imgFailed` | extension text | **`CoverPlaceholder`** |
 
-The placeholder must stay out of the `pending` state, or every card would flash
-placeholder → real cover as its download lands. The existing branch order in
-`BookCard.tsx:146-162` already separates the three states, so only the middle
-branch changes.
+The placeholder must stay out of the `pending` state, or a tile would flash
+placeholder → real cover as its download lands.
+
+In the card that is already guaranteed: the branch order in
+`BookCard.tsx:146-162` separates all three states, so only the middle branch
+changes.
+
+**The sidebar needs a third branch added.** Today it renders only
+`displaySrc ? <img> : <extension text>` — there is no skeleton, so a pending
+cover currently shows the extension text. Dropping the placeholder into that
+`else` would make it show placeholder art during the download and then swap to
+the real cover, which is the flash this rule forbids. `useCover` already returns
+`status` alongside `coverSrc` (the panel destructures only `coverSrc` today), so
+the panel gains:
+
+```tsx
+{displaySrc ? (
+  <img … />
+) : status === 'missing' ? (
+  <CoverPlaceholder title={book.title} author={book.author} />
+) : (
+  <div className="w-full h-full bg-gray-900 animate-pulse" />
+)}
+```
+
+Before the first resolve `status` is `null`, which falls to the skeleton —
+correct. This also brings the panel's loading state in line with the card's,
+which it never had.
 
 ## Data flow
 
