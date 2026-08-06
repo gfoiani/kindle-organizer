@@ -1,3 +1,5 @@
+import { bookIdentityKey } from './bookIdentity'
+
 /** A gradient pair for the placeholder shown when a book has no cover. */
 export interface PlaceholderTint {
   readonly from: string
@@ -40,22 +42,12 @@ function hash(value: string): number {
 }
 
 /**
- * Normalizes one part of the key. NFC because macOS returns decomposed names from
- * the Kindle volume while EPUB metadata and the staging library are composed —
- * the mismatch documented in mergeBooks.ts. Each part is normalized separately so
- * a trailing space in the title cannot leak across the `|` separator.
- */
-function normalizePart(value: string): string {
-  return value.normalize('NFC').trim().toLowerCase()
-}
-
-/**
  * Picks a stable tint for a book with no cover.
  *
  * Deterministic by construction — no randomness and no clock — so a book keeps
  * its colour across restarts, re-scans and cover-cache clears.
  */
 export function placeholderTint(title: string, author?: string): PlaceholderTint {
-  const key = `${normalizePart(title)}|${normalizePart(author ?? '')}`
+  const key = bookIdentityKey(title, author)
   return PLACEHOLDER_TINTS[hash(key) % PLACEHOLDER_TINTS.length]
 }

@@ -50,7 +50,15 @@ describe('placeholderTint', () => {
   })
 
   test('exposes exactly the eight curated pairs', () => {
-    expect(PLACEHOLDER_TINTS).toHaveLength(8)
-    expect(PLACEHOLDER_TINTS[0]).toEqual({ from: '#1e1b4b', to: '#3730a3' })
+    expect(PLACEHOLDER_TINTS).toEqual([
+      { from: '#1e1b4b', to: '#3730a3' }, // indigo
+      { from: '#042f2e', to: '#115e59' }, // teal
+      { from: '#500724', to: '#9d174d' }, // pink
+      { from: '#451a03', to: '#92400e' }, // amber
+      { from: '#2e1065', to: '#5b21b6' }, // violet
+      { from: '#082f49', to: '#075985' }, // sky
+      { from: '#022c22', to: '#065f46' }, // emerald
+      { from: '#020617', to: '#334155' } // slate
+    ])
   })
 })

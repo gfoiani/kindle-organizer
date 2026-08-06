@@ -1,4 +1,5 @@
 import type { KindleBook, LibraryBook } from '../../../preload/api'
+import { bookIdentityKey } from './bookIdentity'
 import { toBookRelpath } from './relpath'
 
 /** Transient send-to-Kindle state layered onto a card while a send is running. */
@@ -30,11 +31,6 @@ export interface DisplayBook extends KindleBook {
  */
 function canonical(value: string): string {
   return value.normalize('NFC')
-}
-
-/** Normalizes a title|author pair into a stable reconciliation key. */
-function identityKey(title: string, author: string | undefined): string {
-  return `${canonical(title).trim().toLowerCase()}|${canonical(author ?? '').trim().toLowerCase()}`
 }
 
 /** Builds a library-only card: no device file, so path/size are placeholders. */
@@ -69,7 +65,7 @@ export function mergeBooks(
 
   const deviceCards: DisplayBook[] = deviceBooks.map((device) => {
     const relpath = canonical(toBookRelpath(device.path, documentsBase))
-    const idKey = identityKey(device.title, device.author)
+    const idKey = bookIdentityKey(device.title, device.author)
     // Reconcile to at most one still-unused library entry (skipping ids already
     // claimed by an earlier device card keeps two identical device books from
     // sharing a libraryId — and thus a React key). Match on the recorded upload
@@ -80,7 +76,7 @@ export function mergeBooks(
       (lib) =>
         !usedLibraryIds.has(lib.id) &&
         ((lib.targetRelpath !== undefined && canonical(lib.targetRelpath) === relpath) ||
-          (lib.uploadedAt !== undefined && identityKey(lib.title, lib.author) === idKey))
+          (lib.uploadedAt !== undefined && bookIdentityKey(lib.title, lib.author) === idKey))
     )
     if (match) usedLibraryIds.add(match.id)
     return {
