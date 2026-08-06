@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { KindleBook, BookMetadata, KindleFormat } from '../../../preload/api'
 import type { DisplayBook } from '../utils/mergeBooks'
+import { CoverPlaceholder } from './CoverPlaceholder'
 import { formatSize } from '../utils/format'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useCover } from '../hooks/useCover'
@@ -112,7 +113,7 @@ export function BookDetailSidebar({
   // Resolve the cover reactively: if the panel was opened while the cover was
   // still downloading, the snapshot `cover` is null — useCover follows the
   // cover:updated / cover:missing pushes so it fills in when the image lands.
-  const { coverSrc } = useCover(book, coverEpoch)
+  const { coverSrc, status } = useCover(book, coverEpoch)
   const displaySrc = coverSrc ?? cover
   const [metadata, setMetadata] = useState<BookMetadata | null>(null)
   const [loading, setLoading] = useState(true)
@@ -252,8 +253,10 @@ export function BookDetailSidebar({
           <div className="w-full aspect-[2/3] bg-gray-950 flex items-center justify-center overflow-hidden shrink-0">
             {displaySrc ? (
               <img src={displaySrc} alt={book.title} className="w-full h-full object-cover" />
+            ) : status === 'missing' ? (
+              <CoverPlaceholder title={book.title} author={book.author} />
             ) : (
-              <span className="text-indigo-300 text-3xl font-bold">{book.extension}</span>
+              <div className="w-full h-full bg-gray-900 animate-pulse" />
             )}
           </div>
 

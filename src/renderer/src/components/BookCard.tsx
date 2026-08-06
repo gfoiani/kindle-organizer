@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { Collection, CoverStatus } from '../../../preload/api'
 import type { DisplayBook } from '../utils/mergeBooks'
 import { CollectionPicker } from './CollectionPicker'
+import { CoverPlaceholder } from './CoverPlaceholder'
 import { formatSize } from '../utils/format'
 import { buildCoverSrc } from '../utils/coverSrc'
 import { useLongPress } from '../hooks/useLongPress'
@@ -154,9 +155,7 @@ export const BookCard = memo(function BookCard({
             className="absolute inset-0 w-full h-full object-cover"
           />
         ) : isMissing || imgFailed ? (
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-indigo-300 text-xl font-bold">{book.extension}</span>
-          </div>
+          <CoverPlaceholder title={book.title} author={book.author} />
         ) : (
           <div className="absolute inset-0 bg-gray-800 animate-pulse" />
         )}
