@@ -233,7 +233,14 @@ setup, matching how the other renderer utilities (`coverSrc`, `gridLayout`,
 - the returned tint is always a palette member (never `undefined`), including
   for inputs whose raw hash is negative
 - an absent author, and an empty title, both return a stable tint
-- a set of distinct titles spreads across more than one palette entry
+- a realistic corpus of book/author pairs reaches **every** palette entry
+
+That last one is deliberately stronger than "more than one entry". A synthetic
+`Book ${i}` / `Author ${i}` corpus reaches only 4 of the 8 tints: `% 8` uses only
+FNV's low 3 bits, and bit 0 of FNV-1a-32 is the XOR of the low bits of every
+input character, so that parity stays constant across such a corpus. A "more than
+one" assertion would still pass against an implementation that had degenerated to
+two tints.
 
 Component rendering is not unit-tested: the project has no jsdom or
 testing-library dependency, and adding that infrastructure is out of scope here.
