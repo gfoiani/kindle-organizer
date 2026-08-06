@@ -127,8 +127,16 @@ yarn dist
 
 ```bash
 brew tap gfoiani/kindle-organizer
+brew trust --tap gfoiani/kindle-organizer
 brew install --cask kindle-organizer
 ```
+
+> [!IMPORTANT]
+> Since Homebrew 6, third-party taps must be trusted explicitly before `brew` loads their
+> casks — skipping `brew trust` makes the install fail with
+> *"Refusing to load cask … from untrusted tap"*. Trusting only this cask instead of the whole
+> tap works too: `brew trust --cask gfoiani/kindle-organizer/kindle-organizer`.
+> The choice is stored in `~/.homebrew/trust.json` and is needed only once, upgrades included.
 
 ### Manual download
 
