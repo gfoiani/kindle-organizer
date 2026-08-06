@@ -29,8 +29,9 @@ export const PLACEHOLDER_TINTS: readonly PlaceholderTint[] = [
 ]
 
 /**
- * FNV-1a, 32-bit. Kept unsigned with `>>> 0`: a signed overflow would make the
- * caller's `% length` negative and index outside the palette.
+ * FNV-1a, 32-bit, over UTF-16 code units (via `charCodeAt`, not UTF-8 bytes).
+ * Kept unsigned with `>>> 0`: a signed overflow would make the caller's
+ * `% length` negative and index outside the palette.
  */
 function hash(value: string): number {
   let h = 0x811c9dc5

@@ -188,10 +188,39 @@ no main-process change, nothing cached or persisted.
 
 ## Error handling
 
-No new failure modes: a pure function plus inline SVG, with no I/O and no
+**Correction (post-review):** "no new failure modes" below was true of
+`placeholderTint` (a pure function, nothing to throw) but did not ask what the
+new default branch in `BookDetailSidebar.tsx` does when the state machine
+feeding it fails to *terminate*. It does not, in one case: `useCover`'s
+`ensureCover` call can reject — e.g. `clearCoverCache` deletes cache files
+while a mounted card re-ensures, and a delete landing between `pathExists` and
+`stat` throws `ENOENT`, which the IPC layer rethrows — and the original
+`catch` only logged the error, leaving `status` at `null` forever. The
+sidebar's new third branch rendered that as an indefinite `animate-pulse`
+shimmer; before this branch the panel showed stable extension text in that
+slot, so this was a genuine new failure mode, not a pre-existing one. Fixed by
+making the rejection terminal (`setStatus('missing')` in the `catch`, in both
+`useCover.ts` and `BookCard.tsx`'s own effect), so the call site falls through
+to the placeholder instead of pulsing forever.
+
+Otherwise unchanged: a pure function plus inline SVG, with no I/O and no
 network. The placeholder *is* the handling for the existing `imgFailed` case — a
 cached file that will not decode — and `placeholderTint` is total over its input
 domain, so it has nothing to throw.
+
+**Known narrow pre-existing seam (not changed by this branch):**
+`src/main/covers.ts` writes a downloaded cover with `fs.writeFile`, which opens
+the file with `'w'` — the path exists at size 0 while bytes are still being
+written, which is byte-for-byte indistinguishable from the zero-byte
+negative-cache marker `ensureCover` checks for. A concurrent `ensureCover` call
+for the same key landing inside that sub-millisecond window reads `'missing'`
+instead of `'pending'`/`'ready'`, so the placeholder could flash for an instant
+before the real cover swaps in. This is self-healing (the following
+`cover:updated` push corrects it) and it behaved identically before this
+branch, so it is not a regression and `covers.ts` is deliberately left
+unchanged here. If it ever needs fixing, the project already has the pattern:
+write to a temp file and `rename` into place, as `calibre.ts` does for its
+device writes.
 
 ## Testing
 

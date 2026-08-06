@@ -23,8 +23,12 @@ export function CoverPlaceholder({ title, author }: CoverPlaceholderProps) {
 
   // SVG ids are document-global, so a hardcoded gradient id would collide across
   // the ~40 mounted cards — later definitions win and every tile paints one
-  // colour. React 19's useId returns ids containing colons (`:r0:`), so strip
-  // everything outside the id-safe set before it reaches `url(#…)`.
+  // colour. Despite appearances, `useId()` does not need the sanitizing below:
+  // verified against the installed react-dom (19.2), a client-rendered id is
+  // already `[a-zA-Z0-9_-]` only (e.g. `_r_0_`) — no colons, unlike the `:r0:`
+  // shape sometimes shown in older docs/examples. The regex is a defensive
+  // guard against a future id-format change, not a fix for anything colons do
+  // today.
   const gradientId = `cover-tint-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 
   return (

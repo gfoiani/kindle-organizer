@@ -242,7 +242,7 @@ export function BooksGrid({
   // Cover cache-buster versions keyed on cache key: bumped by a retry-loop push.
   const [coverVersions, setCoverVersions] = useState<Map<string, number>>(new Map())
   // Keys that resolved to "no cover" (not-found / retries exhausted): a terminal
-  // push that lets a pending card fall through to the extension placeholder.
+  // push that lets a pending card fall through to the placeholder art.
   const [coverMissing, setCoverMissing] = useState<Set<string>>(new Set())
   // Bumped when the cover cache is cleared, forcing every card to re-ensure.
   const [coverEpoch, setCoverEpoch] = useState(0)
