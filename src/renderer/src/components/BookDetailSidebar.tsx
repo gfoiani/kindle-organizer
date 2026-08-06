@@ -115,6 +115,20 @@ export function BookDetailSidebar({
   // cover:updated / cover:missing pushes so it fills in when the image lands.
   const { coverSrc, status } = useCover(book, coverEpoch)
   const displaySrc = coverSrc ?? cover
+  const [imgFailed, setImgFailed] = useState(false)
+
+  // Reset a stale failure on a genuinely new image, mirroring BookCard.tsx's two
+  // reset points: a book switch (identity/epoch change) and a fresh version
+  // pushed for the same book (retry succeeded / cache busted) — so a successful
+  // retry is never masked by a stale error from a previous attempt.
+  useEffect(() => {
+    setImgFailed(false)
+  }, [book.title, book.author, book.isbn, coverEpoch])
+
+  useEffect(() => {
+    if (coverSrc) setImgFailed(false)
+  }, [coverSrc])
+
   const [metadata, setMetadata] = useState<BookMetadata | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -251,9 +265,14 @@ export function BookDetailSidebar({
         <div className="flex-1 overflow-y-auto">
           {/* Cover */}
           <div className="w-full aspect-[2/3] bg-gray-950 flex items-center justify-center overflow-hidden shrink-0">
-            {displaySrc ? (
-              <img src={displaySrc} alt={book.title} className="w-full h-full object-cover" />
-            ) : status === 'missing' ? (
+            {displaySrc && !imgFailed ? (
+              <img
+                src={displaySrc}
+                alt={book.title}
+                onError={() => setImgFailed(true)}
+                className="w-full h-full object-cover"
+              />
+            ) : status === 'missing' || imgFailed ? (
               <CoverPlaceholder title={book.title} author={book.author} />
             ) : (
               <div className="w-full h-full bg-gray-900 animate-pulse" />

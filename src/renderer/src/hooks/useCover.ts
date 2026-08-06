@@ -54,7 +54,9 @@ export function useCover(book: CoverBook, coverEpoch = 0): CoverState {
         setStatus(r.status)
       })
       .catch((err) => {
-        if (!cancelled) console.error('ensureCover failed:', err)
+        if (cancelled) return
+        console.error('ensureCover failed:', err)
+        setStatus('missing') // terminal: show the placeholder rather than pulse forever
       })
 
     return () => {

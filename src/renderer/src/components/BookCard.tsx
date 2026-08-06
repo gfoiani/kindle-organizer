@@ -71,7 +71,9 @@ export const BookCard = memo(function BookCard({
         }
       })
       .catch((err) => {
-        if (!cancelled) console.error('ensureCover failed:', err)
+        if (cancelled) return
+        console.error('ensureCover failed:', err)
+        setStatus('missing') // terminal: show the placeholder rather than pulse forever
       })
     return () => {
       cancelled = true
@@ -81,7 +83,7 @@ export const BookCard = memo(function BookCard({
 
   const version = coverKey ? coverVersions.get(coverKey) : undefined
   // A terminal "no cover" push (not-found / retries exhausted) moves the card out
-  // of its pulse into the extension placeholder without waiting for a remount.
+  // of its pulse into the placeholder art without waiting for a remount.
   const pushedMissing = coverKey !== null && coverMissing.has(coverKey)
 
   // A push (retry succeeded / cache busted) means the file exists now — clear a
