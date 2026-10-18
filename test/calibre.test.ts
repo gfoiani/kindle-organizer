@@ -125,9 +125,53 @@ describe('writeCalibreMetadata — authoritative tag write (H1)', () => {
     expect(entry).toMatchObject({ title: 'A Title', author: 'Someone', tags: ['New'] })
   })
 
-  test('returns false (no write) when metadata.calibre is absent', () => {
-    const ok = writeCalibreMetadata(mountpoint, new Map([['A/Book.azw3', ['X']]]))
-    expect(ok).toBe(false)
+  test('creates metadata.calibre for books in a collection when the device has none', () => {
+    // Arrange: a Kindle that has never seen calibre.
+    const map = new Map([['A/Book.azw3', ['Sci-Fi']]])
+    const books = [{ relpath: 'A/Book.azw3', title: 'Dune', author: 'Frank Herbert', size: 1234 }]
+
+    // Act
+    const ok = writeCalibreMetadata(mountpoint, map, books)
+
+    // Assert
+    expect(ok).toBe(true)
+    const [entry] = readMetadata()
+    expect(entry).toMatchObject({
+      lpath: 'documents/A/Book.azw3',
+      title: 'Dune',
+      authors: ['Frank Herbert'],
+      tags: ['Sci-Fi'],
+      size: 1234,
+      mime: 'application/x-mobi8-ebook'
+    })
+    expect(entry.uuid).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  test('adds a record for a book in a collection that the existing file does not list', () => {
+    writeMetadata([{ lpath: 'documents/B.pdf', tags: ['Old'] }])
+    const map = new Map([
+      ['A.azw3', ['Nuova']],
+      ['B.pdf', ['Aggiornata']]
+    ])
+    const books = [
+      { relpath: 'A.azw3', title: 'A', size: 1 },
+      { relpath: 'B.pdf', title: 'B', size: 2 }
+    ]
+
+    expect(writeCalibreMetadata(mountpoint, map, books)).toBe(true)
+
+    const entries = readMetadata()
+    expect(entries.map((e) => [e.lpath, e.tags])).toEqual([
+      ['documents/B.pdf', ['Aggiornata']],
+      ['documents/A.azw3', ['Nuova']]
+    ])
+  })
+
+  test('does not create metadata.calibre when no book is in any collection', () => {
+    const ok = writeCalibreMetadata(mountpoint, new Map([['A.azw3', []]]), [{ relpath: 'A.azw3', title: 'A', size: 1 }])
+
+    expect(ok).toBe(true)
+    expect(() => readFileSync(path.join(mountpoint, 'metadata.calibre'))).toThrow()
   })
 
   test('returns false on malformed metadata.calibre', () => {
