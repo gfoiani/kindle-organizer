@@ -4,6 +4,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Calibre is no longer needed.** EPUBs are converted to AZW3 by a converter built into the app, so *Send to Kindle* works the same whether or not calibre is installed. The converted book carries the app's title, author and cover, internal links and the table of contents.
+- **Collections work on any Kindle.** *Write to Kindle* now creates `metadata.calibre` when the device has none and registers books that calibre never saw, instead of failing.
+- Sending a book that cannot be converted now says why (DRM-protected, damaged EPUB) instead of only "failed".
+
+### Removed
+
+- The MOBI conversion option: books are always converted to AZW3, which every Kindle since the 2011 generation reads. Kindle 1, 2 and DX (pre-KF8) are not supported for converted books.
+- Embedded fonts are not carried over into converted books; the Kindle's own fonts are used.
+
 ## [0.4.0] - 2026-08-03
 
 ### Added

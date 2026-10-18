@@ -17,8 +17,9 @@ The Kindle's built-in library is awkward to organize: there's no fast visual ove
 - **Metadata lookup** — the detail sidebar pulls publication year, genre, and description for the selected book
 - **Collections** — create, rename, and delete custom collections; assign books to one or more collections
 - **AI auto-classification** — sort your library into genre collections with an on-device, zero-shot ML model ([`@xenova/transformers`](https://github.com/xenova/transformers.js), running in a Web Worker). Define your own genre labels, set a confidence threshold, preview the suggestions, and apply them in one batch. **Everything runs locally — no book data is sent to any server.**
-- **Calibre integration** — on connect, imports tag-based collections from Calibre's `metadata.calibre` file on the Kindle root
-- **Write to Kindle** — saves collection assignments back to `metadata.calibre` (via an atomic write) so Calibre can read them on the next sync
+- **Send to Kindle** — drop EPUBs (or Kindle formats, PDFs) into the app and send them to the device; EPUBs are converted to AZW3 by a built-in converter, with the app's title, author and cover stamped in and shown on the Kindle home screen. **No Calibre installation needed.**
+- **Collections on the device** — on connect, imports tag-based collections from the `metadata.calibre` file on the Kindle root (calibre's format; calibre itself is not required)
+- **Write to Kindle** — saves collection assignments back to `metadata.calibre` (via an atomic write), creating it when the Kindle has none, so calibre can read them on its next sync if you use it
 - **Hot-plug detection** — automatically refreshes the library when a Kindle is connected or disconnected while the app is running
 - **Settings** — clear the local cover cache when you want covers re-fetched from scratch
 - **System menu integration** — custom "About" menu item that opens the internal app section instead of a default dialog
@@ -33,7 +34,8 @@ The Kindle's built-in library is awkward to organize: there's no fast visual ove
 2. **Browse** your library. Covers load in the background; click a book to open the detail sidebar with its cover and metadata, plus an edit button for fixing the title/author.
 3. **Build collections.** Create a collection in the sidebar, then assign books to it from the grid (a book can belong to several collections).
 4. **Let AI organize it for you (optional).** Open **AI Organize**, adjust the genre labels and confidence threshold, run the classifier, review the suggestions, and apply them — the app creates the matching collections and assigns the books.
-5. **Write to Kindle.** Click **Write to Kindle** to save your collections back to `metadata.calibre`. Calibre picks them up on its next sync.
+5. **Write to Kindle.** Click **Write to Kindle** to save your collections back to `metadata.calibre` (created if the Kindle has none). If you also use calibre, it picks them up on its next sync.
+6. **Send books (optional).** Drag EPUBs onto the window to add them to the library, then use **Send to Kindle**. Conversion to AZW3 happens inside the app — calibre is not needed. DRM-protected EPUBs cannot be converted.
 
 ## Screenshots
 
@@ -61,6 +63,9 @@ src/
 │   ├── menu.ts               # Custom system menu setup
 │   ├── kindle.ts             # Kindle drive detection + document scanning
 │   ├── calibre.ts            # Read/write metadata.calibre
+│   ├── convert.ts            # EPUB → AZW3, in-process (epubConvert/ + kf8/)
+│   ├── epubConvert/          # EPUB reader + XHTML/CSS/image/TOC transform
+│   ├── kf8/                  # Native KF8 (AZW3) writer, ported from leotaku/mobi
 │   ├── localCollections.ts   # SQLite collections DB (CRUD)
 │   ├── bookOverrides.ts      # SQLite store for user-edited title/author overrides
 │   └── covers.ts             # Cover fetching + file cache (iTunes → Open Library → Google Books)
