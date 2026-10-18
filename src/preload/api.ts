@@ -9,8 +9,13 @@ import type { AppErrorCode } from '../main/appErrors'
 import type { DeleteResult } from '../main/deviceDelete'
 import type { AvailableUpdate } from '../main/updateCheck'
 import type { CalibreBackupSummary } from '../main/calibreBackup'
+import type { FolderSyncResult, LibraryFolderSummary } from '../main/libraryFolders'
+import type { LinkedFolder } from '../main/libraryWatcher'
 
 export type {
+  FolderSyncResult,
+  LibraryFolderSummary,
+  LinkedFolder,
   DeleteResult,
   CalibreBackupSummary,
   AvailableUpdate,
@@ -85,8 +90,20 @@ export interface KindleAPI {
   addBooks: (filePaths: string[]) => Promise<AddResult[]>
   /** Lists every book in the staging library (newest first). */
   getLibrary: () => Promise<LibraryBook[]>
-  /** Removes a library book: its DB row, conversions, and on-disk files. */
+  /** Removes a dropped library book: its DB row, conversions, and on-disk files. Refuses folder books. */
   removeLibraryBook: (id: string) => Promise<void>
+  /** The library folders, with their book count and whether they can be reached. */
+  listLibraryFolders: () => Promise<LibraryFolderSummary[]>
+  /** Asks for a folder with the system dialog, then adds and reads it. Null when the dialog was cancelled. */
+  addLibraryFolder: () => Promise<LinkedFolder | null>
+  /** Drops a library folder and its books from the library; the files stay where they are. */
+  removeLibraryFolder: (folderId: string) => Promise<void>
+  /** Rescans every library folder (and re-arms their watchers). */
+  syncLibraryFolders: () => Promise<FolderSyncResult[]>
+  /** Shows the book's file in the system file manager. */
+  revealLibraryBook: (id: string) => Promise<void>
+  /** Fired when the library's books changed on disk (a library folder). Returns unsubscribe. */
+  onLibraryChanged: (callback: () => void) => () => void
   /**
    * Deletes books from the Kindle (full paths as `readDocuments` returns them),
    * with their `.sdr` folder, thumbnail, metadata.calibre record and collection
@@ -209,6 +226,16 @@ export const kindleAPI: KindleAPI = {
   getLibrary: () => ipcRenderer.invoke('kindle:get-library'),
 
   removeLibraryBook: (id: string) => ipcRenderer.invoke('kindle:remove-library-book', id),
+  listLibraryFolders: () => ipcRenderer.invoke('library:list-folders'),
+  addLibraryFolder: () => ipcRenderer.invoke('library:add-folder'),
+  removeLibraryFolder: (folderId: string) => ipcRenderer.invoke('library:remove-folder', folderId),
+  syncLibraryFolders: () => ipcRenderer.invoke('library:sync-folders'),
+  revealLibraryBook: (id: string) => ipcRenderer.invoke('library:reveal-book', id),
+  onLibraryChanged: (callback) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('library:changed', handler)
+    return () => ipcRenderer.removeListener('library:changed', handler)
+  },
   deleteDeviceBooks: (mountpoint: string, bookPaths: string[]) =>
     ipcRenderer.invoke('kindle:delete-device-books', mountpoint, bookPaths),
   listCollectionsBackups: (mountpoint: string) => ipcRenderer.invoke('kindle:list-collections-backups', mountpoint),

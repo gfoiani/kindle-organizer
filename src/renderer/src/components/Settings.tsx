@@ -4,6 +4,8 @@ import i18next from '../i18n'
 import { STATUS_RESET_MS } from '../utils/constants'
 import { errorMessageKey } from '../utils/appError'
 import type { CalibreBackupSummary } from '../../../preload/api'
+import { LibraryFoldersSection } from './LibraryFoldersSection'
+import { SECONDARY_BUTTON, STATUS_COLORS, type StatusLine } from './settingsUi'
 
 interface SettingsProps {
   /** Connected device mountpoint, or null when no Kindle is attached. */
@@ -11,20 +13,6 @@ interface SettingsProps {
   /** Fired after metadata.calibre was restored, so the app re-reads the device. */
   onCollectionsRestored: () => void
 }
-
-interface StatusLine {
-  kind: 'success' | 'info' | 'error'
-  text: string
-}
-
-const STATUS_COLORS: Record<StatusLine['kind'], string> = {
-  success: 'text-green-300',
-  info: 'text-gray-300',
-  error: 'text-red-300'
-}
-
-const SECONDARY_BUTTON =
-  'px-4 py-2 rounded-md text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-600 transition-colors disabled:opacity-50'
 
 const formatTakenAt = (takenAt: string): string => new Date(takenAt).toLocaleString(i18next.language)
 
@@ -219,6 +207,8 @@ export function Settings({ mountpoint, onCollectionsRestored }: SettingsProps) {
               </button>
             </div>
           </div>
+
+          <LibraryFoldersSection />
 
           {/* Cover Cache Section */}
           <div>

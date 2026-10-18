@@ -15,6 +15,7 @@ import { mergeBooks } from './utils/mergeBooks'
 import { selectLoadingPhase } from './utils/loadingPhase'
 import { isPresenceFiltered, type PresenceFilter } from './utils/presenceFilter'
 import { errorMessageKey } from './utils/appError'
+import { useLibraryFolderSync } from './hooks/useLibraryFolderSync'
 import {
   buildAuthorSubcollections,
   isSubCollection,
@@ -200,6 +201,8 @@ export function App() {
     loadKindle()
     loadLibrary()
   }, [loadKindle, loadLibrary])
+
+  useLibraryFolderSync(loadLibrary)
 
   // Once per launch. The check resolves null on any failure (offline included),
   // so a rejection here can only be the IPC itself.

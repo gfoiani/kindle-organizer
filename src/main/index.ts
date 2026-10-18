@@ -10,6 +10,7 @@ import { closeOverridesDb } from './bookOverrides'
 import { closeCollectionsDb } from './localCollections'
 import { closeLibraryDb } from './library'
 import { installFileLog } from './logger'
+import { startLibraryFolderWatching } from './libraryWatcher'
 
 const WINDOW_WIDTH = 1200
 const WINDOW_HEIGHT = 780
@@ -159,9 +160,18 @@ registerCoverSchemePrivileges()
 app.whenReady().then(() => {
   // First, so every later failure lands in a file the user can send with a bug report.
   const stopFileLog = installFileLog(app.getPath('logs'))
-  registerIpcHandlers()
+  const folderWatching = startLibraryFolderWatching(() =>
+    safeSend(BrowserWindow.getAllWindows()[0] ?? null, 'library:changed')
+  )
+  registerIpcHandlers(folderWatching)
   registerCoverProtocol()
   createWindow()
+
+  // Catch up on whatever changed in the library folders while the app was closed;
+  // this also starts their watchers.
+  folderWatching.syncAll().catch((err: unknown) => {
+    console.error('[library-folders] Initial sync failed:', err instanceof Error ? err.message : String(err))
+  })
 
   const stopRetryLoop = startCoverRetryLoop(() => BrowserWindow.getAllWindows()[0] ?? null)
 
@@ -171,10 +181,11 @@ app.whenReady().then(() => {
   )
 
   // Single teardown point for every long-lived resource: the retry interval,
-  // the hot-plug poll, and the three cached SQLite handles.
+  // the hot-plug poll, the folder watchers, and the three cached SQLite handles.
   app.on('will-quit', () => {
     stopRetryLoop()
     stopWatcher()
+    folderWatching.stop()
     closeOverridesDb()
     closeCollectionsDb()
     closeLibraryDb()

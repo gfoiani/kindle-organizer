@@ -1,4 +1,4 @@
-import { app, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { detectKindleDrives, readDocuments, requireKindleDrive, type KindleBook } from './kindle'
 import { ejectDrive } from './eject'
 import { AppError } from './appErrors'
@@ -18,7 +18,9 @@ import { setMenuLabels, popupAppMenu } from './menu'
 import { stripDocumentsBase, toDeviceRelpath } from './paths'
 import { KINDLE_FORMAT } from './settings'
 import { addDroppedFiles, removeLibraryBook, sendToKindle, type SendProgress } from './libraryService'
-import { listLibraryBooks } from './library'
+import { getLibraryBook, listLibraryBooks } from './library'
+import { describeLibraryFolders } from './libraryFolders'
+import type { LibraryFolderWatching } from './libraryWatcher'
 import {
   getCollections,
   getCollectionBooks,
@@ -142,7 +144,7 @@ function withErrorLogging<Args extends unknown[], Result>(
   }
 }
 
-export function registerIpcHandlers(): void {
+export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void {
   ipcMain.handle(
     'kindle:detect-drives',
     withErrorLogging('kindle:detect-drives', async () => detectKindleDrives())
@@ -432,6 +434,49 @@ export function registerIpcHandlers(): void {
     withErrorLogging('kindle:remove-library-book', async (_, id: unknown) => {
       assertString(id, 'id')
       await removeLibraryBook(id)
+    })
+  )
+
+  ipcMain.handle(
+    'library:list-folders',
+    withErrorLogging('library:list-folders', async () => describeLibraryFolders())
+  )
+
+  // The folder comes from the system dialog, never from the renderer: a
+  // renderer-supplied path could point the library (and every later send) at
+  // any folder on the disk.
+  ipcMain.handle(
+    'library:add-folder',
+    withErrorLogging('library:add-folder', async (event) => {
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const options = { properties: ['openDirectory' as const] }
+      const choice = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+      if (choice.canceled || choice.filePaths.length === 0) return null
+      return folderWatching.link(choice.filePaths[0])
+    })
+  )
+
+  ipcMain.handle(
+    'library:remove-folder',
+    withErrorLogging('library:remove-folder', async (_, folderId: unknown) => {
+      assertString(folderId, 'folderId')
+      await folderWatching.forget(folderId)
+    })
+  )
+
+  ipcMain.handle(
+    'library:sync-folders',
+    withErrorLogging('library:sync-folders', async () => folderWatching.syncAll())
+  )
+
+  // Reveals the path the library recorded for the book — never a renderer-supplied one.
+  ipcMain.handle(
+    'library:reveal-book',
+    withErrorLogging('library:reveal-book', async (_, id: unknown) => {
+      assertString(id, 'id')
+      const book = getLibraryBook(id)
+      if (!book) throw new Error(`Library book ${id} not found`)
+      shell.showItemInFolder(book.originalPath)
     })
   )
 

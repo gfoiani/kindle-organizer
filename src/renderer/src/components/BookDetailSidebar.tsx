@@ -49,6 +49,7 @@ export function BookDetailSidebar({
   // process said so; the generic button label covers everything else.
   const [sendFailureKey, setSendFailureKey] = useState<string | null>(null)
   const [isRemoving, setIsRemoving] = useState(false)
+  const [revealFailed, setRevealFailed] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   // i18n key of why the last delete from the Kindle failed.
   const [deleteFailureKey, setDeleteFailureKey] = useState<string | null>(null)
@@ -78,6 +79,7 @@ export function BookDetailSidebar({
     setSendPhase('idle')
     setSendPercent(0)
     setSendFailureKey(null)
+    setRevealFailed(false)
   }, [book.libraryId])
 
   // Device-only books have no libraryId, so a delete failure is reset per file.
@@ -146,6 +148,19 @@ export function BookDetailSidebar({
       setDeleteFailureKey(errorMessageKey(err, 'library.deleteError'))
     }
     setIsDeleting(false)
+  }
+
+  // A library-folder book's file is the user's: the panel shows where it is
+  // instead of offering to remove it.
+  async function handleReveal() {
+    if (!book.libraryId) return
+    setRevealFailed(false)
+    try {
+      await window.kindleAPI.revealLibraryBook(book.libraryId)
+    } catch (err) {
+      console.error('Failed to show the book file:', err)
+      setRevealFailed(true)
+    }
   }
 
   async function handleRemove() {
@@ -402,13 +417,30 @@ export function BookDetailSidebar({
                   <p className="text-amber-400/80 text-xs">{t('library.connectToSend')}</p>
                 )}
 
-                <button
-                  onClick={handleRemove}
-                  disabled={isRemoving || isSending}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 transition-colors disabled:opacity-50"
-                >
-                  {t('library.removeFromLibrary')}
-                </button>
+                {book.libraryFolderId ? (
+                  <>
+                    <button
+                      onClick={handleReveal}
+                      title={t('library.fromFolder')}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 transition-colors"
+                    >
+                      {t('library.revealInFolder')}
+                    </button>
+                    {revealFailed && (
+                      <p role="alert" className="text-red-300 text-xs">
+                        {t('library.revealError')}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <button
+                    onClick={handleRemove}
+                    disabled={isRemoving || isSending}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 transition-colors disabled:opacity-50"
+                  >
+                    {t('library.removeFromLibrary')}
+                  </button>
+                )}
 
                 {/* Visually-hidden live region announces the send result — the
                     reason when there is one, so a failure is announced once. */}
