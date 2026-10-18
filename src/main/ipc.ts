@@ -1,8 +1,16 @@
-import { app, ipcMain } from 'electron'
+import { app, ipcMain, shell } from 'electron'
 import { detectKindleDrives, readDocuments, requireKindleDrive, type KindleBook } from './kindle'
 import { ejectDrive } from './eject'
 import { AppError } from './appErrors'
-import { readCalibreMetadata, writeCalibreMetadata, readCalibreIsbnMap, type DeviceBookInfo } from './calibre'
+import {
+  readCalibreMetadata,
+  writeCalibreMetadata,
+  readCalibreIsbnMap,
+  restoreCalibreBackup,
+  type DeviceBookInfo
+} from './calibre'
+import { deleteDeviceBooks } from './deviceDelete'
+import { checkForUpdate } from './updateCheck'
 import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
 import { applyOverrides, setOverride } from './bookOverrides'
 import { setMenuLabels, popupAppMenu } from './menu'
@@ -21,6 +29,7 @@ import {
   addBookToCollection,
   removeBookFromCollection,
   ensureCollectionsContain,
+  forgetBooks,
   importFromCalibre,
   type RenameTarget
 } from './localCollections'
@@ -356,6 +365,42 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     'kindle:get-format',
     withErrorLogging('kindle:get-format', async () => KINDLE_FORMAT)
+  )
+
+  ipcMain.handle(
+    'kindle:delete-device-books',
+    withErrorLogging('kindle:delete-device-books', async (_, mountpoint: unknown, bookPaths: unknown) => {
+      assertString(mountpoint, 'mountpoint')
+      assertStringArray(bookPaths, 'bookPaths')
+      await requireKindleDrive(mountpoint)
+      const result = await deleteDeviceBooks(mountpoint, bookPaths)
+      // Collections are keyed by the app's relpath, like every other caller of getAllBookTags.
+      const documentsBase = `${mountpoint}/documents/`
+      forgetBooks(result.deleted.map((bookPath) => stripDocumentsBase(bookPath, documentsBase)))
+      return result
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:restore-collections-backup',
+    withErrorLogging('kindle:restore-collections-backup', async (_, mountpoint: unknown) => {
+      assertString(mountpoint, 'mountpoint')
+      await requireKindleDrive(mountpoint)
+      return restoreCalibreBackup(mountpoint)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:open-logs-folder',
+    withErrorLogging('kindle:open-logs-folder', async () => {
+      const failure = await shell.openPath(app.getPath('logs'))
+      if (failure) throw new Error(failure)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:check-for-update',
+    withErrorLogging('kindle:check-for-update', async () => checkForUpdate(app.getVersion()))
   )
 
   ipcMain.handle(

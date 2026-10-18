@@ -5,7 +5,7 @@ import {
   formatAuthorCollectionName,
   normalizeKey
 } from '../utils/collectionHierarchy'
-import type { Collection } from '../../../preload/api'
+import type { AvailableUpdate, Collection } from '../../../preload/api'
 
 interface SidebarProps {
   collections: Collection[]
@@ -31,6 +31,8 @@ interface SidebarProps {
   isGroupingByAuthor: boolean
   onSelectSettings: () => void
   onSelectAbout: () => void
+  /** A newer release to point at, or null. */
+  availableUpdate: AvailableUpdate | null
   onAIOrganize: () => void
 }
 
@@ -328,6 +330,7 @@ export function Sidebar({
   isGroupingByAuthor,
   onSelectSettings,
   onSelectAbout,
+  availableUpdate,
   onAIOrganize
 }: SidebarProps) {
   const { t } = useTranslation()
@@ -491,6 +494,21 @@ export function Sidebar({
       </nav>
 
       <footer className="px-2 py-3 border-t border-gray-700 shrink-0 space-y-2">
+        {availableUpdate && (
+          // Opens in the system browser: the main window's open handler hands
+          // http(s) URLs to shell.openExternal.
+          <a
+            href={availableUpdate.url}
+            target="_blank"
+            rel="noreferrer"
+            className="w-full px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-indigo-300 hover:text-white hover:bg-gray-800"
+          >
+            <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            {t('sidebar.updateAvailable', { version: availableUpdate.version })}
+          </a>
+        )}
         <button
           onClick={onSelectAbout}
           className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800`}

@@ -11,10 +11,14 @@ import type { LoadingPhase } from '../utils/loadingPhase'
 import {
   bookKey,
   collectableBooks,
+  deletableBooks,
   removableBooks,
   selectedBooks,
   sendableBooks
 } from '../utils/bulkSelection'
+import { sortBooks } from '../utils/sortBooks'
+import { SortSelect, useBookSortOrder } from './SortSelect'
+import { useDeleteFromKindle } from '../hooks/useDeleteFromKindle'
 import { SelectionToolbar, type BulkProgress } from './SelectionToolbar'
 import type { NoticeKind } from '../hooks/useNotice'
 import { errorMessageKey } from '../utils/appError'
@@ -336,6 +340,9 @@ export function BooksGrid({
 
   const filtered = useMemo(() => filterByPresence(searched, presence), [searched, presence])
 
+  const [sortOrder, changeSortOrder] = useBookSortOrder()
+  const ordered = useMemo(() => sortBooks(filtered, sortOrder), [filtered, sortOrder])
+
   const hasQuery = query.trim() !== ''
 
   // Clears only what this grid owns the controls for; the collection filter is
@@ -356,6 +363,7 @@ export function BooksGrid({
   const chosen = useMemo(() => selectedBooks(books, selectedKeys), [books, selectedKeys])
   const sendable = useMemo(() => sendableBooks(chosen), [chosen])
   const removable = useMemo(() => removableBooks(chosen), [chosen])
+  const deletable = useMemo(() => deletableBooks(chosen), [chosen])
   const collectable = useMemo(() => collectableBooks(chosen), [chosen])
 
   const enterSelection = useCallback((book: DisplayBook) => {
@@ -489,6 +497,20 @@ export function BooksGrid({
    * Adds every eligible selected book to one collection in a SINGLE transaction
    * (ensureCollectionsContain is idempotent, so re-adding a member is a no-op).
    */
+  const { deleteBooks, refreshCollections } = useDeleteFromKindle({
+    mountpoint,
+    onNotify,
+    onLibraryChanged,
+    onCollectionsChanged
+  })
+
+  const runBulkDeleteFromKindle = useCallback(async () => {
+    setIsRunning(true)
+    await deleteBooks(deletable)
+    setIsRunning(false)
+    exitSelection()
+  }, [deleteBooks, deletable, exitSelection])
+
   const runBulkAddToCollection = useCallback(
     async (collectionId: string) => {
       const collection = collections.find((c) => c.id === collectionId)
@@ -537,7 +559,7 @@ export function BooksGrid({
   }, [sendingId])
 
   const columns = columnsForWidth(containerWidth)
-  const rowCount = Math.ceil(filtered.length / columns)
+  const rowCount = Math.ceil(ordered.length / columns)
 
   // Row height estimate: cover height (card width × aspect) + info block + gap.
   const usableWidth = Math.max(0, (containerWidth || 1280) - GRID_PADDING_PX * 2)
@@ -575,15 +597,17 @@ export function BooksGrid({
             sendableCount={sendable.length}
             removableCount={removable.length}
             collectableCount={collectable.length}
+            deletableCount={deletable.length}
             collections={collections}
             isDeviceConnected={mountpoint !== null}
             progress={progress}
             isRunning={isRunning}
-            onSelectAll={() => setSelectedKeys(new Set(filtered.map(bookKey)))}
+            onSelectAll={() => setSelectedKeys(new Set(ordered.map(bookKey)))}
             onClear={() => setSelectedKeys(new Set())}
             onExit={exitSelection}
             onSend={runBulkSend}
             onRemove={runBulkRemove}
+            onDeleteFromKindle={runBulkDeleteFromKindle}
             onAddToCollection={runBulkAddToCollection}
             onStop={() => {
               stopRef.current = true
@@ -625,6 +649,8 @@ export function BooksGrid({
               active={showLibraryOnly}
               onToggle={() => onPresenceChange({ ...presence, showLibraryOnly: !showLibraryOnly })}
             />
+
+          <SortSelect value={sortOrder} onChange={changeSortOrder} />
 
           <div className="relative w-56">
             <svg
@@ -680,7 +706,7 @@ export function BooksGrid({
             <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
               {virtualRows.map((virtualRow) => {
                 const start = virtualRow.index * columns
-                const rowBooks = filtered.slice(start, start + columns)
+                const rowBooks = ordered.slice(start, start + columns)
                 return (
                   <div
                     key={virtualRow.key}
@@ -746,6 +772,11 @@ export function BooksGrid({
           }}
           onSent={onLibraryChanged}
           onRemoved={onLibraryChanged}
+          onDeleted={() => {
+            setSelectedBook(null)
+            onLibraryChanged()
+            refreshCollections()
+          }}
         />
       )}
     </div>

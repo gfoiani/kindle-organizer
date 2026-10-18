@@ -6,8 +6,12 @@ import type { LibraryBook } from '../main/library'
 import type { AddResult, SendProgress } from '../main/libraryService'
 import type { RenameTarget } from '../main/localCollections'
 import type { AppErrorCode } from '../main/appErrors'
+import type { DeleteResult } from '../main/deviceDelete'
+import type { AvailableUpdate } from '../main/updateCheck'
 
 export type {
+  DeleteResult,
+  AvailableUpdate,
   KindleDrive,
   KindleBook,
   Collection,
@@ -81,6 +85,18 @@ export interface KindleAPI {
   getLibrary: () => Promise<LibraryBook[]>
   /** Removes a library book: its DB row, conversions, and on-disk files. */
   removeLibraryBook: (id: string) => Promise<void>
+  /**
+   * Deletes books from the Kindle (full paths as `readDocuments` returns them),
+   * with their `.sdr` folder, thumbnail, metadata.calibre record and collection
+   * memberships. Rejects with DEVICE_NOT_FOUND unless a Kindle is mounted there.
+   */
+  deleteDeviceBooks: (mountpoint: string, bookPaths: string[]) => Promise<DeleteResult>
+  /** Puts back the latest metadata.calibre backup; null when the device has none. */
+  restoreCollectionsBackup: (mountpoint: string) => Promise<{ takenAt: string } | null>
+  /** Opens the folder holding `main.log` in the system file manager. */
+  openLogsFolder: () => Promise<void>
+  /** A newer GitHub release, or null (also when the check could not run). */
+  checkForUpdate: () => Promise<AvailableUpdate | null>
   /**
    * Converts (EPUB → AZW3, in-process) and uploads a library book to the
    * connected device. Progress arrives via onConvertProgress / onUploadProgress
@@ -189,6 +205,11 @@ export const kindleAPI: KindleAPI = {
   getLibrary: () => ipcRenderer.invoke('kindle:get-library'),
 
   removeLibraryBook: (id: string) => ipcRenderer.invoke('kindle:remove-library-book', id),
+  deleteDeviceBooks: (mountpoint: string, bookPaths: string[]) =>
+    ipcRenderer.invoke('kindle:delete-device-books', mountpoint, bookPaths),
+  restoreCollectionsBackup: (mountpoint: string) => ipcRenderer.invoke('kindle:restore-collections-backup', mountpoint),
+  openLogsFolder: () => ipcRenderer.invoke('kindle:open-logs-folder'),
+  checkForUpdate: () => ipcRenderer.invoke('kindle:check-for-update'),
 
   uploadBook: (id: string, mountpoint: string) => ipcRenderer.invoke('kindle:upload-book', id, mountpoint),
 

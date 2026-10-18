@@ -40,3 +40,11 @@ export function removableBooks(books: DisplayBook[]): DisplayBook[] {
 export function collectableBooks(books: DisplayBook[]): DisplayBook[] {
   return books.filter((book) => book.onDevice)
 }
+
+/**
+ * Books that can be deleted from the Kindle: those with a file on it. A staged
+ * copy in the library is untouched (that is "remove from library").
+ */
+export function deletableBooks(books: DisplayBook[]): DisplayBook[] {
+  return books.filter((book) => book.onDevice)
+}

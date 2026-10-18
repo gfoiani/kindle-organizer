@@ -2,6 +2,9 @@ import * as fs from 'fs-extra'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { stripDocumentsPrefix } from './paths'
+import { backupCalibreMetadata, hasRecentCalibreBackup, listCalibreBackups } from './calibreBackup'
+
+export { CALIBRE_BACKUP_LIMIT } from './calibreBackup'
 
 export interface CalibreBook {
   lpath: string
@@ -39,9 +42,23 @@ function readEntryArray(metadataPath: string): unknown[] | null {
  * Atomic write: temp file then rename, so the device's `metadata.calibre` is
  * never left half-written if the Kindle is unplugged mid-write. A failed write
  * cleans up its temp file rather than leaving a stale `.tmp` on the device.
+ * The file being replaced is backed up first (see calibreBackup.ts); when that
+ * copy cannot be made, nothing is written. A `routine` write (registering a
+ * just-sent book) skips the copy when a recent one exists, so a bulk send
+ * keeps the pre-send file rather than ten copies of its own progress.
  */
-function writeEntryArray(metadataPath: string, entries: unknown[]): boolean {
+function writeEntryArray(metadataPath: string, entries: unknown[], routine = false): boolean {
   const tempPath = `${metadataPath}.tmp`
+  const mountpoint = path.dirname(metadataPath)
+
+  if (fs.existsSync(metadataPath) && !(routine && hasRecentCalibreBackup(mountpoint))) {
+    try {
+      backupCalibreMetadata(mountpoint, metadataPath)
+    } catch (err) {
+      console.error(`[calibre] Not writing ${metadataPath}: the backup failed:`, errorText(err))
+      return false
+    }
+  }
 
   try {
     fs.writeFileSync(tempPath, JSON.stringify(entries, null, 2), 'utf-8')
@@ -155,6 +172,43 @@ export function writeCalibreMetadata(
 
   if (!exists && added.length === 0) return true
   return writeEntryArray(metadataPath, [...updated, ...added])
+}
+
+/**
+ * Puts back the most recent readable backup of `metadata.calibre` (a damaged
+ * copy is skipped). The file it replaces is backed up in turn, so a restore
+ * can itself be undone. Null when the device has no usable backup; throws
+ * when the restored file cannot be written.
+ */
+export function restoreCalibreBackup(mountpoint: string): { takenAt: string } | null {
+  for (const backup of listCalibreBackups(mountpoint)) {
+    const entries = readEntryArray(backup.file)
+    if (!entries) continue
+    if (!writeEntryArray(getMetadataPath(mountpoint), entries)) {
+      throw new Error(`Could not restore the ${backup.takenAt} backup of ${METADATA_FILENAME}`)
+    }
+    return { takenAt: backup.takenAt }
+  }
+  return null
+}
+
+/**
+ * Drops the records of books deleted from the device (relpaths under
+ * `documents/`, compared case-insensitively). A device without the file has
+ * nothing to drop; a file that will not parse is left untouched (false).
+ */
+export function removeCalibreEntries(mountpoint: string, relpaths: readonly string[]): boolean {
+  const metadataPath = getMetadataPath(mountpoint)
+  if (!fs.existsSync(metadataPath)) return true
+  const entries = readEntryArray(metadataPath)
+  if (!entries) return false
+
+  const removed = new Set(relpaths.map((relpath) => foldRelpath(toPosixRelpath(relpath))))
+  const kept = entries.filter((entry) => {
+    const relpath = entryRelpath(entry)
+    return relpath === undefined || !removed.has(foldRelpath(relpath))
+  })
+  return kept.length === entries.length || writeEntryArray(metadataPath, kept)
 }
 
 export function readCalibreMetadata(mountpoint: string): CalibreBook[] {
@@ -342,5 +396,5 @@ export function upsertCalibreEntry(mountpoint: string, input: CalibreEntryInput)
   const entry = buildEntry(input, relpath, existing)
   const updated = index >= 0 ? entries.map((e, i) => (i === index ? entry : e)) : [...entries, entry]
 
-  return writeEntryArray(metadataPath, updated)
+  return writeEntryArray(metadataPath, updated, true)
 }

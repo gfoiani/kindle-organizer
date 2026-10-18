@@ -26,6 +26,8 @@ export interface KindleBook {
   path: string
   /** ISBN from Calibre metadata, when available — used for reliable cover lookup. */
   isbn?: string
+  /** Epoch ms the book arrived: on the device, its file's creation time; for a staged book, when it was staged. */
+  addedAt?: number
 }
 
 export interface Collection {
@@ -243,7 +245,10 @@ async function scanBooks(dirPath: string, author?: string): Promise<KindleBook[]
         author,
         extension: ext.replace('.', '').toUpperCase(),
         size: stats.size,
-        path: filePath
+        path: filePath,
+        // Creation time is when the copy landed on the device; a copy keeps the
+        // source's mtime. Some file systems report no birth time (0).
+        addedAt: stats.birthtimeMs > 0 ? stats.birthtimeMs : stats.mtimeMs
       })
     }
   }

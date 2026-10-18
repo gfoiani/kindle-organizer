@@ -277,6 +277,18 @@ export function removeBookFromCollection(collectionId: string, bookRelpath: stri
 }
 
 /**
+ * Takes books that no longer exist (deleted from the device) out of every
+ * collection, in one transaction. The collections themselves stay.
+ */
+export function forgetBooks(bookRelpaths: readonly string[]): void {
+  const db = store.get()
+  const remove = db.prepare<[string]>(`DELETE FROM collection_books WHERE book_relpath = ?`)
+  db.transaction((relpaths: readonly string[]) => {
+    for (const relpath of relpaths) remove.run(relpath)
+  })(bookRelpaths)
+}
+
+/**
  * Imports Calibre tag-collections into the local store.
  *
  * H2 fix: this used to DELETE every `source='calibre'` collection and recreate

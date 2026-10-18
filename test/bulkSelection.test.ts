@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import {
   bookKey,
   collectableBooks,
+  deletableBooks,
   removableBooks,
   selectedBooks,
   sendableBooks
@@ -84,6 +85,16 @@ describe('collectableBooks', () => {
 
   test('excludes a staged book that never reached the device', () => {
     expect(collectableBooks([STAGED])).toEqual([])
+  })
+})
+
+describe('deletableBooks', () => {
+  test('keeps only books that are on the device, staged or not', () => {
+    expect(deletableBooks(ALL).map((b) => b.title)).toEqual(['Dune', 'Open'])
+  })
+
+  test('excludes a staged book that never reached the device: there is nothing to delete', () => {
+    expect(deletableBooks([STAGED])).toEqual([])
   })
 })
 

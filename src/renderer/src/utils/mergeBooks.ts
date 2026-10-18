@@ -42,6 +42,7 @@ function libraryToDisplay(lib: LibraryBook): DisplayBook {
     extension: lib.sourceFormat.toUpperCase(),
     size: 0,
     path: '',
+    addedAt: lib.createdAt,
     onDevice: false,
     libraryId: lib.id
   }

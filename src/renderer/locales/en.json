@@ -25,7 +25,8 @@
     "aiOrganize": "AI Organize",
     "groupByAuthor": "Group by author",
     "expand": "Expand",
-    "collapse": "Collapse"
+    "collapse": "Collapse",
+    "updateAvailable": "Version {{version}} is available"
   },
   "header": {
     "collection": "Collection",
@@ -50,7 +51,20 @@
     "cacheCleared": "Cache cleared",
     "cacheError": "Error",
     "cacheInfo": "After clearing the cache, covers will be reloaded on the next library refresh.",
-    "language": "Language"
+    "language": "Language",
+    "deviceCollections": "Collections on the Kindle",
+    "deviceCollectionsDescription": "Before every change to metadata.calibre the app keeps a copy on the Kindle itself (the .kindle-organizer folder, last 10 copies). If the collections on the device look wrong, you can go back to the latest copy.",
+    "restoreBackup": "Restore the latest backup",
+    "restoring": "Restoring...",
+    "restoreConfirm": "Replace metadata.calibre on the Kindle with the latest backup? The current file is saved too, so restoring again undoes this.",
+    "restoreDone": "Restored the backup from {{date}}",
+    "restoreNone": "This Kindle has no backups",
+    "restoreError": "Restore failed",
+    "restoreNeedsKindle": "Connect a Kindle to restore a backup.",
+    "diagnostics": "Diagnostics",
+    "diagnosticsDescription": "The app's errors and warnings are saved to a log file (main.log). Attach it when you report a problem.",
+    "openLogs": "Open logs folder",
+    "openLogsError": "Could not open the logs folder"
   },
   "books": {
     "addToCollection": "Add to collection",
@@ -69,7 +83,11 @@
     "noResultsFilter": "No books match the active filters",
     "removeFilter": "Remove filter",
     "onKindle": "On Kindle",
-    "inLibraryOnly": "In library only"
+    "inLibraryOnly": "In library only",
+    "sortBy": "Sort by",
+    "sortTitle": "Title",
+    "sortAuthor": "Author",
+    "sortRecent": "Recently added"
   },
   "library": {
     "dropOverlay": "Drop EPUB or Kindle files to add them to your library",
@@ -89,7 +107,10 @@
     "unsupported_one": "{{count}} unsupported",
     "unsupported_other": "{{count}} unsupported",
     "addError_one": "{{count}} failed",
-    "addError_other": "{{count}} failed"
+    "addError_other": "{{count}} failed",
+    "deleteFromKindle": "Delete from Kindle",
+    "confirmDeleteFromKindle": "Delete “{{title}}” from the Kindle? Its reading position and highlights are deleted too. This cannot be undone.",
+    "deleteError": "Could not delete the book from the Kindle"
   },
   "collectionPicker": {
     "loading": "Loading...",
@@ -233,7 +254,12 @@
     "failedCount_one": "{{count}} failed",
     "failedCount_other": "{{count}} failed",
     "addedToCollection_one": "{{count}} book added to \"{{name}}\"",
-    "addedToCollection_other": "{{count}} books added to \"{{name}}\""
+    "addedToCollection_other": "{{count}} books added to \"{{name}}\"",
+    "deleteFromKindle": "Delete from Kindle",
+    "confirmDeleteFromKindle_one": "Delete {{count}} book from the Kindle? Its reading position and highlights are deleted too. This cannot be undone.",
+    "confirmDeleteFromKindle_other": "Delete {{count}} books from the Kindle? Their reading positions and highlights are deleted too. This cannot be undone.",
+    "deletedCount_one": "{{count}} deleted from the Kindle",
+    "deletedCount_other": "{{count}} deleted from the Kindle"
   },
   "notice": {
     "dismiss": "Dismiss"

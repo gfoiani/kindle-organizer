@@ -25,7 +25,8 @@
     "aiOrganize": "Organizza con IA",
     "groupByAuthor": "Raggruppa per autore",
     "expand": "Espandi",
-    "collapse": "Comprimi"
+    "collapse": "Comprimi",
+    "updateAvailable": "Disponibile la versione {{version}}"
   },
   "aiClassify": {
     "title": "Organizzazione con IA",
@@ -125,7 +126,20 @@
     "cacheCleared": "Cache cancellata",
     "cacheError": "Errore",
     "cacheInfo": "Dopo aver cancellato la cache, le copertine verranno ricaricate al prossimo aggiornamento della libreria.",
-    "language": "Lingua"
+    "language": "Lingua",
+    "deviceCollections": "Collezioni sul Kindle",
+    "deviceCollectionsDescription": "Prima di ogni modifica di metadata.calibre l'app ne salva una copia sul Kindle stesso (cartella .kindle-organizer, ultime 10 copie). Se le collezioni sul dispositivo risultano sbagliate, puoi tornare all'ultima copia.",
+    "restoreBackup": "Ripristina l'ultimo backup",
+    "restoring": "Ripristino in corso...",
+    "restoreConfirm": "Sostituire metadata.calibre sul Kindle con l'ultimo backup? Anche il file attuale viene salvato, quindi ripristinando di nuovo puoi annullare.",
+    "restoreDone": "Ripristinato il backup del {{date}}",
+    "restoreNone": "Su questo Kindle non ci sono backup",
+    "restoreError": "Ripristino non riuscito",
+    "restoreNeedsKindle": "Collega un Kindle per ripristinare un backup.",
+    "diagnostics": "Diagnostica",
+    "diagnosticsDescription": "Errori e avvisi dell'app vengono salvati in un file di log (main.log). Allegalo quando segnali un problema.",
+    "openLogs": "Apri cartella dei log",
+    "openLogsError": "Impossibile aprire la cartella dei log"
   },
   "books": {
     "addToCollection": "Aggiungi a collezione",
@@ -144,7 +158,11 @@
     "noResultsFilter": "Nessun libro corrisponde ai filtri attivi",
     "removeFilter": "Rimuovi filtro",
     "onKindle": "Sul Kindle",
-    "inLibraryOnly": "Solo in libreria"
+    "inLibraryOnly": "Solo in libreria",
+    "sortBy": "Ordina per",
+    "sortTitle": "Titolo",
+    "sortAuthor": "Autore",
+    "sortRecent": "Aggiunti di recente"
   },
   "library": {
     "dropOverlay": "Trascina file EPUB o Kindle per aggiungerli alla libreria",
@@ -164,7 +182,10 @@
     "unsupported_one": "{{count}} non supportato",
     "unsupported_other": "{{count}} non supportati",
     "addError_one": "{{count}} non riuscito",
-    "addError_other": "{{count}} non riusciti"
+    "addError_other": "{{count}} non riusciti",
+    "deleteFromKindle": "Elimina dal Kindle",
+    "confirmDeleteFromKindle": "Eliminare «{{title}}» dal Kindle? Vengono cancellate anche la posizione di lettura e le evidenziazioni. L'operazione non si può annullare.",
+    "deleteError": "Eliminazione dal Kindle non riuscita"
   },
   "collectionPicker": {
     "loading": "Caricamento...",
@@ -233,7 +254,12 @@
     "failedCount_one": "{{count}} non riuscito",
     "failedCount_other": "{{count}} non riusciti",
     "addedToCollection_one": "{{count}} libro aggiunto a \"{{name}}\"",
-    "addedToCollection_other": "{{count}} libri aggiunti a \"{{name}}\""
+    "addedToCollection_other": "{{count}} libri aggiunti a \"{{name}}\"",
+    "deleteFromKindle": "Elimina dal Kindle",
+    "confirmDeleteFromKindle_one": "Eliminare {{count}} libro dal Kindle? Vengono cancellate anche la posizione di lettura e le evidenziazioni. L'operazione non si può annullare.",
+    "confirmDeleteFromKindle_other": "Eliminare {{count}} libri dal Kindle? Vengono cancellate anche la posizione di lettura e le evidenziazioni. L'operazione non si può annullare.",
+    "deletedCount_one": "{{count}} eliminato dal Kindle",
+    "deletedCount_other": "{{count}} eliminati dal Kindle"
   },
   "notice": {
     "dismiss": "Chiudi"

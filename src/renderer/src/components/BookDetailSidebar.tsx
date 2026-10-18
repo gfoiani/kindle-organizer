@@ -25,6 +25,8 @@ interface Props {
   onSent: () => void
   /** Fired after the book is removed from the library. */
   onRemoved: () => void
+  /** Fired after the book is deleted from the Kindle; the parent closes the panel. */
+  onDeleted: () => void
 }
 
 export function BookDetailSidebar({
@@ -36,7 +38,8 @@ export function BookDetailSidebar({
   onClose,
   onBookUpdated,
   onSent,
-  onRemoved
+  onRemoved,
+  onDeleted
 }: Props) {
   const { t } = useTranslation()
 
@@ -46,6 +49,9 @@ export function BookDetailSidebar({
   // process said so; the generic button label covers everything else.
   const [sendFailureKey, setSendFailureKey] = useState<string | null>(null)
   const [isRemoving, setIsRemoving] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  // i18n key of why the last delete from the Kindle failed.
+  const [deleteFailureKey, setDeleteFailureKey] = useState<string | null>(null)
   const [targetFormat, setTargetFormat] = useState<KindleFormat | null>(null)
 
   const isLibraryOnly = Boolean(book.libraryId) && !book.onDevice
@@ -73,6 +79,11 @@ export function BookDetailSidebar({
     setSendPercent(0)
     setSendFailureKey(null)
   }, [book.libraryId])
+
+  // Device-only books have no libraryId, so a delete failure is reset per file.
+  useEffect(() => {
+    setDeleteFailureKey(null)
+  }, [book.path])
 
   // Follow convert/upload progress pushes for THIS book only.
   useEffect(() => {
@@ -116,6 +127,25 @@ export function BookDetailSidebar({
       setSendFailureKey(key || null)
       setSendPhase('error')
     }
+  }
+
+  async function handleDeleteFromKindle() {
+    if (!mountpoint || !book.onDevice) return
+    if (!window.confirm(t('library.confirmDeleteFromKindle', { title: book.title }))) return
+    setIsDeleting(true)
+    setDeleteFailureKey(null)
+    try {
+      const { deleted } = await window.kindleAPI.deleteDeviceBooks(mountpoint, [book.path])
+      if (deleted.length === 1) {
+        onDeleted()
+        return
+      }
+      setDeleteFailureKey('library.deleteError')
+    } catch (err) {
+      console.error('Failed to delete from the Kindle:', err)
+      setDeleteFailureKey(errorMessageKey(err, 'library.deleteError'))
+    }
+    setIsDeleting(false)
   }
 
   async function handleRemove() {
@@ -389,6 +419,23 @@ export function BookDetailSidebar({
                       ? t(sendFailureKey ?? 'library.sendError')
                       : ''}
                 </div>
+              </div>
+            )}
+
+            {book.onDevice && mountpoint && (
+              <div className="space-y-2">
+                <button
+                  onClick={handleDeleteFromKindle}
+                  disabled={isDeleting || isSending}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-gray-800 hover:bg-red-900/60 text-gray-300 hover:text-red-200 border border-gray-600 hover:border-red-700 transition-colors disabled:opacity-50"
+                >
+                  {t('library.deleteFromKindle')}
+                </button>
+                {deleteFailureKey && (
+                  <p role="alert" className="text-red-300 text-xs">
+                    {t(deleteFailureKey)}
+                  </p>
+                )}
               </div>
             )}
 

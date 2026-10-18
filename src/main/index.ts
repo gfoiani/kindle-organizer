@@ -9,6 +9,7 @@ import { startKindleWatcher } from './kindle'
 import { closeOverridesDb } from './bookOverrides'
 import { closeCollectionsDb } from './localCollections'
 import { closeLibraryDb } from './library'
+import { installFileLog } from './logger'
 
 const WINDOW_WIDTH = 1200
 const WINDOW_HEIGHT = 780
@@ -156,6 +157,8 @@ function safeSend(win: BrowserWindow | null, channel: string, ...args: unknown[]
 registerCoverSchemePrivileges()
 
 app.whenReady().then(() => {
+  // First, so every later failure lands in a file the user can send with a bug report.
+  const stopFileLog = installFileLog(app.getPath('logs'))
   registerIpcHandlers()
   registerCoverProtocol()
   createWindow()
@@ -176,6 +179,7 @@ app.whenReady().then(() => {
     closeCollectionsDb()
     closeLibraryDb()
     cancelAllCovers()
+    stopFileLog()
   })
 
   app.on('activate', () => {

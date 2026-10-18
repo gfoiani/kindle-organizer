@@ -17,6 +17,7 @@ interface SelectionToolbarProps {
   sendableCount: number
   removableCount: number
   collectableCount: number
+  deletableCount: number
   collections: Collection[]
   /** False when no Kindle is attached — sending needs a destination. */
   isDeviceConnected: boolean
@@ -27,6 +28,7 @@ interface SelectionToolbarProps {
   onExit: () => void
   onSend: () => void
   onRemove: () => void
+  onDeleteFromKindle: () => void
   onAddToCollection: (collectionId: string) => void
   onStop: () => void
 }
@@ -130,6 +132,7 @@ export function SelectionToolbar({
   sendableCount,
   removableCount,
   collectableCount,
+  deletableCount,
   collections,
   isDeviceConnected,
   progress,
@@ -139,6 +142,7 @@ export function SelectionToolbar({
   onExit,
   onSend,
   onRemove,
+  onDeleteFromKindle,
   onAddToCollection,
   onStop
 }: SelectionToolbarProps) {
@@ -199,6 +203,18 @@ export function SelectionToolbar({
             </svg>
             {t('selection.remove')}
             <ActionCount value={removableCount} />
+          </button>
+
+          <button
+            onClick={onDeleteFromKindle}
+            disabled={!isDeviceConnected || deletableCount === 0 || isRunning}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-red-900/60 border border-gray-600 hover:border-red-700 rounded-md text-xs text-gray-300 hover:text-red-200 whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <svg aria-hidden="true" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            {t('selection.deleteFromKindle')}
+            <ActionCount value={deletableCount} />
           </button>
 
           <button

@@ -6,6 +6,7 @@ import {
   CALIBRE_BACKUP_LIMIT,
   removeCalibreEntries,
   restoreCalibreBackup,
+  upsertCalibreEntry,
   writeCalibreMetadata
 } from '../src/main/calibre'
 
@@ -65,6 +66,20 @@ describe('metadata.calibre backups', () => {
     }
 
     expect(backups()).toHaveLength(CALIBRE_BACKUP_LIMIT)
+  })
+
+  test('a burst of uploads keeps one copy: the file as it was before the first', () => {
+    // Arrange
+    const before = writeMetadata([{ lpath: 'documents/Old.azw3', tags: ['Keep'] }])
+
+    // Act: a bulk send registers one book after the other.
+    for (let i = 0; i < CALIBRE_BACKUP_LIMIT + 5; i++) {
+      upsertCalibreEntry(mountpoint, { relpath: `Book${i}.azw3`, title: `Book ${i}`, size: 1, uuid: `uuid-${i}` })
+    }
+
+    // Assert
+    expect(backups()).toHaveLength(1)
+    expect(readFileSync(path.join(backupDir(), backups()[0]), 'utf-8')).toBe(before)
   })
 
   test('does not write when the backup cannot be made', () => {

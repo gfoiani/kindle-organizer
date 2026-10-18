@@ -2,8 +2,103 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18next from '../i18n'
 import { STATUS_RESET_MS } from '../utils/constants'
+import { errorMessageKey } from '../utils/appError'
 
-export function Settings() {
+interface SettingsProps {
+  /** Connected device mountpoint, or null when no Kindle is attached. */
+  mountpoint: string | null
+  /** Fired after metadata.calibre was restored, so the app re-reads the device. */
+  onCollectionsRestored: () => void
+}
+
+interface StatusLine {
+  kind: 'success' | 'info' | 'error'
+  text: string
+}
+
+const STATUS_COLORS: Record<StatusLine['kind'], string> = {
+  success: 'text-green-300',
+  info: 'text-gray-300',
+  error: 'text-red-300'
+}
+
+const SECONDARY_BUTTON =
+  'px-4 py-2 rounded-md text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-600 transition-colors disabled:opacity-50'
+
+/** Restores the latest metadata.calibre backup kept on the connected Kindle. */
+function DeviceCollectionsSection({ mountpoint, onCollectionsRestored }: SettingsProps) {
+  const { t } = useTranslation()
+  const [isRestoring, setIsRestoring] = useState(false)
+  const [status, setStatus] = useState<StatusLine | null>(null)
+
+  async function handleRestore() {
+    if (!mountpoint || !window.confirm(t('settings.restoreConfirm'))) return
+    setIsRestoring(true)
+    setStatus(null)
+    try {
+      const restored = await window.kindleAPI.restoreCollectionsBackup(mountpoint)
+      if (restored) {
+        const date = new Date(restored.takenAt).toLocaleString(i18next.language)
+        setStatus({ kind: 'success', text: t('settings.restoreDone', { date }) })
+        onCollectionsRestored()
+      } else {
+        setStatus({ kind: 'info', text: t('settings.restoreNone') })
+      }
+    } catch (err) {
+      console.error('Failed to restore the collections backup:', err)
+      setStatus({ kind: 'error', text: t(errorMessageKey(err, 'settings.restoreError')) })
+    } finally {
+      setIsRestoring(false)
+    }
+  }
+
+  return (
+    <div>
+      <h3 className="text-white font-semibold mb-4">{t('settings.deviceCollections')}</h3>
+      <p className="text-gray-400 text-sm mb-4">{t('settings.deviceCollectionsDescription')}</p>
+      <button onClick={handleRestore} disabled={!mountpoint || isRestoring} className={SECONDARY_BUTTON}>
+        {isRestoring ? t('settings.restoring') : t('settings.restoreBackup')}
+      </button>
+      {!mountpoint && <p className="text-gray-500 text-xs mt-3">{t('settings.restoreNeedsKindle')}</p>}
+      <p role="status" aria-live="polite" className={`text-xs mt-3 ${status ? STATUS_COLORS[status.kind] : ''}`}>
+        {status?.text ?? ''}
+      </p>
+    </div>
+  )
+}
+
+/** Points the user at main.log, to attach to a bug report. */
+function DiagnosticsSection() {
+  const { t } = useTranslation()
+  const [failed, setFailed] = useState(false)
+
+  async function handleOpenLogs() {
+    setFailed(false)
+    try {
+      await window.kindleAPI.openLogsFolder()
+    } catch (err) {
+      console.error('Failed to open the logs folder:', err)
+      setFailed(true)
+    }
+  }
+
+  return (
+    <div>
+      <h3 className="text-white font-semibold mb-4">{t('settings.diagnostics')}</h3>
+      <p className="text-gray-400 text-sm mb-4">{t('settings.diagnosticsDescription')}</p>
+      <button onClick={handleOpenLogs} className={SECONDARY_BUTTON}>
+        {t('settings.openLogs')}
+      </button>
+      {failed && (
+        <p role="alert" className="text-red-300 text-xs mt-3">
+          {t('settings.openLogsError')}
+        </p>
+      )}
+    </div>
+  )
+}
+
+export function Settings({ mountpoint, onCollectionsRestored }: SettingsProps) {
   const { t } = useTranslation()
   const [isClearing, setIsClearing] = useState(false)
   const [clearResult, setClearResult] = useState<'success' | 'error' | null>(null)
@@ -135,6 +230,9 @@ export function Settings() {
                   : ''}
             </div>
           </div>
+
+          <DeviceCollectionsSection mountpoint={mountpoint} onCollectionsRestored={onCollectionsRestored} />
+          <DiagnosticsSection />
         </div>
       </div>
     </div>

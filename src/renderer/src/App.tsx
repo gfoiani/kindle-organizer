@@ -25,7 +25,7 @@ import {
   type AuthoredBook,
   type CollectionMembership
 } from './utils/collectionHierarchy'
-import type { KindleDrive, KindleBook, Collection, LibraryBook } from '../../preload/api'
+import type { AvailableUpdate, KindleDrive, KindleBook, Collection, LibraryBook } from '../../preload/api'
 
 /** How long the drag-and-drop add summary toast stays up (ms). */
 const DROP_SUMMARY_RESET_MS = 6000
@@ -64,6 +64,7 @@ export function App() {
   const [isShowingAbout, setIsShowingAbout] = useState(false)
   const [isAIModalOpen, setIsAIModalOpen] = useState(false)
   const [isGroupingByAuthor, setIsGroupingByAuthor] = useState(false)
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null)
 
   // Lifted so the classifier worker (and its loaded model) persists across
   // modal open/close instead of being recreated every time the modal mounts.
@@ -199,6 +200,15 @@ export function App() {
     loadKindle()
     loadLibrary()
   }, [loadKindle, loadLibrary])
+
+  // Once per launch. The check resolves null on any failure (offline included),
+  // so a rejection here can only be the IPC itself.
+  useEffect(() => {
+    window.kindleAPI
+      .checkForUpdate()
+      .then(setAvailableUpdate)
+      .catch((err) => console.error('[update] Check failed:', err))
+  }, [])
 
   // Import files dropped anywhere in the window into the staging library, then
   // refresh the library and announce a per-status summary.
@@ -658,11 +668,12 @@ export function App() {
             setSelectedCollectionId(null)
           }}
           onAIOrganize={() => setIsAIModalOpen(true)}
+          availableUpdate={availableUpdate}
         />
 
         <main className="flex-1 flex flex-col min-w-0">
           {isShowingSettings ? (
-            <Settings />
+            <Settings mountpoint={kindle?.mountpoint ?? null} onCollectionsRestored={loadKindle} />
           ) : isShowingAbout ? (
             <About />
           ) : (
