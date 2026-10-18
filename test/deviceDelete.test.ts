@@ -76,6 +76,33 @@ describe('deleteDeviceBooks', () => {
     rmSync(path.dirname(target), { recursive: true, force: true })
   })
 
+  test('keeps the .sdr folder that another book with the same name still uses', async () => {
+    // Arrange: the Kindle names reading data by stem, so Book.azw3 and Book.pdf share Book.sdr.
+    const azw3 = writeMobi(documents('A', 'Book.azw3'), { uuid: UUID })
+    writeFileSync(documents('A', 'Book.pdf'), '%PDF')
+    mkdirSync(documents('A', 'Book.sdr'))
+
+    // Act
+    await deleteDeviceBooks(mountpoint, [azw3])
+
+    // Assert
+    expect(existsSync(documents('A', 'Book.sdr'))).toBe(true)
+  })
+
+  test('refuses a book reached through a folder that links off the device', async () => {
+    const outsideDir = mkdtempSync(path.join(tmpdir(), 'kindle-outside-'))
+    const target = path.join(outsideDir, 'Real.azw3')
+    writeFileSync(target, 'precious')
+    symlinkSync(outsideDir, documents('Linked'))
+    const viaLink = documents('Linked', 'Real.azw3')
+
+    const result = await deleteDeviceBooks(mountpoint, [viaLink])
+
+    expect(result.failed).toEqual([viaLink])
+    expect(readFileSync(target, 'utf-8')).toBe('precious')
+    rmSync(outsideDir, { recursive: true, force: true })
+  })
+
   test('reports a book that is already gone and carries on with the rest', async () => {
     const missing = documents('Missing.azw3')
     const present = writeMobi(documents('Present.azw3'), { uuid: UUID })

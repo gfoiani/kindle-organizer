@@ -4,6 +4,7 @@ import { tmpdir } from 'os'
 import path from 'path'
 import {
   CALIBRE_BACKUP_LIMIT,
+  describeCalibreBackups,
   removeCalibreEntries,
   restoreCalibreBackup,
   upsertCalibreEntry,
@@ -96,38 +97,55 @@ describe('metadata.calibre backups', () => {
   })
 })
 
+const tagsIn = (id: string): unknown => JSON.parse(readFileSync(path.join(backupDir(), id), 'utf-8'))[0].tags
+
+describe('describeCalibreBackups', () => {
+  test('lists the device backups newest first, by file name and time only', () => {
+    mkdirSync(backupDir(), { recursive: true })
+    writeFileSync(path.join(backupDir(), 'metadata.calibre.2026-01-01T00-00-00-000Z.json'), '[]')
+    writeFileSync(path.join(backupDir(), 'metadata.calibre.2026-02-01T00-00-00-000Z.json'), '[]')
+    writeFileSync(path.join(backupDir(), 'unrelated.txt'), '')
+
+    expect(describeCalibreBackups(mountpoint)).toEqual([
+      { id: 'metadata.calibre.2026-02-01T00-00-00-000Z.json', takenAt: '2026-02-01T00:00:00.000Z' },
+      { id: 'metadata.calibre.2026-01-01T00-00-00-000Z.json', takenAt: '2026-01-01T00:00:00.000Z' }
+    ])
+  })
+})
+
 describe('restoreCalibreBackup', () => {
-  test('restores the most recent backup and backs up what it replaces', () => {
-    // Arrange: v1 on the device, then a write turns it into v2.
+  test('restores the chosen copy, older than the latest, and keeps one of what it replaces', () => {
+    // Arrange: v1 → v2 → v3, so the backups hold v2 (newest) and v1.
     writeMetadata([{ lpath: 'documents/A.azw3', tags: ['v1'] }])
     writeCalibreMetadata(mountpoint, new Map([['A.azw3', ['v2']]]))
+    writeCalibreMetadata(mountpoint, new Map([['A.azw3', ['v3']]]))
+    const [, oldest] = describeCalibreBackups(mountpoint)
 
     // Act
-    const restored = restoreCalibreBackup(mountpoint)
+    const restored = restoreCalibreBackup(mountpoint, oldest.id)
 
     // Assert
-    expect(restored?.takenAt).toMatch(/^\d{4}-\d\d-\d\dT/)
+    expect(restored).toEqual({ takenAt: oldest.takenAt })
     expect(readMetadata()[0].tags).toEqual(['v1'])
-    const newest = backups().at(-1) ?? ''
-    expect(JSON.parse(readFileSync(path.join(backupDir(), newest), 'utf-8'))[0].tags).toEqual(['v2'])
+    expect(tagsIn(describeCalibreBackups(mountpoint)[0].id)).toEqual(['v3'])
   })
 
-  test('is null when there is no backup', () => {
+  test('is null for anything that is not one of the device backups, never treating it as a path', () => {
     writeMetadata([{ lpath: 'documents/A.azw3', tags: ['v1'] }])
 
-    expect(restoreCalibreBackup(mountpoint)).toBeNull()
+    expect(restoreCalibreBackup(mountpoint, '../metadata.calibre')).toBeNull()
+    expect(restoreCalibreBackup(mountpoint, 'metadata.calibre.2026-01-01T00-00-00-000Z.json')).toBeNull()
     expect(readMetadata()[0].tags).toEqual(['v1'])
   })
 
-  test('skips a damaged backup and uses the newest readable one', () => {
+  test('refuses a damaged backup and leaves the file untouched', () => {
+    writeMetadata([{ lpath: 'documents/A.azw3', tags: ['v1'] }])
     mkdirSync(backupDir(), { recursive: true })
-    writeFileSync(path.join(backupDir(), 'metadata.calibre.2026-01-01T00-00-00-000Z.json'), '[{"lpath":"documents/Ok.azw3"}]')
-    writeFileSync(path.join(backupDir(), 'metadata.calibre.2026-02-01T00-00-00-000Z.json'), 'not json')
+    const damaged = 'metadata.calibre.2026-02-01T00-00-00-000Z.json'
+    writeFileSync(path.join(backupDir(), damaged), 'not json')
 
-    const restored = restoreCalibreBackup(mountpoint)
-
-    expect(restored?.takenAt).toBe('2026-01-01T00:00:00.000Z')
-    expect(readMetadata()).toEqual([{ lpath: 'documents/Ok.azw3' }])
+    expect(() => restoreCalibreBackup(mountpoint, damaged)).toThrow()
+    expect(readMetadata()[0].tags).toEqual(['v1'])
   })
 })
 
