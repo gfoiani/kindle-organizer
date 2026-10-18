@@ -1,229 +1,141 @@
-import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import path from 'path'
 import './setup/electron-mock' // app.isPackaged = false
 
-// Controllable child_process + fs so detection and spawning are fully driven.
-const { execFileMock, execFileSyncMock, existsSyncMock } = vi.hoisted(() => ({
-  execFileMock: vi.fn(),
-  execFileSyncMock: vi.fn(),
-  existsSyncMock: vi.fn()
-}))
-vi.mock('node:child_process', () => ({ execFile: execFileMock, execFileSync: execFileSyncMock }))
-vi.mock('node:fs', () => ({ existsSync: existsSyncMock }))
+// The whole point of the native converter: it must never shell out to calibre.
+const { execFileMock, spawnMock } = vi.hoisted(() => ({ execFileMock: vi.fn(), spawnMock: vi.fn() }))
+vi.mock('node:child_process', () => ({ execFile: execFileMock, spawn: spawnMock, execFileSync: execFileMock }))
+vi.mock('child_process', () => ({ execFile: execFileMock, spawn: spawnMock, execFileSync: execFileMock }))
 
-import {
-  convert,
-  detectEngine,
-  resetEngineCache,
-  ConversionUnavailableError,
-  UnsupportedFormatError,
-  ConversionFailedError
-} from '../src/main/convert'
+import { convert } from '../src/main/convert'
+import { AppError } from '../src/main/appErrors'
+import { JPEG, PNG, writeEpubBook, type EpubBookSpec } from './setup/epubBookFixture'
+import { exthStrings, readKf8 } from './setup/kf8Reader'
 
-/** A fake ChildProcess we can drive from the test. */
-class FakeChild extends EventEmitter {
-  stdout = new EventEmitter()
-  stderr = new EventEmitter()
-  killed = false
-  kill = vi.fn((): boolean => {
-    this.killed = true
-    return true
-  })
-}
+const BOOK_ID = '3f6d9a1e-1c4b-4a2d-8f77-0b9c2e5d1a33'
 
-const CALIBRE_MAC = '/Applications/calibre.app/Contents/MacOS/ebook-convert'
-
-/** Configures existsSync to return true only for the given paths. */
-function setExisting(paths: string[]): void {
-  const set = new Set(paths)
-  existsSyncMock.mockImplementation((p: string) => set.has(p))
-}
-
-/**
- * `findCalibre()` reads `process.platform` when it runs, and the canonical-path
- * list is empty on Linux — so on a Linux CI runner the PATH fallback would win
- * and every assertion about the macOS binary would be checking the wrong thing.
- * Pin the platform per test instead of inheriting the host's.
- */
-const HOST_PLATFORM = process.platform
-function setPlatform(platform: NodeJS.Platform): void {
-  Object.defineProperty(process, 'platform', { value: platform, configurable: true })
-}
+let dir: string
 
 beforeEach(() => {
-  setPlatform('darwin')
-  resetEngineCache()
+  dir = mkdtempSync(path.join(tmpdir(), 'kindle-convert-'))
   execFileMock.mockReset()
-  execFileSyncMock.mockReset()
-  existsSyncMock.mockReset()
+  spawnMock.mockReset()
 })
 
 afterEach(() => {
-  setPlatform(HOST_PLATFORM)
-  resetEngineCache()
+  rmSync(dir, { recursive: true, force: true })
 })
 
-describe('detectEngine', () => {
-  test('detects calibre when the canonical macOS binary exists', () => {
-    setExisting([CALIBRE_MAC])
-    expect(detectEngine()).toBe('calibre')
+const SPEC: EpubBookSpec = {
+  title: 'Titolo EPUB',
+  author: 'Autore EPUB',
+  language: 'it',
+  docs: [
+    { path: 'a.xhtml', body: '<h1>Uno</h1><p><a href="b.xhtml#x">vai</a></p>' },
+    { path: 'b.xhtml', body: '<h1>Due</h1><p id="x">Città</p>' }
+  ],
+  images: [{ path: 'cover.jpg', data: JPEG, cover: true }]
+}
+
+function epub(spec: EpubBookSpec = SPEC): string {
+  return writeEpubBook(path.join(dir, 'in.epub'), spec)
+}
+
+describe('convert', () => {
+  test('writes an AZW3 to the output path without running any external program', async () => {
+    // Arrange
+    const outputPath = path.join(dir, 'out.azw3')
+
+    // Act
+    const result = await convert(epub(), 'azw3', { outputPath })
+
+    // Assert
+    expect(result).toBe(outputPath)
+    const kf8 = readKf8(readFileSync(outputPath))
+    expect(kf8.parts).toHaveLength(2)
+    expect(kf8.parts[1]).toContain('<p id="x">Città</p>')
+    expect(execFileMock).not.toHaveBeenCalled()
+    expect(spawnMock).not.toHaveBeenCalled()
   })
 
-  test('falls back to the PATH binary where there is no canonical location', () => {
-    // Arrange — Linux has no canonical calibre path, so detection must lean on
-    // `ebook-convert --version` succeeding on PATH. This is the case that used to
-    // make the assertions below silently platform-dependent.
-    setPlatform('linux')
-    setExisting([])
-    execFileSyncMock.mockReturnValue(undefined)
+  test("stamps the app's title, author, identifier and cover into the book", async () => {
+    const coverPath = path.join(dir, 'app-cover.png')
+    writeFileSync(coverPath, PNG)
+    const outputPath = path.join(dir, 'out.azw3')
 
-    // Act / Assert
-    expect(detectEngine()).toBe('calibre')
-    expect(execFileSyncMock).toHaveBeenCalledWith('ebook-convert', ['--version'], expect.any(Object))
-  })
-
-  test('returns "none" when no calibre and no bundled binary exist', () => {
-    setExisting([])
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('command not found')
+    await convert(epub(), 'azw3', {
+      outputPath,
+      metadata: { title: 'Titolo App', author: 'Autore App', coverPath, identifier: BOOK_ID }
     })
-    expect(detectEngine()).toBe('none')
-  })
-})
 
-describe('convert — calibre engine', () => {
-  test('spawns ebook-convert with the kindle profile argv and resolves the output path', async () => {
-    setExisting([CALIBRE_MAC])
-    const child = new FakeChild()
-    execFileMock.mockReturnValue(child)
-
-    const p = convert('/in/book.epub', 'azw3', { outputPath: '/out/book.azw3' })
-    child.emit('close', 0)
-
-    await expect(p).resolves.toBe('/out/book.azw3')
-    expect(execFileMock).toHaveBeenCalledWith(
-      CALIBRE_MAC,
-      ['/in/book.epub', '/out/book.azw3', '--output-profile', 'kindle_pw3'],
-      expect.any(Object)
-    )
+    const kf8 = readKf8(readFileSync(outputPath))
+    expect(kf8.header.fullName).toBe('Titolo App')
+    expect(exthStrings(kf8.header, 100)).toEqual(['Autore App'])
+    expect(exthStrings(kf8.header, 113)).toEqual([BOOK_ID])
+    expect(kf8.images[0]).toEqual(PNG)
+    expect(exthStrings(kf8.header, 129)).toEqual(['kindle:embed:0001'])
   })
 
-  test("forces the app's title, author and cover onto the output, like calibre does", async () => {
-    setExisting([CALIBRE_MAC])
-    const child = new FakeChild()
-    execFileMock.mockReturnValue(child)
+  test("keeps the EPUB's own cover when the app's cover file cannot be read", async () => {
+    const outputPath = path.join(dir, 'out.azw3')
 
-    const p = convert('/in/book.epub', 'azw3', {
-      outputPath: '/out/book.azw3',
-      metadata: { title: 'Dune', author: 'Frank Herbert', coverPath: '/covers/dune.jpg' }
+    await convert(epub(), 'azw3', { outputPath, metadata: { coverPath: path.join(dir, 'missing.jpg') } })
+
+    const kf8 = readKf8(readFileSync(outputPath))
+    expect(kf8.images[0]).toEqual(JPEG)
+  })
+
+  test('replaces the output atomically and leaves no temporary file behind', async () => {
+    const outputPath = path.join(dir, 'out.azw3')
+    writeFileSync(outputPath, 'stale')
+
+    await convert(epub(), 'azw3', { outputPath })
+
+    expect(readFileSync(outputPath).subarray(60, 68).toString('latin1')).toBe('BOOKMOBI')
+    expect(readdirSync(dir).sort()).toEqual(['in.epub', 'out.azw3'])
+  })
+
+  test('reports progress that ends at 100%', async () => {
+    const seen: number[] = []
+
+    await convert(epub(), 'azw3', { outputPath: path.join(dir, 'out.azw3'), onProgress: (p) => seen.push(p) })
+
+    expect(seen.length).toBeGreaterThan(1)
+    expect(seen[seen.length - 1]).toBe(100)
+  })
+
+  test('rejects a DRM-protected EPUB with EPUB_DRM_PROTECTED', async () => {
+    const drm = epub({
+      ...SPEC,
+      extraEntries: [{ name: 'META-INF/rights.xml', data: Buffer.from('<rights/>') }]
     })
-    child.emit('close', 0)
 
-    await expect(p).resolves.toBe('/out/book.azw3')
-    expect(execFileMock).toHaveBeenCalledWith(
-      CALIBRE_MAC,
-      [
-        '/in/book.epub',
-        '/out/book.azw3',
-        '--output-profile',
-        'kindle_pw3',
-        '--title',
-        'Dune',
-        '--authors',
-        'Frank Herbert',
-        '--cover',
-        '/covers/dune.jpg'
-      ],
-      expect.any(Object)
-    )
+    const error = await convert(drm, 'azw3', { outputPath: path.join(dir, 'out.azw3') }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(AppError)
+    expect((error as AppError).code).toBe('EPUB_DRM_PROTECTED')
+    expect(existsSync(path.join(dir, 'out.azw3'))).toBe(false)
   })
 
-  test('omits the metadata flags that have no value', async () => {
-    setExisting([CALIBRE_MAC])
-    const child = new FakeChild()
-    execFileMock.mockReturnValue(child)
+  test('rejects a file that is not an EPUB with EPUB_INVALID', async () => {
+    const notEpub = path.join(dir, 'in.epub')
+    writeFileSync(notEpub, 'plain text')
 
-    const p = convert('/in/book.epub', 'azw3', {
-      outputPath: '/out/book.azw3',
-      metadata: { title: 'Dune' }
-    })
-    child.emit('close', 0)
+    const error = await convert(notEpub, 'azw3', { outputPath: path.join(dir, 'out.azw3') }).catch((e: unknown) => e)
 
-    await p
-    const [, args] = execFileMock.mock.calls[0]
-    expect(args).toContain('--title')
-    expect(args).not.toContain('--authors')
-    expect(args).not.toContain('--cover')
+    expect((error as AppError).code).toBe('EPUB_INVALID')
   })
 
-  test('reports progress from a tolerant "\\d+%" match on stderr', async () => {
-    setExisting([CALIBRE_MAC])
-    const child = new FakeChild()
-    execFileMock.mockReturnValue(child)
-    const onProgress = vi.fn()
-
-    const p = convert('/in/book.epub', 'azw3', { outputPath: '/out/book.azw3', onProgress })
-    child.stderr.emit('data', Buffer.from('45% Converting input'))
-    child.emit('close', 0)
-
-    await p
-    expect(onProgress).toHaveBeenCalledWith(45)
-  })
-
-  test('rejects with ConversionFailedError (code + stderr tail) on a non-zero exit', async () => {
-    setExisting([CALIBRE_MAC])
-    const child = new FakeChild()
-    execFileMock.mockReturnValue(child)
-
-    const p = convert('/in/book.epub', 'azw3', { outputPath: '/out/book.azw3' })
-    child.stderr.emit('data', Buffer.from('boom: bad input'))
-    child.emit('close', 1)
-
-    await expect(p).rejects.toBeInstanceOf(ConversionFailedError)
-    await expect(p).rejects.toMatchObject({ code: 1, stderrTail: expect.stringContaining('boom') })
-  })
-
-  test('cancels via AbortSignal: kills the child and rejects with an AbortError', async () => {
-    setExisting([CALIBRE_MAC])
-    const child = new FakeChild()
-    execFileMock.mockReturnValue(child)
+  test('rejects with an AbortError when cancelled, writing nothing', async () => {
     const controller = new AbortController()
-
-    const p = convert('/in/book.epub', 'azw3', {
-      outputPath: '/out/book.azw3',
-      signal: controller.signal
-    })
     controller.abort()
-    child.emit('close', null)
+    const outputPath = path.join(dir, 'out.azw3')
 
-    await expect(p).rejects.toMatchObject({ name: 'AbortError' })
-    expect(child.kill).toHaveBeenCalled()
-  })
-})
+    const error = await convert(epub(), 'azw3', { outputPath, signal: controller.signal }).catch((e: unknown) => e)
 
-describe('convert — engine guards', () => {
-  test('rejects MOBI on the bundled engine with UnsupportedFormatError (no spawn)', async () => {
-    const bundled = `${process.cwd()}/resources/converter/kindle-cli`
-    setExisting([bundled]) // no calibre → bundled
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('not found') // PATH probe fails → calibre not found
-    })
-
-    const p = convert('/in/book.epub', 'mobi', { outputPath: '/out/book.mobi' })
-
-    await expect(p).rejects.toBeInstanceOf(UnsupportedFormatError)
-    expect(execFileMock).not.toHaveBeenCalled()
-  })
-
-  test('rejects with ConversionUnavailableError when no engine is available', async () => {
-    setExisting([])
-    execFileSyncMock.mockImplementation(() => {
-      throw new Error('not found')
-    })
-
-    const p = convert('/in/book.epub', 'azw3', { outputPath: '/out/book.azw3' })
-
-    await expect(p).rejects.toBeInstanceOf(ConversionUnavailableError)
-    expect(execFileMock).not.toHaveBeenCalled()
+    expect((error as Error).name).toBe('AbortError')
+    expect(existsSync(outputPath)).toBe(false)
   })
 })

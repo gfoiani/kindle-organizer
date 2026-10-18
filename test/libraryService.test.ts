@@ -115,7 +115,7 @@ describe('sendToKindle', () => {
   interface ConvertArgs {
     outputPath: string
     onProgress?: (p: number) => void
-    metadata?: { title?: string; author?: string; coverPath?: string }
+    metadata?: { title?: string; author?: string; coverPath?: string; identifier?: string }
   }
 
   /** A converter that produces a real (fixture) AZW3 at the requested path. */
@@ -169,7 +169,7 @@ describe('sendToKindle', () => {
     expect(typeof after?.uploadedAt).toBe('number')
   })
 
-  test('stamps the app title, author and cached cover into the converted file', async () => {
+  test('stamps the app title, author, book id and cached cover into the converted file', async () => {
     const cover = fakeJpeg()
     const file = writeEpub(path.join(src, 'novel.epub'), {
       title: 'Dune',
@@ -189,7 +189,8 @@ describe('sendToKindle', () => {
     expect(options.metadata).toEqual({
       title: 'Dune',
       author: 'Frank Herbert',
-      coverPath: path.join(userData, 'covers', `${book!.coverKey}.jpg`)
+      coverPath: path.join(userData, 'covers', `${book!.coverKey}.jpg`),
+      identifier: book!.id
     })
   })
 
