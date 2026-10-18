@@ -348,7 +348,7 @@ export function BookDetailSidebar({
                 </button>
 
                 {sendPhase === 'error' && sendFailureKey && (
-                  <p role="alert" className="text-red-300 text-xs">
+                  <p className="text-red-300 text-xs">
                     {t(sendFailureKey)}
                   </p>
                 )}
@@ -380,12 +380,13 @@ export function BookDetailSidebar({
                   {t('library.removeFromLibrary')}
                 </button>
 
-                {/* Visually-hidden live region announces the send result. */}
+                {/* Visually-hidden live region announces the send result — the
+                    reason when there is one, so a failure is announced once. */}
                 <div role="status" aria-live="polite" className="sr-only">
                   {sendPhase === 'done'
                     ? t('library.sent')
                     : sendPhase === 'error'
-                      ? t('library.sendError')
+                      ? t(sendFailureKey ?? 'library.sendError')
                       : ''}
                 </div>
               </div>

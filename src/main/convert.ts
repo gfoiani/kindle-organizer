@@ -6,7 +6,6 @@ import { epubToKf8 } from './epubConvert'
 import { ConversionAbortError, EpubDrmError, EpubInvalidError, throwIfAborted } from './epubConvert/errors'
 import { writeKf8 } from './kf8'
 import { toKindleJpeg } from './kindleThumbnails'
-import type { KindleFormat } from './settings'
 
 export { ConversionAbortError } from './epubConvert/errors'
 
@@ -80,12 +79,12 @@ function toReportableError(err: unknown, inputPath: string): Error {
 
 /**
  * Converts an EPUB to a Kindle book at `options.outputPath`, entirely in-process
- * (no calibre, no external program). Only AZW3 (KF8) is produced; every Kindle
- * since the 2011 generation reads it. Failures reject with an `AppError`
+ * (no calibre, no external program). Only AZW3 (KF8) is produced (see
+ * `KINDLE_FORMAT`). Failures reject with an `AppError`
  * (EPUB_INVALID / EPUB_DRM_PROTECTED / CONVERSION_FAILED); cancellation with an
  * AbortError-named error.
  */
-export async function convert(inputPath: string, _format: KindleFormat, options: ConvertOptions): Promise<string> {
+export async function convert(inputPath: string, options: ConvertOptions): Promise<string> {
   const metadata = options.metadata ?? {}
   try {
     const book = await epubToKf8(inputPath, {

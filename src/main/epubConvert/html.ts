@@ -3,7 +3,7 @@ import { hasChildren, isCDATA, isTag, isText, type ChildNode, type Document, typ
 import { findAllByName, findFirstByName, localName, normalizedText, parseHtml } from './dom'
 import { EpubInvalidError } from './errors'
 import { isExternalHref, resolveHref, type ResolvedHref } from './paths'
-import { serialize, type XElement, type XNode } from './serialize'
+import { isVoidElement, serialize, type XElement, type XNode } from './serialize'
 
 /** What the book-level converter provides to each document it transforms. */
 export interface DocumentContext {
@@ -37,6 +37,8 @@ const HTML_ATTRIBUTES = new Set(['lang', 'xml:lang', 'dir'])
 const PLAIN_ATTRIBUTE = /^[A-Za-z_][-A-Za-z0-9_.]*$/
 const ALLOWED_PREFIX = /^(xml|xmlns|xlink):[A-Za-z_][-A-Za-z0-9_.]*$/
 const IMG_SOURCE_ATTRIBUTES: ReadonlySet<string> = new Set(['src', 'srcset', 'sizes'])
+/** Outside <img> these point at media the book does not carry (<source>, <input>, <video>). */
+const URL_ATTRIBUTES: ReadonlySet<string> = new Set(['src', 'srcset', 'poster'])
 /** htmlparser2 accepts `"`, `<`, `=` in tag names; writing them out would corrupt the XHTML. */
 const VALID_ELEMENT_NAME = /^[A-Za-z_][-A-Za-z0-9_.:]*$/
 /**
@@ -77,6 +79,11 @@ function cleanAttributes(
   })
 }
 
+/** HTML attribute names are case-insensitive, XHTML ones lowercase (SVG/MathML keep theirs). */
+function lowerCaseKeys(attribs: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(attribs).map(([name, value]) => [name.toLowerCase(), value]))
+}
+
 function element(name: string, attributes: Attribute[], children: XNode[] = []): XElement {
   return { kind: 'element', name, attributes, children }
 }
@@ -87,10 +94,10 @@ function imageFor(href: string | undefined, ctx: DocumentContext): string | unde
 }
 
 /** An image the book cannot carry is removed rather than left as a broken reference. */
-function convertImg(el: Element, ctx: DocumentContext): XNode[] {
-  const uri = imageFor(el.attribs.src, ctx)
+function convertImg(attribs: Readonly<Record<string, string>>, ctx: DocumentContext): XNode[] {
+  const uri = imageFor(attribs.src, ctx)
   if (!uri) return []
-  return [element(el.name, [['src', uri], ...cleanAttributes(el.attribs, ctx, IMG_SOURCE_ATTRIBUTES)])]
+  return [element('img', [['src', uri], ...cleanAttributes(attribs, ctx, IMG_SOURCE_ATTRIBUTES)])]
 }
 
 /** The common cover-page pattern — an <svg> wrapping one <image> — becomes a plain <img>. */
@@ -123,13 +130,16 @@ function convertElement(el: Element, ctx: DocumentContext, foreign: boolean): XN
   const lower = el.name.toLowerCase()
   if (DROPPED.has(lower)) return []
   if (!VALID_ELEMENT_NAME.test(el.name)) return el.children.flatMap((c) => convertNode(c, ctx, foreign))
-  if (lower === 'img') return convertImg(el, ctx)
+  if (lower === 'img') return convertImg(lowerCaseKeys(el.attribs), ctx)
   const cover = lower === 'svg' && !foreign ? svgCover(el, ctx) : undefined
   if (cover) return cover
 
   const inForeign = foreign || lower === 'svg' || lower === 'math'
+  const name = inForeign ? el.name : lower
   const isForeignImage = inForeign && localName(lower) === 'image'
-  const cleaned = cleanAttributes(el.attribs, ctx)
+  const cleaned = inForeign
+    ? cleanAttributes(el.attribs, ctx)
+    : cleanAttributes(lowerCaseKeys(el.attribs), ctx, URL_ATTRIBUTES)
   // Inside SVG only <image> keeps a reference (rewritten below); SVG links have
   // no Kindle target and would otherwise pass arbitrary URLs through.
   const linked = inForeign
@@ -139,7 +149,11 @@ function convertElement(el: Element, ctx: DocumentContext, foreign: boolean): XN
       : cleaned
   const attrs = isForeignImage ? foreignImageAttributes(el, linked, ctx) : linked
   if (!attrs) return []
-  return [element(el.name, attrs, el.children.flatMap((c) => convertNode(c, ctx, inForeign)))]
+  const children = el.children.flatMap((c) => convertNode(c, ctx, inForeign))
+  // The parser only knows lowercase void names, so an unclosed <BR> swallows
+  // what follows it: hand that content back to the parent.
+  if (!inForeign && isVoidElement(name)) return [element(name, attrs), ...children]
+  return [element(name, attrs, children)]
 }
 
 function convertNode(node: ChildNode, ctx: DocumentContext, foreign: boolean): XNode[] {
@@ -183,15 +197,18 @@ export function transformDocument(source: string, ctx: DocumentContext): Transfo
   const content = body?.children ?? html?.children ?? doc.children
 
   const serialized = serialize(content.flatMap((c) => convertNode(c, ctx, false)))
-  const bodyId = body?.attribs.id
+  const bodyAttribs = lowerCaseKeys(body?.attribs ?? {})
+  const bodyId = bodyAttribs.id
   const anchors =
     bodyId && !serialized.anchors.has(bodyId) ? new Map([...serialized.anchors, [bodyId, 0]]) : serialized.anchors
 
   return {
     title: documentTitle(head, body),
-    htmlAttributes: Object.fromEntries(Object.entries(html?.attribs ?? {}).filter(([n]) => HTML_ATTRIBUTES.has(n))),
+    htmlAttributes: Object.fromEntries(
+      Object.entries(lowerCaseKeys(html?.attribs ?? {})).filter(([n]) => HTML_ATTRIBUTES.has(n))
+    ),
     bodyAttributes: Object.fromEntries(
-      cleanAttributes(body?.attribs ?? {}, ctx, new Set(['id'])).filter(([name]) => !name.includes(':'))
+      cleanAttributes(bodyAttribs, ctx, new Set(['id'])).filter(([name]) => !name.includes(':'))
     ),
     body: serialized.html,
     anchors,

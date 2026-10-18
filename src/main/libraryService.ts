@@ -133,7 +133,7 @@ export async function removeLibraryBook(id: string): Promise<void> {
 
 // ─── Send to Kindle (convert + upload) ────────────────────────────────────────
 
-type ConvertFn = (inputPath: string, format: KindleFormat, options: ConvertOptions) => Promise<string>
+type ConvertFn = (inputPath: string, options: ConvertOptions) => Promise<string>
 type UploadFn = (
   source: string,
   mountpoint: string,
@@ -265,7 +265,7 @@ export async function sendToKindle(
     const outputPath = path.join(itemDir(id), `converted.${format}`)
     upsertConversion({ libraryId: id, format, status: 'converting' })
     try {
-      await convertFn(book.originalPath, format, {
+      await convertFn(book.originalPath, {
         outputPath,
         // Stamp the app's own metadata into the book, like calibre does: the
         // device reads title/author/cover from the file itself.

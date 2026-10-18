@@ -95,6 +95,14 @@ function isDocumentsRelpath(relpath: string): boolean {
   return relpath !== '' && !relpath.startsWith('/') && !/^[A-Za-z]:/.test(relpath) && !relpath.split('/').includes('..')
 }
 
+/**
+ * The comparison key for a relpath. A Kindle's volume is FAT/exFAT, which
+ * ignores case, so calibre's `Dune.AZW3` and a scanned `Dune.azw3` are one file.
+ */
+function foldRelpath(relpath: string): string {
+  return relpath.toLowerCase()
+}
+
 function entryRelpath(entry: unknown): string | undefined {
   if (typeof entry !== 'object' || entry === null) return undefined
   const lpath = (entry as Record<string, unknown>)['lpath']
@@ -128,17 +136,19 @@ export function writeCalibreMetadata(
   const entries = exists ? readEntryArray(metadataPath) : []
   if (!entries) return false
 
+  const tagsByFoldedPath = new Map([...bookTagMap].map(([relpath, tags]) => [foldRelpath(relpath), tags]))
   const updated = entries.map((entry) => {
     const relpath = entryRelpath(entry)
-    const tags = relpath === undefined ? undefined : bookTagMap.get(relpath)
+    const tags =
+      relpath === undefined ? undefined : (bookTagMap.get(relpath) ?? tagsByFoldedPath.get(foldRelpath(relpath)))
     return tags !== undefined ? { ...(entry as Record<string, unknown>), tags } : entry
   })
 
-  const listed = new Set(entries.map(entryRelpath))
+  const listed = new Set(entries.flatMap((entry) => entryRelpath(entry) ?? []).map(foldRelpath))
   const added = deviceBooks.flatMap((book) => {
     const relpath = toPosixRelpath(book.relpath)
     const tags = bookTagMap.get(book.relpath)
-    if (!tags || tags.length === 0 || listed.has(relpath) || !isDocumentsRelpath(relpath)) return []
+    if (!tags || tags.length === 0 || listed.has(foldRelpath(relpath)) || !isDocumentsRelpath(relpath)) return []
     const input = { ...book, relpath, mime: calibreMimeType(relpath), uuid: randomUUID() }
     return [{ ...buildEntry(input, relpath, undefined), tags }]
   })
@@ -248,33 +258,9 @@ function keepStringArray(rec: Record<string, unknown> | undefined, field: string
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
 }
 
-/**
- * Builds the record calibre would write for this book. Only the fields that
- * actually travel between calibre and a device are filled in; the rest are the
- * explicit nulls calibre emits, so the entry round-trips through its reader
- * (and through ours) unchanged.
- */
-function buildEntry(
-  input: CalibreEntryInput,
-  relpath: string,
-  existing: Record<string, unknown> | undefined
-): Record<string, unknown> {
-  const author = input.author?.trim() || UNKNOWN_AUTHOR
-
+/** The explicit nulls calibre writes for the fields it has no value for. */
+function emptyCalibreFields(): Record<string, unknown> {
   return {
-    lpath: `documents/${relpath}`,
-    title: input.title,
-    title_sort: input.title,
-    authors: [author],
-    author_sort: toAuthorSort(author),
-    // Tags ARE collections for this app (see writeCalibreMetadata) — a re-upload
-    // must not silently drop the book out of every collection it belongs to.
-    tags: keepStringArray(existing, 'tags'),
-    device_collections: keepStringArray(existing, 'device_collections'),
-    uuid: input.uuid,
-    size: input.size,
-    mime: input.mime ?? null,
-    last_modified: new Date().toISOString(),
     application_id: null,
     book_producer: null,
     comments: null,
@@ -287,6 +273,39 @@ function buildEntry(
     series: null,
     series_index: null,
     thumbnail: null
+  }
+}
+
+/**
+ * Builds the record calibre would write for this book: the fields the app
+ * owns are set, everything else is what an existing record already holds
+ * (calibre's ISBN, series, publisher… survive a re-upload — the ISBN feeds the
+ * cover lookup) or the explicit nulls calibre emits, so the entry round-trips
+ * through its reader (and through ours) unchanged.
+ */
+function buildEntry(
+  input: CalibreEntryInput,
+  relpath: string,
+  existing: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const author = input.author?.trim() || UNKNOWN_AUTHOR
+
+  return {
+    ...emptyCalibreFields(),
+    ...existing,
+    lpath: `documents/${relpath}`,
+    title: input.title,
+    title_sort: input.title,
+    authors: [author],
+    author_sort: toAuthorSort(author),
+    // Tags ARE collections for this app (see writeCalibreMetadata) — a re-upload
+    // must not silently drop the book out of every collection it belongs to.
+    tags: keepStringArray(existing, 'tags'),
+    device_collections: keepStringArray(existing, 'device_collections'),
+    uuid: input.uuid,
+    size: input.size,
+    mime: input.mime ?? null,
+    last_modified: new Date().toISOString()
   }
 }
 
@@ -315,9 +334,8 @@ export function upsertCalibreEntry(mountpoint: string, input: CalibreEntryInput)
   const relpath = toPosixRelpath(input.relpath)
 
   const index = entries.findIndex((entry) => {
-    if (typeof entry !== 'object' || entry === null) return false
-    const lpath = (entry as Record<string, unknown>)['lpath']
-    return typeof lpath === 'string' && stripDocumentsPrefix(lpath) === relpath
+    const entryPath = entryRelpath(entry)
+    return entryPath !== undefined && foldRelpath(entryPath) === foldRelpath(relpath)
   })
 
   const existing = index >= 0 ? (entries[index] as Record<string, unknown>) : undefined

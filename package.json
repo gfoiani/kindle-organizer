@@ -78,13 +78,15 @@
     ],
     "files": [
       "out",
-      "THIRD_PARTY_NOTICES.md",
       "node_modules",
       "!**/node_modules/onnxruntime-node/**",
       "!**/node_modules/onnxruntime-web/**",
       "!**/node_modules/@xenova/**",
       "!**/node_modules/sharp/**",
       "!**/node_modules/better-sqlite3/bin/**"
+    ],
+    "extraResources": [
+      "THIRD_PARTY_NOTICES.md"
     ],
     "directories": {
       "buildResources": "assets",

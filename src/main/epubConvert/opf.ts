@@ -122,9 +122,13 @@ export async function readPackage(archive: EpubArchive): Promise<EpubPackage> {
   const manifest = readManifest(asNode(pkg.manifest), opfPath)
   const byId = new Map(manifest.map((i) => [i.id, i]))
 
-  const spine = nodes(spineNode?.itemref)
+  const listed = nodes(spineNode?.itemref)
     .map((ref) => byId.get(attr(ref, 'idref') ?? ''))
     .filter((i): i is ManifestItem => i !== undefined && CONTENT_TYPES.has(i.mediaType))
+  // A document listed twice would become two parts with links reaching only
+  // one of them (and a cheap way to inflate the output): keep its first place.
+  const firstPlace = new Map(listed.map((item, index) => [item.path, index] as const).reverse())
+  const spine = listed.filter((item, index) => firstPlace.get(item.path) === index)
 
   const ncxId = attr(spineNode, 'toc')
   const ncx = (ncxId ? byId.get(ncxId) : undefined) ?? manifest.find((i) => i.mediaType === NCX_TYPE)

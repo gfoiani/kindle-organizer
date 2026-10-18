@@ -6,6 +6,8 @@ const HEADER_LENGTH = 78
 const RECORD_ENTRY_LENGTH = 8
 /** Two zero bytes traditionally separate the record list from the first record. */
 const GAP_LENGTH = 2
+/** The record count is a 16-bit field. */
+const MAX_RECORDS = 0xffff
 
 /**
  * The PalmDB name is a 31-byte NUL-terminated field that readers treat as
@@ -26,6 +28,9 @@ export function palmDbName(title: string): string {
  * Record ids follow calibre's convention of doubling the index.
  */
 export function buildPalmDb(title: string, created: Date, records: Buffer[]): Buffer {
+  if (records.length > MAX_RECORDS) {
+    throw new RangeError(`A PalmDB holds at most ${MAX_RECORDS} records; this book needs ${records.length}`)
+  }
   const name = Buffer.alloc(NAME_LENGTH)
   name.write(palmDbName(title), 'latin1')
   // calibre stores a Unix timestamp here; readers only display it.

@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import type { Element } from 'domhandler'
+import { isTag, type Element } from 'domhandler'
 import type { EpubArchive } from './archive'
 import { decodeDocument, findAllByName, findFirstByName, localName, normalizedText, parseHtml, parseXml } from './dom'
 import type { EpubPackage } from './opf'
@@ -31,7 +31,7 @@ function fromNav(source: string, navPath: string): RawTocEntry[] {
 }
 
 function ownChild(parent: Element, name: string): Element | undefined {
-  return parent.children.find((c): c is Element => 'name' in c && localName((c as Element).name) === name)
+  return parent.children.find((c): c is Element => isTag(c) && localName(c.name) === name)
 }
 
 /** EPUB2: every navPoint, depth-first, which is reading order. */

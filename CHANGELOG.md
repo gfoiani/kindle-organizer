@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
-- The MOBI conversion option: books are always converted to AZW3, which every Kindle since the 2011 generation reads. Kindle 1, 2 and DX (pre-KF8) are not supported for converted books.
+- The MOBI conversion option: books are always converted to AZW3 (KF8), which every Kindle reads from the Kindle Keyboard (with its 2012 firmware update) onwards. Kindle 1, 2 and DX are not supported for converted books.
 - Embedded fonts are not carried over into converted books; the Kindle's own fonts are used.
 
 ## [0.4.0] - 2026-08-03

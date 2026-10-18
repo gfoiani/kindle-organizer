@@ -33,6 +33,11 @@ const VOID_ELEMENTS = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'
 ])
 const FOREIGN_ROOTS = new Set(['svg', 'math'])
+
+/** An HTML element that cannot have content (`<br>`, `<img>`…); `name` is lowercase. */
+export function isVoidElement(name: string): boolean {
+  return VOID_ELEMENTS.has(name)
+}
 const ANCHOR_ATTRIBUTES = new Set(['id', 'name'])
 
 /** C0 controls other than tab/LF/CR are not allowed anywhere in an XML document. */

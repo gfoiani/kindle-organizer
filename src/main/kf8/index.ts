@@ -67,6 +67,21 @@ export function kindlePosUri(part: number, offset: number): string {
   return `kindle:pos:fid:${toBase32(part, 4)}:off:${toBase32(offset, 10)}`
 }
 
+/**
+ * Longest part or navigation title written. A CNCX record must stay under
+ * 64 KiB and one string cannot be split across records, so an unbounded
+ * title (a hostile <title>, a runaway heading) would break the index.
+ */
+const MAX_TITLE_LENGTH = 256
+
+/** `title` cut to MAX_TITLE_LENGTH code units, never inside a surrogate pair. */
+function capTitle(title: string): string {
+  if (title.length <= MAX_TITLE_LENGTH) return title
+  const cut = title.slice(0, MAX_TITLE_LENGTH)
+  const last = cut.charCodeAt(cut.length - 1)
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut
+}
+
 const SKELETON_TAGS: TagDef[] = [
   { tag: 1, valuesPerEntry: 1, mask: 3 }, // chunk count (written twice)
   { tag: 6, valuesPerEntry: 2, mask: 12 } // geometry (written twice)
@@ -103,7 +118,7 @@ function layoutParts(parts: Kf8Part[]): Layout {
 
   parts.forEach((part, i) => {
     const aid = toBase32(i, 4)
-    const { head, tail } = buildSkeleton({ ...part, aid })
+    const { head, tail } = buildSkeleton({ ...part, title: capTitle(part.title), aid })
     const headBytes = Buffer.from(head, 'utf-8')
     const skeleton = Buffer.concat([headBytes, Buffer.from(tail, 'utf-8')])
     const body = Buffer.from(part.body, 'utf-8')
@@ -137,7 +152,7 @@ function resolveToc(input: Kf8BookInput, layout: Layout): NcxEntry[] {
     .map((e) => {
       const chunk = layout.chunks[e.part]
       const offset = Math.min(Math.max(0, Math.floor(e.offset)), chunk.length)
-      return { title: e.title, part: e.part, offset, start: chunk.insertPos + offset }
+      return { title: capTitle(e.title), part: e.part, offset, start: chunk.insertPos + offset }
     })
     .sort((a, b) => a.start - b.start)
   return located.map((e, i) => ({ ...e, length: (located[i + 1]?.start ?? layout.html.length) - e.start }))
