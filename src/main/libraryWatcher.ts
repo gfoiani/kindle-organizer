@@ -4,7 +4,6 @@ import {
   addLibraryFolder,
   removeLibraryFolder,
   syncAllLibraryFolders,
-  syncLibraryFolder,
   type FolderSyncResult
 } from './libraryFolders'
 
@@ -166,27 +165,35 @@ export function startLibraryFolderWatching(
     if (results.some(changedSomething)) notify()
   }
 
-  const sync = async (folderId: string): Promise<FolderSyncResult> => {
-    const result = await syncLibraryFolder(folderId)
-    announce([result])
-    return result
-  }
-
-  const watchers = createFolderWatchers((folderId) => {
-    sync(folderId).catch((err: unknown) => {
+  // The callback runs after a debounce, by which time syncAll is defined.
+  const watchers = createFolderWatchers(() => {
+    syncAll().catch((err: unknown) => {
       console.error('[library-watcher] Sync after a change failed:', errorText(err))
     })
   }, options)
 
   const refresh = (): void => watchers.watch(listLibraryFolders())
 
+  // Every sync reads every folder (a book leaving one may be moving into
+  // another), then re-arms any watcher that died — the change that triggered
+  // the sync is often what killed it.
+  const syncAll = async (): Promise<FolderSyncResult[]> => {
+    refresh()
+    const results = await syncAllLibraryFolders()
+    refresh()
+    announce(results)
+    return results
+  }
+
   return {
     refresh,
 
     async link(folderPath) {
       const folder = await addLibraryFolder(folderPath)
-      refresh()
-      return { folder, result: await sync(folder.id) }
+      const results = await syncAll()
+      const result = results.find((r) => r.folderId === folder.id)
+      if (!result) throw new Error(`Library folder ${folder.id} vanished while it was being read`)
+      return { folder, result }
     },
 
     async forget(folderId) {
@@ -195,12 +202,7 @@ export function startLibraryFolderWatching(
       notify()
     },
 
-    async syncAll() {
-      refresh()
-      const results = await syncAllLibraryFolders()
-      announce(results)
-      return results
-    },
+    syncAll,
 
     stop: () => watchers.close()
   }

@@ -6,7 +6,6 @@ import {
   deleteLibraryBook,
   deleteLibraryFolder,
   findByContentHash,
-  getLibraryFolder,
   insertLibraryBook,
   insertLibraryFolder,
   listFolderBooks,
@@ -18,11 +17,18 @@ import {
   type LibraryFolder
 } from './library'
 import { hashFile, readBookMetadata, removeLibraryItemCache } from './libraryService'
-import { isReadableDirectory, isSameOrInside, scanLibraryFolder, type ScannedFile } from './folderScan'
+import {
+  isReadableDirectory,
+  isRegularFileInside,
+  isSameOrInside,
+  scanLibraryFolder,
+  type FolderScan,
+  type ScannedFile
+} from './folderScan'
 
 /**
  * Library folders: folders on this computer whose books the library shows
- * without copying them. A sync brings the library in line with one folder:
+ * without copying them. A sync brings the library in line with every folder:
  * new files are added, renamed or moved ones keep their library id (and with
  * it the link to the copy on the Kindle), vanished ones leave the library.
  *
@@ -57,6 +63,23 @@ function emptyResult(folderId: string, status: FolderSyncStatus): FolderSyncResu
   return { folderId, status, added: 0, updated: 0, removed: 0, errors: 0 }
 }
 
+// ─── One operation at a time ──────────────────────────────────────────────────
+
+/**
+ * Syncs, additions and removals of folders run one after the other. A removal
+ * landing in the middle of a sync would otherwise race its inserts, and two
+ * syncs could both add the same new file.
+ */
+let tail: Promise<unknown> = Promise.resolve()
+
+function exclusive<T>(task: () => Promise<T>): Promise<T> {
+  const run = tail.then(task, task)
+  tail = run.catch(() => undefined)
+  return run
+}
+
+// ─── Folders ──────────────────────────────────────────────────────────────────
+
 async function realDirectory(folderPath: string): Promise<string | null> {
   if (!path.isAbsolute(folderPath)) return null
   try {
@@ -75,23 +98,27 @@ async function realDirectory(folderPath: string): Promise<string | null> {
  * folder that is, contains or sits inside one already added: its books would
  * show twice, and removing one folder would take the other's books with it.
  */
-export async function addLibraryFolder(folderPath: string): Promise<LibraryFolder> {
-  const real = await realDirectory(folderPath)
-  if (!real) throw new AppError('LIBRARY_FOLDER_INVALID')
+export function addLibraryFolder(folderPath: string): Promise<LibraryFolder> {
+  return exclusive(async () => {
+    const real = await realDirectory(folderPath)
+    if (!real) throw new AppError('LIBRARY_FOLDER_INVALID')
 
-  const overlaps = listLibraryFolders().some(
-    (folder) => isSameOrInside(folder.path, real) || isSameOrInside(real, folder.path)
-  )
-  if (overlaps) throw new AppError('LIBRARY_FOLDER_OVERLAP')
+    const overlaps = listLibraryFolders().some(
+      (folder) => isSameOrInside(folder.path, real) || isSameOrInside(real, folder.path)
+    )
+    if (overlaps) throw new AppError('LIBRARY_FOLDER_OVERLAP')
 
-  return insertLibraryFolder(crypto.randomUUID(), real)
+    return insertLibraryFolder(crypto.randomUUID(), real)
+  })
 }
 
 /** Drops a folder and its books from the library. Only the app's conversion caches are deleted. */
-export async function removeLibraryFolder(folderId: string): Promise<void> {
-  const books = listFolderBooks(folderId)
-  deleteLibraryFolder(folderId)
-  await Promise.all(books.map((book) => removeLibraryItemCache(book.id)))
+export function removeLibraryFolder(folderId: string): Promise<void> {
+  return exclusive(async () => {
+    const books = listFolderBooks(folderId)
+    deleteLibraryFolder(folderId)
+    await Promise.all(books.map((book) => removeLibraryItemCache(book.id)))
+  })
 }
 
 /** Every library folder with its book count and whether it can be read right now. */
@@ -107,79 +134,131 @@ export async function describeLibraryFolders(): Promise<LibraryFolderSummary[]> 
 
 // ─── Sync ─────────────────────────────────────────────────────────────────────
 
-interface SyncSlot {
-  current: Promise<FolderSyncResult>
-  next: Promise<FolderSyncResult> | null
-}
-
-const syncSlots = new Map<string, SyncSlot>()
+let queuedSync: Promise<FolderSyncResult[]> | null = null
 
 /**
- * Brings the library in line with one folder. Syncs of a folder never overlap:
- * requests arriving mid-sync share ONE follow-up sync that starts when the
- * running one ends, so a burst of watcher events costs at most two passes and a
+ * Brings the library in line with every folder. Requests made while a sync is
+ * waiting to start share it; one made while a sync runs queues the next, so a
  * change made during a pass is never missed.
  */
-export function syncLibraryFolder(folderId: string): Promise<FolderSyncResult> {
-  const slot = syncSlots.get(folderId)
-  if (!slot) return startSync(folderId)
-  if (slot.next) return slot.next
-
-  const next = slot.current.then(
-    () => startSync(folderId),
-    () => startSync(folderId)
-  )
-  syncSlots.set(folderId, { ...slot, next })
-  return next
-}
-
-function startSync(folderId: string): Promise<FolderSyncResult> {
-  const current: Promise<FolderSyncResult> = runSync(folderId).finally(() => {
-    const slot = syncSlots.get(folderId)
-    if (slot?.current === current && !slot.next) syncSlots.delete(folderId)
+export function syncAllLibraryFolders(): Promise<FolderSyncResult[]> {
+  if (queuedSync) return queuedSync
+  const run = exclusive(() => {
+    queuedSync = null
+    return runSync()
   })
-  syncSlots.set(folderId, { current, next: null })
-  return current
+  queuedSync = run
+  return run
 }
 
-/** Syncs every library folder, one after the other. */
-export async function syncAllLibraryFolders(): Promise<FolderSyncResult[]> {
-  const results: FolderSyncResult[] = []
-  for (const folder of listLibraryFolders()) {
-    results.push(await syncLibraryFolder(folder.id))
+/**
+ * Syncs the library and reports on one folder. Every folder is read: a book
+ * that left this folder may have moved into another one, and only reading that
+ * one tells a move (the book keeps its id) from a deletion.
+ */
+export async function syncLibraryFolder(folderId: string): Promise<FolderSyncResult> {
+  const results = await syncAllLibraryFolders()
+  return results.find((result) => result.folderId === folderId) ?? emptyResult(folderId, 'unavailable')
+}
+
+/** What a sync knows about every folder once they have all been scanned. */
+interface SyncContext {
+  scannedPaths: ReadonlySet<string>
+  /** Folders whose scan was complete: a path missing from them is really gone. */
+  completeFolders: ReadonlySet<string>
+}
+
+interface FolderPass {
+  folder: LibraryFolder
+  scan: FolderScan | null
+  outcomes: FileOutcome[]
+  errors: number
+}
+
+async function runSync(): Promise<FolderSyncResult[]> {
+  const folders = listLibraryFolders()
+  const scans: Array<FolderScan | null> = []
+  for (const folder of folders) scans.push(await scanLibraryFolder(folder.path))
+
+  const context: SyncContext = {
+    scannedPaths: new Set(scans.flatMap((scan) => scan?.files.map((file) => file.path) ?? [])),
+    completeFolders: new Set(folders.filter((_, i) => scans[i]?.complete).map((folder) => folder.id))
   }
+  forgetHashesExcept(context.scannedPaths)
+
+  // Read every folder before removing anything: a book missing from one folder
+  // may be adopted by another in this phase.
+  const passes: FolderPass[] = []
+  for (const [i, folder] of folders.entries()) {
+    passes.push({ folder, scan: scans[i], ...(await readFolder(folder, scans[i], context)) })
+  }
+
+  const results: FolderSyncResult[] = []
+  for (const pass of passes) results.push(await finishPass(pass))
   return results
 }
 
-async function runSync(folderId: string): Promise<FolderSyncResult> {
-  const folder = getLibraryFolder(folderId)
-  const scan = folder ? await scanLibraryFolder(folder.path) : null
-  if (!scan) return emptyResult(folderId, 'unavailable')
+async function readFolder(
+  folder: LibraryFolder,
+  scan: FolderScan | null,
+  context: SyncContext
+): Promise<Pick<FolderPass, 'outcomes' | 'errors'>> {
+  if (!scan) return { outcomes: [], errors: 0 }
 
-  const knownByPath = new Map(listFolderBooks(folderId).map((book) => [book.originalPath, book]))
-  const scannedPaths = new Set(scan.files.map((file) => file.path))
+  const knownByPath = new Map(listFolderBooks(folder.id).map((book) => [book.originalPath, book]))
   const outcomes: FileOutcome[] = []
   let errors = 0
-
   for (const file of scan.files) {
     try {
-      outcomes.push(await syncFile(folderId, file, knownByPath.get(file.path), scannedPaths))
+      outcomes.push(await syncFile(folder, file, knownByPath.get(file.path), context))
     } catch (err) {
       console.error(`[library-folders] Failed to read "${file.path}":`, errorText(err))
       errors += 1
     }
   }
+  return { outcomes, errors }
+}
 
+async function finishPass({ folder, scan, outcomes, errors }: FolderPass): Promise<FolderSyncResult> {
+  if (!scan) return emptyResult(folder.id, 'unavailable')
   // Only a complete scan proves a book is gone.
-  const removed = scan.complete ? await removeVanished(folderId, scannedPaths) : 0
+  const removed = scan.complete ? await removeVanished(folder.id, new Set(scan.files.map((file) => file.path))) : 0
   return {
-    folderId,
+    folderId: folder.id,
     status: 'ok',
     added: outcomes.filter((o) => o === 'added').length,
     updated: outcomes.filter((o) => o === 'updated').length,
     removed,
     errors
   }
+}
+
+// ─── One file ─────────────────────────────────────────────────────────────────
+
+/**
+ * Hashes of files read during this run of the app, keyed by path. A file that
+ * duplicates another book is never stored, so without this it would be read in
+ * full on every sync.
+ */
+const hashCache = new Map<string, { size: number; mtimeMs: number; hash: string }>()
+
+function forgetHashesExcept(paths: ReadonlySet<string>): void {
+  for (const cachedPath of [...hashCache.keys()]) {
+    if (!paths.has(cachedPath)) hashCache.delete(cachedPath)
+  }
+}
+
+async function hashOf(folder: LibraryFolder, file: ScannedFile): Promise<string> {
+  const cached = hashCache.get(file.path)
+  if (cached && cached.size === file.size && cached.mtimeMs === file.mtimeMs) return cached.hash
+
+  // The scan saw a regular file; it may have been swapped for a link since.
+  if (!(await isRegularFileInside(folder.path, file.path))) {
+    throw new Error('no longer a regular file inside the library folder')
+  }
+  const hash = await hashFile(file.path)
+  hashCache.set(file.path, { size: file.size, mtimeMs: file.mtimeMs, hash })
+  return hash
 }
 
 function locationOf(folderId: string, file: ScannedFile): FolderBookLocation {
@@ -197,34 +276,20 @@ function formatOf(file: ScannedFile): string {
 }
 
 async function syncFile(
-  folderId: string,
+  folder: LibraryFolder,
   file: ScannedFile,
   known: LibraryBook | undefined,
-  scannedPaths: ReadonlySet<string>
+  context: SyncContext
 ): Promise<FileOutcome> {
   // Size and mtime unchanged: the file is not read again (a rescan of a large
   // folder costs one stat per book).
   if (known && known.fileSize === file.size && known.fileMtime === file.mtimeMs) return 'unchanged'
 
-  const contentHash = await hashFile(file.path)
-  if (known) {
-    if (known.contentHash === contentHash) {
-      updateFolderBookLocation(known.id, locationOf(folderId, file))
-      return 'unchanged'
-    }
-    const metadata = await readBookMetadata(file.path)
-    updateFolderBookContent(known.id, {
-      contentHash,
-      ...metadata,
-      sourceFormat: formatOf(file),
-      fileSize: file.size,
-      fileMtime: file.mtimeMs
-    })
-    return 'updated'
-  }
+  const contentHash = await hashOf(folder, file)
+  if (known) return refreshKnownBook(folder.id, file, known, contentHash)
 
   const twin = findByContentHash(contentHash)
-  if (twin) return adoptTwin(folderId, file, twin, scannedPaths)
+  if (twin) return (await adoptTwin(folder.id, file, twin, context)) ? 'updated' : 'unchanged'
 
   const metadata = await readBookMetadata(file.path)
   insertLibraryBook({
@@ -234,27 +299,67 @@ async function syncFile(
     filename: path.basename(file.path),
     ...metadata,
     sourceFormat: formatOf(file),
-    folderId,
+    folderId: folder.id,
     fileSize: file.size,
     fileMtime: file.mtimeMs
   })
   return 'added'
 }
 
+/** The file of a known book changed on disk (touched, or rewritten). */
+async function refreshKnownBook(
+  folderId: string,
+  file: ScannedFile,
+  known: LibraryBook,
+  contentHash: string
+): Promise<FileOutcome> {
+  if (known.contentHash === contentHash) {
+    updateFolderBookLocation(known.id, locationOf(folderId, file))
+    return 'unchanged'
+  }
+
+  const owner = findByContentHash(contentHash)
+  if (owner) {
+    // The file now holds the bytes of another library book. Two rows cannot
+    // share a hash, so this one keeps its old record; storing the new size and
+    // mtime stops it being re-read (and re-reported) on every sync.
+    console.warn(`[library-folders] "${file.path}" now duplicates "${owner.title}"; keeping the earlier record`)
+    updateFolderBookLocation(known.id, locationOf(folderId, file))
+    return 'unchanged'
+  }
+
+  const metadata = await readBookMetadata(file.path)
+  updateFolderBookContent(known.id, {
+    contentHash,
+    ...metadata,
+    sourceFormat: formatOf(file),
+    fileSize: file.size,
+    fileMtime: file.mtimeMs
+  })
+  return 'updated'
+}
+
 /**
  * The same bytes are already in the library. A folder book whose own file is
  * gone was renamed or moved — possibly from another library folder — and keeps
- * its id. Anything else (a second copy, a book dropped into the app) is left as is.
+ * its id. Anything else (a second copy, a book dropped into the app) is left as
+ * is. Returns whether the book was adopted.
  */
-async function adoptTwin(
-  folderId: string,
-  file: ScannedFile,
-  twin: LibraryBook,
-  scannedPaths: ReadonlySet<string>
-): Promise<FileOutcome> {
-  if (!twin.folderId || scannedPaths.has(twin.originalPath) || (await exists(twin.originalPath))) return 'unchanged'
+async function adoptTwin(folderId: string, file: ScannedFile, twin: LibraryBook, context: SyncContext): Promise<boolean> {
+  if (!twin.folderId || (await twinStillThere(twin, context))) return false
   updateFolderBookLocation(twin.id, locationOf(folderId, file))
-  return 'updated'
+  return true
+}
+
+/**
+ * Whether the twin's own file still exists. A complete scan of its folder is
+ * the authority: it compares exact names, so a rename that only changes letter
+ * case (which `access` would still find on macOS and Windows) counts as a move.
+ */
+async function twinStillThere(twin: LibraryBook, context: SyncContext): Promise<boolean> {
+  if (context.scannedPaths.has(twin.originalPath)) return true
+  if (twin.folderId && context.completeFolders.has(twin.folderId)) return false
+  return exists(twin.originalPath)
 }
 
 async function exists(filePath: string): Promise<boolean> {

@@ -7,7 +7,7 @@ import { SUPPORTED_EXTENSIONS } from './kindle'
  * shows in place. Everything in it is the user's: this module only reads.
  */
 
-/** Deepest subfolder level a scan descends to; books below it are not part of the library. */
+/** Deepest subfolder level a scan descends to. A deeper folder makes the scan incomplete. */
 export const MAX_SCAN_DEPTH = 16
 /** Most books one folder may hold. Past it the scan stops and is marked incomplete. */
 export const MAX_SCAN_FILES = 20_000
@@ -113,7 +113,12 @@ export async function scanLibraryFolder(root: string, limits: ScanLimits = DEFAU
       const entryPath = path.join(dir, entry.name)
 
       if (entry.isDirectory()) {
-        if (depth < limits.maxDepth) pending.push({ dir: entryPath, depth: depth + 1 })
+        if (depth < limits.maxDepth) {
+          pending.push({ dir: entryPath, depth: depth + 1 })
+        } else {
+          // Books moved below the limit would look deleted.
+          complete = false
+        }
         continue
       }
       if (!isBookFile(entry)) continue
