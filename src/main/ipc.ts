@@ -179,9 +179,16 @@ export function registerIpcHandlers(): void {
       // (authoritative sync — H1 fix).
       const books = await readDocuments(mountpoint)
       const documentsBase = `${mountpoint}/documents/`
-      const knownRelpaths = books.map((book) => stripDocumentsBase(book.path, documentsBase))
-      const bookTagMap = getAllBookTags(knownRelpaths)
-      return writeCalibreMetadata(mountpoint, bookTagMap)
+      const deviceBooks = books.map((book) => ({
+        relpath: stripDocumentsBase(book.path, documentsBase),
+        title: book.title,
+        author: book.author,
+        size: book.size
+      }))
+      const bookTagMap = getAllBookTags(deviceBooks.map((book) => book.relpath))
+      // deviceBooks lets books calibre never registered (or a device with no
+      // metadata.calibre at all) join their collections.
+      return writeCalibreMetadata(mountpoint, bookTagMap, deviceBooks)
     })
   )
 

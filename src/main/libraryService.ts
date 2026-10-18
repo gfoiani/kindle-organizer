@@ -19,7 +19,7 @@ import { convert, type ConvertOptions } from './convert'
 import { uploadFile } from './deviceUpload'
 import { titleFromFilename } from './titleFromFilename'
 import { getCacheKey, getCachePath } from './coverPaths'
-import { upsertCalibreEntry } from './calibre'
+import { calibreMimeType, upsertCalibreEntry } from './calibre'
 import { writeKindleThumbnail } from './kindleThumbnails'
 import type { KindleFormat } from './settings'
 
@@ -154,16 +154,6 @@ export interface SendDeps {
   uploadFile?: UploadFn
 }
 
-/** MIME types calibre records for the formats this app can put on a device. */
-const MIME_BY_FORMAT: Record<string, string> = {
-  azw3: 'application/x-mobi8-ebook',
-  azw: 'application/vnd.amazon.ebook',
-  mobi: 'application/x-mobipocket-ebook',
-  pdf: 'application/pdf',
-  txt: 'text/plain',
-  epub: 'application/epub+zip'
-}
-
 /**
  * On-disk path of the cover the UI shows for this book, or undefined when there
  * is none yet.
@@ -216,13 +206,12 @@ async function applyCalibreSidecars(
   }
 
   try {
-    const format = path.extname(targetRelpath).slice(1).toLowerCase()
     upsertCalibreEntry(mountpoint, {
       relpath: targetRelpath,
       title: book.title,
       author: book.author,
       size: (await fs.stat(uploadSource)).size,
-      mime: MIME_BY_FORMAT[format],
+      mime: calibreMimeType(targetRelpath),
       uuid: book.id
     })
   } catch (err) {

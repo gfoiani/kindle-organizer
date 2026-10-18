@@ -1,5 +1,6 @@
 import * as fs from 'fs-extra'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import { stripDocumentsPrefix } from './paths'
 
 export interface CalibreBook {
@@ -57,6 +58,41 @@ function writeEntryArray(metadataPath: string, entries: unknown[]): boolean {
   }
 }
 
+/** What the app knows about a book that is already in the device's `documents/`. */
+export interface DeviceBookInfo {
+  /** Path under `documents/` — the same key `bookTagMap` uses. */
+  relpath: string
+  title: string
+  author?: string
+  size: number
+}
+
+/** MIME types calibre records for the formats a Kindle reads. */
+const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  azw3: 'application/x-mobi8-ebook',
+  azw: 'application/vnd.amazon.ebook',
+  mobi: 'application/x-mobipocket-ebook',
+  kfx: 'application/vnd.amazon.ebook',
+  pdf: 'application/pdf',
+  txt: 'text/plain',
+  epub: 'application/epub+zip'
+}
+
+export function calibreMimeType(relpath: string): string | undefined {
+  return MIME_BY_EXTENSION[path.extname(relpath).slice(1).toLowerCase()]
+}
+
+/** `lpath` is always posix-separated, whatever the host platform uses. */
+function toPosixRelpath(relpath: string): string {
+  return relpath.split(path.sep).join('/')
+}
+
+function entryRelpath(entry: unknown): string | undefined {
+  if (typeof entry !== 'object' || entry === null) return undefined
+  const lpath = (entry as Record<string, unknown>)['lpath']
+  return typeof lpath === 'string' ? stripDocumentsPrefix(lpath) : undefined
+}
+
 /**
  * Writes updated tags back to `metadata.calibre` on the Kindle.
  *
@@ -66,27 +102,41 @@ function writeEntryArray(metadataPath: string, entries: unknown[]): boolean {
  * so de-tagging actually clears the tag on the device. Books the app does NOT
  * know about (absent from the map) keep their existing tags untouched.
  *
- * Returns true if the file was successfully updated.
+ * Calibre is not required: a book in a collection that the file does not list
+ * (copied by hand, or on a Kindle calibre never touched — then there is no file
+ * at all) gets a calibre-shaped record built from `deviceBooks`. Nothing is
+ * created when no book is in any collection, and a file that exists but cannot
+ * be parsed is still left untouched.
+ *
+ * Returns true if the device now reflects the map.
  */
 export function writeCalibreMetadata(
   mountpoint: string,
-  bookTagMap: Map<string, string[]>
+  bookTagMap: Map<string, string[]>,
+  deviceBooks: readonly DeviceBookInfo[] = []
 ): boolean {
   const metadataPath = getMetadataPath(mountpoint)
-  const entries = readEntryArray(metadataPath)
+  const exists = fs.existsSync(metadataPath)
+  const entries = exists ? readEntryArray(metadataPath) : []
   if (!entries) return false
 
   const updated = entries.map((entry) => {
-    if (typeof entry !== 'object' || entry === null) return entry
-    const rec = entry as Record<string, unknown>
-    const lpath = rec['lpath']
-    if (typeof lpath !== 'string') return entry
-
-    const tags = bookTagMap.get(stripDocumentsPrefix(lpath))
-    return tags !== undefined ? { ...rec, tags } : entry
+    const relpath = entryRelpath(entry)
+    const tags = relpath === undefined ? undefined : bookTagMap.get(relpath)
+    return tags !== undefined ? { ...(entry as Record<string, unknown>), tags } : entry
   })
 
-  return writeEntryArray(metadataPath, updated)
+  const listed = new Set(entries.map(entryRelpath))
+  const added = deviceBooks.flatMap((book) => {
+    const relpath = toPosixRelpath(book.relpath)
+    const tags = bookTagMap.get(book.relpath)
+    if (!tags || tags.length === 0 || listed.has(relpath)) return []
+    const input = { ...book, relpath, mime: calibreMimeType(relpath), uuid: randomUUID() }
+    return [{ ...buildEntry(input, relpath, undefined), tags }]
+  })
+
+  if (!exists && added.length === 0) return true
+  return writeEntryArray(metadataPath, [...updated, ...added])
 }
 
 export function readCalibreMetadata(mountpoint: string): CalibreBook[] {
@@ -254,8 +304,7 @@ export function upsertCalibreEntry(mountpoint: string, input: CalibreEntryInput)
     return false
   }
 
-  // `lpath` is always posix-separated, whatever the host platform uses.
-  const relpath = input.relpath.split(path.sep).join('/')
+  const relpath = toPosixRelpath(input.relpath)
 
   const index = entries.findIndex((entry) => {
     if (typeof entry !== 'object' || entry === null) return false
