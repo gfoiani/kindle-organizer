@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Delete from Kindle** — one book from its detail panel, or a whole selection. The book's reading data (`.sdr`), home-screen thumbnail, `metadata.calibre` record and collection memberships go with it.
+- **Backups of `metadata.calibre`** — every change first copies the previous file to `.kindle-organizer/backups/` on the Kindle (the last 10). *Settings → Collections on the Kindle* restores the latest copy, and a restore can itself be undone.
+- **Sort the grid** by title, author or recently added.
+- **Logs** — errors and warnings are written to `main.log`; *Settings → Diagnostics* opens its folder.
+- **Update notice** — a link at the bottom of the sidebar when a newer release is out.
+
 ### Changed
 
 - **Calibre is no longer needed.** EPUBs are converted to AZW3 by a converter built into the app, so *Send to Kindle* works the same whether or not calibre is installed. The converted book carries the app's title, author and cover, internal links and the table of contents.

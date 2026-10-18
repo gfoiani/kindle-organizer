@@ -20,8 +20,12 @@ The Kindle's built-in library is awkward to organize: there's no fast visual ove
 - **Send to Kindle** — drop EPUBs (or Kindle formats, PDFs) into the app and send them to the device; EPUBs are converted to AZW3 by a built-in converter, with the app's title, author and cover stamped in and shown on the Kindle home screen. **No Calibre installation needed.**
 - **Collections on the device** — on connect, imports tag-based collections from the `metadata.calibre` file on the Kindle root (calibre's format; calibre itself is not required)
 - **Write to Kindle** — saves collection assignments back to `metadata.calibre` (via an atomic write), creating it when the Kindle has none, so calibre can read them on its next sync if you use it
+- **Backups of `metadata.calibre`** — before every change the previous file is copied to `.kindle-organizer/backups/` on the Kindle itself (last 10 copies); *Settings → Collections on the Kindle* puts the latest one back
+- **Delete from Kindle** — delete one book or a selection from the device, together with its reading data (`.sdr` folder), home-screen thumbnail and `metadata.calibre` record
+- **Sorting** — order the grid by title, author or recently added; the choice is remembered
 - **Hot-plug detection** — automatically refreshes the library when a Kindle is connected or disconnected while the app is running
-- **Settings** — clear the local cover cache when you want covers re-fetched from scratch
+- **Settings** — clear the local cover cache, restore the collections backup, open the logs folder (`main.log`, to attach to a bug report)
+- **Update notice** — once per launch the app asks GitHub for the latest release and shows a link when a newer version exists (nothing else is sent)
 - **System menu integration** — custom "About" menu item that opens the internal app section instead of a default dialog
 
 ## Supported formats
