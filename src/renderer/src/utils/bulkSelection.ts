@@ -27,9 +27,11 @@ export function sendableBooks(books: DisplayBook[]): DisplayBook[] {
 /**
  * Books with a library entry to delete. Unlike sending, this includes books
  * already on the device — removing the staged copy leaves the device file alone.
+ * A book read from a library folder is not one: its file belongs to the user,
+ * and it leaves the library when it leaves the folder.
  */
 export function removableBooks(books: DisplayBook[]): DisplayBook[] {
-  return books.filter((book) => book.libraryId !== undefined)
+  return books.filter((book) => book.libraryId !== undefined && book.libraryFolderId === undefined)
 }
 
 /**

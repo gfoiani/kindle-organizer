@@ -141,7 +141,22 @@
     "diagnostics": "Diagnostica",
     "diagnosticsDescription": "Errori e avvisi dell'app vengono salvati in un file di log (main.log). Allegalo quando segnali un problema.",
     "openLogs": "Apri cartella dei log",
-    "openLogsError": "Impossibile aprire la cartella dei log"
+    "openLogsError": "Impossibile aprire la cartella dei log",
+    "libraryFolders": "Cartelle della libreria",
+    "libraryFoldersDescription": "I libri di queste cartelle compaiono nella libreria senza essere copiati, e l'app segue le modifiche mentre è aperta. I file non vengono mai modificati né cancellati.",
+    "libraryFoldersEmpty": "Nessuna cartella collegata.",
+    "addLibraryFolder": "Aggiungi cartella",
+    "addingLibraryFolder": "Lettura della cartella…",
+    "syncLibraryFolders": "Aggiorna",
+    "syncingLibraryFolders": "Aggiornamento…",
+    "removeLibraryFolder": "Scollega",
+    "removeLibraryFolderConfirm": "Scollegare «{{path}}»? I suoi libri spariscono dalla libreria, ma i file restano nella cartella.",
+    "libraryFolderBooks_one": "{{count}} libro",
+    "libraryFolderBooks_other": "{{count}} libri",
+    "libraryFolderUnavailable": "Non raggiungibile",
+    "libraryFolderAdded_one": "Cartella aggiunta: {{count}} libro trovato",
+    "libraryFolderAdded_other": "Cartella aggiunta: {{count}} libri trovati",
+    "libraryFolderError": "Operazione sulla cartella non riuscita"
   },
   "books": {
     "addToCollection": "Aggiungi a collezione",
@@ -187,7 +202,10 @@
     "addError_other": "{{count}} non riusciti",
     "deleteFromKindle": "Elimina dal Kindle",
     "confirmDeleteFromKindle": "Eliminare «{{title}}» dal Kindle? Vengono cancellate anche la posizione di lettura e le evidenziazioni. L'operazione non si può annullare.",
-    "deleteError": "Eliminazione dal Kindle non riuscita"
+    "deleteError": "Eliminazione dal Kindle non riuscita",
+    "fromFolder": "Da una cartella della libreria",
+    "revealInFolder": "Mostra nella cartella",
+    "revealError": "Impossibile mostrare il file"
   },
   "collectionPicker": {
     "loading": "Caricamento...",
@@ -272,6 +290,11 @@
     "epubInvalid": "Il file EPUB è danneggiato o non è un EPUB valido.",
     "epubDrmProtected": "Questo EPUB è protetto da DRM e non può essere convertito.",
     "conversionFailed": "Impossibile convertire il libro per il Kindle.",
+    "libraryFolderInvalid": "La cartella scelta non esiste o non si può leggere.",
+    "libraryFolderOverlap": "Questa cartella è già nella libreria, oppure ne contiene una già aggiunta o è contenuta in una di esse.",
+    "libraryFileMissing": "Il file del libro non è più nella sua cartella. Controlla che la cartella sia raggiungibile.",
+    "libraryFolderBook": "Questo libro viene da una cartella della libreria: per toglierlo, rimuovilo dalla cartella.",
+    "libraryFolders": "Impossibile leggere le cartelle della libreria.",
     "createCollection": "Impossibile creare la collezione.",
     "renameCollection": "Impossibile rinominare la collezione.",
     "deleteCollection": "Impossibile eliminare la collezione.",

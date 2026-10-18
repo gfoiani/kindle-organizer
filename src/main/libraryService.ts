@@ -11,10 +11,13 @@ import {
   findByContentHash,
   deleteLibraryBook,
   getLibraryBook,
+  getLibraryFolder,
   upsertConversion,
   setUploaded,
   type LibraryBook
 } from './library'
+import { AppError } from './appErrors'
+import { isRegularFileInside } from './folderScan'
 import { convert, type ConvertOptions } from './convert'
 import { uploadFile } from './deviceUpload'
 import { titleFromFilename } from './titleFromFilename'
@@ -42,7 +45,7 @@ function itemDir(id: string): string {
 }
 
 /** Streams a sha256 of the file's bytes — the dedupe key. */
-function hashFile(filePath: string): Promise<string> {
+export function hashFile(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256')
     const stream = createReadStream(filePath)
@@ -77,15 +80,7 @@ async function addOneFile(filePath: string): Promise<AddResult> {
     const existing = findByContentHash(contentHash)
     if (existing) return { path: filePath, status: 'duplicate', book: existing }
 
-    let title = titleFromFilename(filePath)
-    let author: string | undefined
-    let coverImage: Buffer | undefined
-    if (ext === '.epub') {
-      const meta = await parseEpub(filePath)
-      title = meta.title
-      author = meta.author
-      coverImage = meta.coverImage
-    }
+    const metadata = await readBookMetadata(filePath)
 
     // Copy the original into the library store under a fresh id.
     const id = crypto.randomUUID()
@@ -94,22 +89,13 @@ async function addOneFile(filePath: string): Promise<AddResult> {
     const originalPath = path.join(dir, `original${ext}`)
     await fs.copy(filePath, originalPath)
 
-    // Seed the cover cache from the embedded image, if any (null → not a valid
-    // image → fall back to the normal online lookup at display time).
-    let coverKey: string | undefined
-    if (coverImage) {
-      coverKey = (await importLocalCover(title, author, coverImage)) ?? undefined
-    }
-
     const book = insertLibraryBook({
       id,
       contentHash,
       originalPath,
       filename: path.basename(filePath),
-      title,
-      author,
-      sourceFormat: ext.slice(1),
-      coverKey
+      ...metadata,
+      sourceFormat: ext.slice(1)
     })
     return { path: filePath, status: 'added', book }
   } catch (err) {
@@ -125,10 +111,60 @@ async function addOneFile(filePath: string): Promise<AddResult> {
   }
 }
 
-/** Removes a library book: DB row (cascades conversions) + its on-disk directory. */
-export async function removeLibraryBook(id: string): Promise<void> {
-  deleteLibraryBook(id)
+/** What the library shows for a book, read from the file itself. */
+export interface BookFileMetadata {
+  title: string
+  author?: string
+  coverKey?: string
+}
+
+/**
+ * EPUBs are parsed for real metadata and their embedded cover seeds the cover
+ * cache; already-Kindle formats and PDFs get a title from the file name.
+ */
+export async function readBookMetadata(filePath: string): Promise<BookFileMetadata> {
+  if (path.extname(filePath).toLowerCase() !== '.epub') return { title: titleFromFilename(filePath) }
+
+  const meta = await parseEpub(filePath)
+  // null → not a valid image → fall back to the normal online lookup at display time.
+  const coverKey = meta.coverImage ? await importLocalCover(meta.title, meta.author, meta.coverImage) : null
+  return {
+    title: meta.title,
+    ...(meta.author ? { author: meta.author } : {}),
+    ...(coverKey ? { coverKey } : {})
+  }
+}
+
+/** Deletes a book's directory in the app's store (its dropped copy and its conversions). */
+export async function removeLibraryItemCache(id: string): Promise<void> {
   await fs.remove(itemDir(id))
+}
+
+/**
+ * Removes a dropped book: DB row (cascades conversions) + its on-disk directory.
+ * A book read from a library folder is refused: its file belongs to the user,
+ * and it leaves the library when it leaves its folder.
+ */
+export async function removeLibraryBook(id: string): Promise<void> {
+  if (getLibraryBook(id)?.folderId) throw new AppError('LIBRARY_FOLDER_BOOK')
+  deleteLibraryBook(id)
+  await removeLibraryItemCache(id)
+}
+
+/**
+ * The file to read a book from. A dropped book's copy lives in the app's store.
+ * A folder book's file belongs to the user and may have changed since the last
+ * sync: it must still be a regular file inside its folder, or a symlink swapped
+ * in could make the app read and upload any file on the disk.
+ */
+async function readableSourcePath(book: LibraryBook): Promise<string> {
+  if (!book.folderId) return book.originalPath
+
+  const folder = getLibraryFolder(book.folderId)
+  if (!folder || !(await isRegularFileInside(folder.path, book.originalPath))) {
+    throw new AppError('LIBRARY_FILE_MISSING')
+  }
+  return book.originalPath
 }
 
 // ─── Send to Kindle (convert + upload) ────────────────────────────────────────
@@ -257,15 +293,18 @@ export async function sendToKindle(
   const book = getLibraryBook(id)
   if (!book) throw new Error(`Library book ${id} not found`)
 
+  const sourcePath = await readableSourcePath(book)
   const coverPath = await findCoverPath(book)
   let uploadSource: string
   let targetFilename: string
 
   if (book.sourceFormat === 'epub') {
+    // A folder book has no directory in the app's store until its first conversion.
+    await fs.ensureDir(itemDir(id))
     const outputPath = path.join(itemDir(id), `converted.${format}`)
     upsertConversion({ libraryId: id, format, status: 'converting' })
     try {
-      await convertFn(book.originalPath, {
+      await convertFn(sourcePath, {
         outputPath,
         // Stamp the app's own metadata into the book, like calibre does: the
         // device reads title/author/cover from the file itself.
@@ -286,7 +325,7 @@ export async function sendToKindle(
     targetFilename = `${sanitizeFilename(book.title)}.${format}`
   } else {
     // Already Kindle-compatible (or PDF): upload the original untouched.
-    uploadSource = book.originalPath
+    uploadSource = sourcePath
     targetFilename = book.filename
   }
 

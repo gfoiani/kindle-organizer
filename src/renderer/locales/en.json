@@ -66,7 +66,22 @@
     "diagnostics": "Diagnostics",
     "diagnosticsDescription": "The app's errors and warnings are saved to a log file (main.log). Attach it when you report a problem.",
     "openLogs": "Open logs folder",
-    "openLogsError": "Could not open the logs folder"
+    "openLogsError": "Could not open the logs folder",
+    "libraryFolders": "Library folders",
+    "libraryFoldersDescription": "Books in these folders appear in the library without being copied, and the app follows changes while it is open. The files are never changed or deleted.",
+    "libraryFoldersEmpty": "No folders linked.",
+    "addLibraryFolder": "Add folder",
+    "addingLibraryFolder": "Reading the folder…",
+    "syncLibraryFolders": "Refresh",
+    "syncingLibraryFolders": "Refreshing…",
+    "removeLibraryFolder": "Unlink",
+    "removeLibraryFolderConfirm": "Unlink “{{path}}”? Its books leave the library, but the files stay in the folder.",
+    "libraryFolderBooks_one": "{{count}} book",
+    "libraryFolderBooks_other": "{{count}} books",
+    "libraryFolderUnavailable": "Not reachable",
+    "libraryFolderAdded_one": "Folder added: {{count}} book found",
+    "libraryFolderAdded_other": "Folder added: {{count}} books found",
+    "libraryFolderError": "The folder operation failed"
   },
   "books": {
     "addToCollection": "Add to collection",
@@ -112,7 +127,10 @@
     "addError_other": "{{count}} failed",
     "deleteFromKindle": "Delete from Kindle",
     "confirmDeleteFromKindle": "Delete “{{title}}” from the Kindle? Its reading position and highlights are deleted too. This cannot be undone.",
-    "deleteError": "Could not delete the book from the Kindle"
+    "deleteError": "Could not delete the book from the Kindle",
+    "fromFolder": "From a library folder",
+    "revealInFolder": "Show in folder",
+    "revealError": "Could not show the file"
   },
   "collectionPicker": {
     "loading": "Loading...",
@@ -272,6 +290,11 @@
     "epubInvalid": "The EPUB file is damaged or not a valid EPUB.",
     "epubDrmProtected": "This EPUB is DRM-protected and cannot be converted.",
     "conversionFailed": "Could not convert the book for the Kindle.",
+    "libraryFolderInvalid": "The chosen folder does not exist or cannot be read.",
+    "libraryFolderOverlap": "This folder is already in the library, or it contains or sits inside a folder already added.",
+    "libraryFileMissing": "The book's file is no longer in its folder. Check that the folder can be reached.",
+    "libraryFolderBook": "This book comes from a library folder: to take it out, remove it from the folder.",
+    "libraryFolders": "Could not read the library folders.",
     "createCollection": "Could not create the collection.",
     "renameCollection": "Could not rename the collection.",
     "deleteCollection": "Could not delete the collection.",

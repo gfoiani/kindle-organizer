@@ -14,7 +14,14 @@ export type BookConversionState = 'converting' | 'uploading' | 'error'
 export interface DisplayBook extends KindleBook {
   onDevice: boolean
   libraryId?: string
+  /** Set when the library entry is read in place from a library folder: its file is the user's. */
+  libraryFolderId?: string
   conversionStatus?: BookConversionState
+}
+
+/** The fields a card takes from its library entry. */
+function libraryLink(lib: LibraryBook): Pick<DisplayBook, 'libraryId' | 'libraryFolderId'> {
+  return { libraryId: lib.id, ...(lib.folderId ? { libraryFolderId: lib.folderId } : {}) }
 }
 
 /**
@@ -44,7 +51,7 @@ function libraryToDisplay(lib: LibraryBook): DisplayBook {
     path: '',
     addedAt: lib.createdAt,
     onDevice: false,
-    libraryId: lib.id
+    ...libraryLink(lib)
   }
 }
 
@@ -83,7 +90,7 @@ export function mergeBooks(
     return {
       ...device,
       onDevice: true,
-      ...(match ? { libraryId: match.id } : {})
+      ...(match ? libraryLink(match) : {})
     }
   })
 

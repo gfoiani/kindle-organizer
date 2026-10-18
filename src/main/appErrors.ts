@@ -22,6 +22,10 @@ export type AppErrorCode =
   | 'EPUB_INVALID'
   | 'EPUB_DRM_PROTECTED'
   | 'CONVERSION_FAILED'
+  | 'LIBRARY_FOLDER_INVALID'
+  | 'LIBRARY_FOLDER_OVERLAP'
+  | 'LIBRARY_FILE_MISSING'
+  | 'LIBRARY_FOLDER_BOOK'
 
 /** An error whose message is a stable code the renderer can translate. */
 export class AppError extends Error {

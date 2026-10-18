@@ -5,7 +5,7 @@ import path from 'path'
 import { cleanupUserDataDirs, freshUserData } from './setup/electron-mock'
 import { createFolderWatchers, startLibraryFolderWatching, type WatchFn } from '../src/main/libraryWatcher'
 import { addLibraryFolder } from '../src/main/libraryFolders'
-import { listFolderBooks, type LibraryFolder } from '../src/main/library'
+import { listFolderBooks, listLibraryFolders, type LibraryFolder } from '../src/main/library'
 
 interface FakeWatcher {
   dir: string
@@ -217,6 +217,46 @@ describe('startLibraryFolderWatching', () => {
     expect(listFolderBooks(linked.id).map((b) => b.filename)).toEqual(['new.azw3'])
     watching.stop()
     expect(fake.watchers[0].closed).toBe(true)
+  })
+
+  test('link adds a folder, watches it, syncs it and announces the new books', async () => {
+    // Arrange
+    const root = path.join(scratch, 'Books')
+    mkdirSync(root)
+    writeFileSync(path.join(root, 'a.azw3'), 'bytes')
+    const fake = fakeWatch()
+    const notify = vi.fn()
+    const watching = startLibraryFolderWatching(notify, { watch: fake.watch, debounceMs: 5 })
+
+    // Act
+    const { folder: linked, result } = await watching.link(root)
+
+    // Assert
+    expect(result.added).toBe(1)
+    expect(listLibraryFolders().map((f) => f.id)).toEqual([linked.id])
+    expect(fake.watchers.map((w) => w.dir)).toEqual([root])
+    expect(notify).toHaveBeenCalledOnce()
+    watching.stop()
+  })
+
+  test('forget stops watching a folder, drops it and announces it', async () => {
+    // Arrange
+    const root = path.join(scratch, 'Books')
+    mkdirSync(root)
+    const fake = fakeWatch()
+    const notify = vi.fn()
+    const watching = startLibraryFolderWatching(notify, { watch: fake.watch, debounceMs: 5 })
+    const { folder: linked } = await watching.link(root)
+    notify.mockClear()
+
+    // Act
+    await watching.forget(linked.id)
+
+    // Assert
+    expect(listLibraryFolders()).toEqual([])
+    expect(fake.watchers[0].closed).toBe(true)
+    expect(notify).toHaveBeenCalledOnce()
+    watching.stop()
   })
 
   test('syncAll announces only when something changed, and re-arms the watchers', async () => {
