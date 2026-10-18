@@ -127,6 +127,19 @@ describe('CSS sanitizing stays linear on hostile input', () => {
     expect(performance.now() - start).toBeLessThan(500)
   })
 
+  test('a character whose lowercase form is longer does not shift the rewrite', () => {
+    // Arrange: 'İ' (U+0130) lowercases to two UTF-16 code units.
+    const resolve = (p: string): string | undefined => (p === 'img.png' ? 'kindle:embed:0001' : undefined)
+    const fonts = 'h1{content:"İİİİ"} @font-face{font-family:x;src:url(a.ttf)} p{color:red}'
+    const urls = 'h1{content:"İİ"} p{background:url(img.png)}'
+    const imports = 'h1{content:"İİ"} @import "x.css"; p{color:red}'
+
+    // Act + Assert
+    expect(sanitizeCss(fonts, 'a.css', noImages)).toBe('h1{content:"İİİİ"}  p{color:red}')
+    expect(sanitizeCss(urls, 'a.css', resolve)).toBe('h1{content:"İİ"} p{background:url(kindle:embed:0001)}')
+    expect(sanitizeCss(imports, 'a.css', noImages)).toBe('h1{content:"İİ"}  p{color:red}')
+  })
+
   test('still drops font faces and rewrites quoted and bare urls', () => {
     const css = sanitizeCss(
       `@font-face { src: url(f.ttf) } a { b: url( "img/x.png" ) } c { d: url('img/x.png') } e { f: url(img/x.png) } g { h: url(none.png) }`,

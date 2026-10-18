@@ -167,6 +167,20 @@ describe('writeCalibreMetadata — authoritative tag write (H1)', () => {
     ])
   })
 
+  test('never records a book whose relpath is not relative to documents/', () => {
+    // Arrange: what a Windows path that missed the documents/ prefix looks like.
+    const relpaths = ['E:\\documents\\A.azw3', 'E:/documents/B.azw3', '/Volumes/K/documents/C.azw3', '../D.azw3']
+    const map = new Map(relpaths.map((relpath) => [relpath, ['X']]))
+    const books = relpaths.map((relpath) => ({ relpath, title: relpath, size: 1 }))
+
+    // Act
+    const ok = writeCalibreMetadata(mountpoint, map, books)
+
+    // Assert
+    expect(ok).toBe(true)
+    expect(() => readFileSync(path.join(mountpoint, 'metadata.calibre'))).toThrow()
+  })
+
   test('does not create metadata.calibre when no book is in any collection', () => {
     const ok = writeCalibreMetadata(mountpoint, new Map([['A.azw3', []]]), [{ relpath: 'A.azw3', title: 'A', size: 1 }])
 

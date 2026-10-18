@@ -1,5 +1,6 @@
+import path from 'path'
 import { describe, expect, test } from 'vitest'
-import { stripDocumentsPrefix, stripDocumentsBase } from '../src/main/paths'
+import { stripDocumentsPrefix, stripDocumentsBase, toDeviceRelpath } from '../src/main/paths'
 
 describe('stripDocumentsPrefix', () => {
   test('strips a leading documents/ prefix from a Calibre lpath', () => {
@@ -57,5 +58,30 @@ describe('stripDocumentsBase', () => {
   test('is exact-prefix sensitive (a different mountpoint is untouched)', () => {
     const bookPath = '/Volumes/Other/documents/Book.azw3'
     expect(stripDocumentsBase(bookPath, base)).toBe(bookPath)
+  })
+})
+
+describe('toDeviceRelpath', () => {
+  test('gives the POSIX path under documents/ for a Windows book path', () => {
+    // Arrange: how readDocuments joins on Windows.
+    const bookPath = path.win32.join('E:\\', 'documents', 'Author', 'Book.azw3')
+
+    // Act + Assert
+    expect(toDeviceRelpath(bookPath, 'E:\\', path.win32)).toBe('Author/Book.azw3')
+  })
+
+  test('agrees with readDocuments for a bare drive-letter mountpoint', () => {
+    const bookPath = path.win32.join(path.win32.join('E:', 'documents'), 'Book.azw3')
+
+    expect(toDeviceRelpath(bookPath, 'E:', path.win32)).toBe('Book.azw3')
+  })
+
+  test('gives the path under documents/ on POSIX', () => {
+    expect(toDeviceRelpath('/Volumes/Kindle/documents/A/B.azw3', '/Volumes/Kindle', path.posix)).toBe('A/B.azw3')
+  })
+
+  test('is undefined for a book outside documents/', () => {
+    expect(toDeviceRelpath('/Volumes/Other/documents/B.azw3', '/Volumes/Kindle', path.posix)).toBeUndefined()
+    expect(toDeviceRelpath('/Volumes/Kindle/B.azw3', '/Volumes/Kindle', path.posix)).toBeUndefined()
   })
 })

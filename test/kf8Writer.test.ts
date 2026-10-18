@@ -6,6 +6,7 @@ import {
   type Kf8BookInput,
   type Kf8Part
 } from '../src/main/kf8'
+import { buildTextRecords } from '../src/main/kf8/text'
 import { parseMobiIdentifiers } from '../src/main/mobiHeader'
 import {
   exthInt,
@@ -176,6 +177,47 @@ describe('writeKf8 — text, skeletons and chunks', () => {
     const kf8 = readKf8(writeKf8(book()))
 
     expect([...trailingParts(kf8.pdb.records[1], 0b11).tbs]).toEqual([0x86, 0x88, 0x02])
+  })
+})
+
+describe('buildTextRecords — trailing byte sequences', () => {
+  test('keeps the TBS of every record across entries that touch, span and sit on boundaries', () => {
+    // Arrange: contiguous NCX ranges, as resolveToc builds them (one empty).
+    const text = Buffer.alloc(4096 * 4, 0x61)
+    const ranges = [
+      { start: 0, length: 100 },
+      { start: 100, length: 4900 },
+      { start: 5000, length: 0 },
+      { start: 5000, length: 3192 },
+      { start: 8192, length: 10 },
+      { start: 8202, length: 30 },
+      { start: 8232, length: 8152 }
+    ]
+
+    // Act
+    const tbs = buildTextRecords(text, ranges).map((r) => [...trailingParts(r, 0b11).tbs])
+
+    // Assert
+    expect(tbs).toEqual([
+      [0x86, 0x88, 0x02],
+      [0x8e, 0x88, 0x04],
+      [0x9e, 0x88, 0x04],
+      [0xb2, 0x88]
+    ])
+  })
+
+  test('stays linear in the number of navigation entries', () => {
+    // Arrange: 4 MB of text and an entry every 20 bytes (~200k entries).
+    const text = Buffer.alloc(4096 * 1000, 0x61)
+    const step = 20
+    const ranges = Array.from({ length: text.length / step }, (_, i) => ({ start: i * step, length: step }))
+
+    // Act
+    const started = performance.now()
+    buildTextRecords(text, ranges)
+
+    // Assert
+    expect(performance.now() - started).toBeLessThan(1000)
   })
 })
 
