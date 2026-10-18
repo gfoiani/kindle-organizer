@@ -57,3 +57,13 @@ describe('readDocuments', () => {
     expect(books[0].author).toBe(author.normalize('NFC'))
   })
 })
+
+describe('readDocuments — dates', () => {
+  test('records when each book was added to the device', async () => {
+    const root = await fakeDevice(['Book.azw3'])
+
+    const [book] = await readDocuments(root)
+
+    expect(book.addedAt).toBeGreaterThan(0)
+  })
+})

@@ -177,3 +177,11 @@ describe('mergeBooks', () => {
     expect(byTitle['Library Only'].libraryId).toBe('libonly')
   })
 })
+
+describe('mergeBooks — dates', () => {
+  test('a library-only card is dated by when it entered the library', () => {
+    const [card] = mergeBooks([], [libraryBook({ createdAt: 1234 })], BASE)
+
+    expect(card.addedAt).toBe(1234)
+  })
+})

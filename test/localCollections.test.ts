@@ -10,6 +10,7 @@ import {
   getAllBookTags,
   getCollectionBooks,
   getCollections,
+  forgetBooks,
   importFromCalibre,
   renameCollections
 } from '../src/main/localCollections'
@@ -427,5 +428,23 @@ describe('connection caching', () => {
     expect(getCollections()).toEqual([])
     createCollection('Thriller')
     expect(getCollections()).toHaveLength(1)
+  })
+})
+
+describe('forgetBooks', () => {
+  test('takes deleted books out of every collection and leaves the others', () => {
+    // Arrange
+    const sf = createCollection('SF')
+    const fav = createCollection('Preferiti')
+    addBookToCollection(sf.id, 'Gone.azw3')
+    addBookToCollection(fav.id, 'Gone.azw3')
+    addBookToCollection(sf.id, 'Kept.azw3')
+
+    // Act
+    forgetBooks(['Gone.azw3'])
+
+    // Assert
+    expect(getCollectionBooks(sf.id)).toEqual(['Kept.azw3'])
+    expect(getCollectionBooks(fav.id)).toEqual([])
   })
 })
