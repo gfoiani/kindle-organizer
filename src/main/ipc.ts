@@ -7,7 +7,7 @@ import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLoc
 import { applyOverrides, setOverride } from './bookOverrides'
 import { setMenuLabels, popupAppMenu } from './menu'
 import { stripDocumentsBase } from './paths'
-import { getSettings, setKindleFormat, isKindleFormat, type KindleFormat } from './settings'
+import { KINDLE_FORMAT } from './settings'
 import { addDroppedFiles, removeLibraryBook, sendToKindle, type SendProgress } from './libraryService'
 import { listLibraryBooks } from './library'
 import {
@@ -83,12 +83,6 @@ function assertRenameTargets(value: unknown, name: string): asserts value is Ren
     const rec = entry as Record<string, unknown>
     assertString(rec.id, `${name}[].id`)
     assertString(rec.newName, `${name}[].newName`)
-  }
-}
-
-function assertKindleFormat(value: unknown, name: string): asserts value is KindleFormat {
-  if (!isKindleFormat(value)) {
-    throw new TypeError(`Expected "${name}" to be one of azw3, mobi, got ${String(value)}`)
   }
 }
 
@@ -339,15 +333,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'kindle:get-format',
-    withErrorLogging('kindle:get-format', async () => getSettings().kindleFormat)
-  )
-
-  ipcMain.handle(
-    'kindle:set-format',
-    withErrorLogging('kindle:set-format', async (_, format: unknown) => {
-      assertKindleFormat(format, 'format')
-      setKindleFormat(format)
-    })
+    withErrorLogging('kindle:get-format', async () => KINDLE_FORMAT)
   )
 
   ipcMain.handle(
@@ -375,18 +361,15 @@ export function registerIpcHandlers(): void {
     'kindle:upload-book',
     withErrorLogging(
       'kindle:upload-book',
-      async (event, id: unknown, mountpoint: unknown, format: unknown) => {
+      async (event, id: unknown, mountpoint: unknown) => {
         assertString(id, 'id')
         assertString(mountpoint, 'mountpoint')
-        assertOptionalString(format, 'format')
-        // Omitted/invalid format falls back to the persisted default.
-        const fmt = isKindleFormat(format) ? format : getSettings().kindleFormat
         // This push is request-scoped (tied to this invoke), so event.sender is
         // the right target — guarded against a renderer that navigated away.
         const emit = (channel: string, payload: SendProgress): void => {
           if (!event.sender.isDestroyed()) event.sender.send(channel, payload)
         }
-        return sendToKindle(id, mountpoint, fmt, emit)
+        return sendToKindle(id, mountpoint, KINDLE_FORMAT, emit)
       }
     )
   )

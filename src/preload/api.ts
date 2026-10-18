@@ -67,10 +67,8 @@ export interface KindleAPI {
   setLocale: (lang: string) => Promise<void>
   /** Returns the running app version (from package.json via app.getVersion()). */
   getAppVersion: () => Promise<string>
-  /** Reads the configured Kindle conversion format (default 'azw3'). */
+  /** The format EPUBs are converted to before upload (always AZW3). */
   getFormat: () => Promise<KindleFormat>
-  /** Persists the Kindle conversion format. Rejects on an invalid value. */
-  setFormat: (format: KindleFormat) => Promise<void>
   /**
    * Resolves the absolute filesystem path of a dropped/selected File. Electron
    * removed `File.path`; `webUtils.getPathForFile` is the sandbox-safe
@@ -84,11 +82,11 @@ export interface KindleAPI {
   /** Removes a library book: its DB row, conversions, and on-disk files. */
   removeLibraryBook: (id: string) => Promise<void>
   /**
-   * Converts (EPUB → format) and uploads a library book to the connected device.
-   * Format omitted → the persisted default. Progress arrives via
-   * onConvertProgress / onUploadProgress (keyed by libraryId).
+   * Converts (EPUB → AZW3, in-process) and uploads a library book to the
+   * connected device. Progress arrives via onConvertProgress / onUploadProgress
+   * (keyed by libraryId).
    */
-  uploadBook: (id: string, mountpoint: string, format?: KindleFormat) => Promise<{ targetRelpath: string }>
+  uploadBook: (id: string, mountpoint: string) => Promise<{ targetRelpath: string }>
   /** Subscribe to conversion progress (libraryId + percent). Returns unsubscribe. */
   onConvertProgress: (callback: (progress: SendProgress) => void) => () => void
   /** Subscribe to upload progress (libraryId + percent). Returns unsubscribe. */
@@ -184,8 +182,6 @@ export const kindleAPI: KindleAPI = {
 
   getFormat: () => ipcRenderer.invoke('kindle:get-format'),
 
-  setFormat: (format: KindleFormat) => ipcRenderer.invoke('kindle:set-format', format),
-
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   addBooks: (filePaths: string[]) => ipcRenderer.invoke('kindle:add-books', filePaths),
@@ -194,8 +190,7 @@ export const kindleAPI: KindleAPI = {
 
   removeLibraryBook: (id: string) => ipcRenderer.invoke('kindle:remove-library-book', id),
 
-  uploadBook: (id: string, mountpoint: string, format?: KindleFormat) =>
-    ipcRenderer.invoke('kindle:upload-book', id, mountpoint, format),
+  uploadBook: (id: string, mountpoint: string) => ipcRenderer.invoke('kindle:upload-book', id, mountpoint),
 
   onConvertProgress: (callback) => {
     const handler = (_: Electron.IpcRendererEvent, progress: SendProgress) => callback(progress)
