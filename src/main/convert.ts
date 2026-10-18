@@ -95,10 +95,12 @@ export async function convert(inputPath: string, _format: KindleFormat, options:
       cover: await readCover(metadata.coverPath),
       thumbnail: toKindleJpeg,
       signal: options.signal,
-      onProgress: options.onProgress
+      // 100% is reported once the file is actually on disk, not when parsing ends.
+      onProgress: (percent) => options.onProgress?.(Math.min(percent, 99))
     })
     throwIfAborted(options.signal)
     await writeAtomically(options.outputPath, writeKf8(book))
+    options.onProgress?.(100)
     return options.outputPath
   } catch (err) {
     throw toReportableError(err, inputPath)

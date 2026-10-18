@@ -63,6 +63,14 @@ export function BookDetailSidebar({
       .catch((err) => console.error('Failed to load conversion format:', err))
   }, [willConvert])
 
+  // The panel is reused across books: another book must not inherit the last
+  // send's outcome (e.g. a "DRM-protected" alert that belonged to the previous one).
+  useEffect(() => {
+    setSendPhase('idle')
+    setSendPercent(0)
+    setSendFailureKey(null)
+  }, [book.libraryId])
+
   // Follow convert/upload progress pushes for THIS book only.
   useEffect(() => {
     const libraryId = book.libraryId

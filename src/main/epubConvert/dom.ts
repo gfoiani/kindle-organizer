@@ -40,8 +40,10 @@ export function normalizedText(el: Element): string {
   return DomUtils.textContent(el).replace(/\s+/g, ' ').trim()
 }
 
-/** Decodes a content document honouring the XML declaration's encoding (UTF-8 otherwise). */
+/** Decodes a content document honouring a UTF-16 BOM or the XML declaration's encoding (UTF-8 otherwise). */
 export function decodeDocument(data: Buffer): string {
+  if (data[0] === 0xff && data[1] === 0xfe) return new TextDecoder('utf-16le').decode(data)
+  if (data[0] === 0xfe && data[1] === 0xff) return new TextDecoder('utf-16be').decode(data)
   const head = data.subarray(0, 200).toString('latin1')
   const declared = head.match(/^(?:\xEF\xBB\xBF)?<\?xml[^>]*encoding=["']([A-Za-z0-9._-]+)["']/)?.[1]
   try {

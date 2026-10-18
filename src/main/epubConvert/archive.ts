@@ -8,27 +8,38 @@ const debug = (...args: unknown[]): void => {
 }
 
 /**
- * Guards against hostile archives (zip bombs): sizes come from the central
- * directory and are re-checked on the inflated data.
+ * Guards against hostile archives (zip bombs). The central directory's sizes
+ * are attacker-controlled — and node-stream-zip skips its own size check for
+ * entries flagged with a data descriptor — so the limits are enforced on the
+ * bytes actually inflated, while they stream in.
  */
 export interface ArchiveLimits {
   maxEntryBytes: number
+  /** Tighter cap for content documents, which are parsed into a DOM (~50-100× their size). */
+  maxDocumentBytes: number
   maxTotalBytes: number
 }
 
 export const DEFAULT_ARCHIVE_LIMITS: ArchiveLimits = {
   maxEntryBytes: 64 * 1024 * 1024,
-  maxTotalBytes: 768 * 1024 * 1024
+  maxDocumentBytes: 16 * 1024 * 1024,
+  maxTotalBytes: 512 * 1024 * 1024
 }
 
 export interface EpubArchive {
   has(entryPath: string): boolean
-  read(entryPath: string): Promise<Buffer>
+  /** Reads an entry, rejecting with EpubInvalidError past `maxBytes` (default: maxEntryBytes). */
+  read(entryPath: string, maxBytes?: number): Promise<Buffer>
   close(): Promise<void>
 }
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** Entry names are attacker-controlled: keep control characters out of the logs. */
+function printable(name: string): string {
+  return name.replace(/[\u0000-\u001f\u007f]/g, '?')
 }
 
 /**
@@ -46,22 +57,38 @@ export async function openArchive(filePath: string, limits: ArchiveLimits): Prom
     throw new EpubInvalidError(`Not a readable EPUB archive: ${errorText(err)}`)
   }
 
-  const names = Object.keys(entries)
-  const byLowerCase = new Map(names.map((n) => [n.toLowerCase(), n]))
+  const byLowerCase = new Map(Object.keys(entries).map((n) => [n.toLowerCase(), n]))
   const resolve = (entryPath: string): string | undefined =>
     entries[entryPath] ? entryPath : byLowerCase.get(entryPath.toLowerCase())
   let totalRead = 0
 
-  const read = async (entryPath: string): Promise<Buffer> => {
+  const readCapped = async (name: string, maxBytes: number): Promise<Buffer> => {
+    const chunks: Buffer[] = []
+    let length = 0
+    let stream: NodeJS.ReadableStream | undefined
+    try {
+      stream = await zip.stream(name)
+      for await (const chunk of stream as AsyncIterable<Buffer>) {
+        length += chunk.length
+        totalRead += chunk.length
+        if (length > maxBytes) throw new EpubInvalidError(`Archive entry "${printable(name)}" is too large`)
+        if (totalRead > limits.maxTotalBytes) throw new EpubInvalidError('The EPUB expands to too much data')
+        chunks.push(chunk)
+      }
+    } catch (err) {
+      ;(stream as { destroy?: () => void } | undefined)?.destroy?.()
+      if (err instanceof EpubInvalidError) throw err
+      throw new EpubInvalidError(`Archive entry "${printable(name)}" is not readable: ${errorText(err)}`)
+    }
+    return Buffer.concat(chunks, length)
+  }
+
+  const read = async (entryPath: string, maxBytes = limits.maxEntryBytes): Promise<Buffer> => {
     const name = resolve(entryPath)
-    if (!name) throw new EpubInvalidError(`Missing archive entry "${entryPath}"`)
-    const declared = entries[name].size
-    if (declared > limits.maxEntryBytes) throw new EpubInvalidError(`Archive entry "${name}" is too large`)
-    totalRead += declared
-    if (totalRead > limits.maxTotalBytes) throw new EpubInvalidError('The EPUB expands to too much data')
-    const data = await zip.entryData(name)
-    if (data.length > limits.maxEntryBytes) throw new EpubInvalidError(`Archive entry "${name}" is too large`)
-    return data
+    if (!name) throw new EpubInvalidError(`Missing archive entry "${printable(entryPath)}"`)
+    const cap = Math.min(maxBytes, limits.maxEntryBytes)
+    if (entries[name].size > cap) throw new EpubInvalidError(`Archive entry "${printable(name)}" is too large`)
+    return readCapped(name, cap)
   }
 
   const close = async (): Promise<void> => {

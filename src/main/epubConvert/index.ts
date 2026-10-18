@@ -59,16 +59,23 @@ async function loadStylesheets(archive: EpubArchive, manifest: ManifestItem[]): 
   return sheets
 }
 
+/** Lets IPC and window events through between documents: the transform itself is synchronous. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
 async function transformSpine(
   archive: EpubArchive,
   spine: ManifestItem[],
   registry: BookRegistry,
-  options: EpubToKf8Options
+  options: EpubToKf8Options,
+  maxDocumentBytes: number
 ): Promise<TransformedDocument[]> {
   const docs: TransformedDocument[] = []
   for (const [i, item] of spine.entries()) {
     throwIfAborted(options.signal)
-    const source = decodeDocument(await archive.read(item.path))
+    await yieldToEventLoop()
+    const source = decodeDocument(await archive.read(item.path, maxDocumentBytes))
     docs.push(
       transformDocument(source, {
         path: item.path,
@@ -105,7 +112,12 @@ function chooseCover(registry: BookRegistry, pkg: EpubPackage, options: EpubToKf
   return thumbnail && thumbnail.length > 0 ? { image, thumbnail } : { image }
 }
 
-async function buildBook(archive: EpubArchive, filePath: string, options: EpubToKf8Options): Promise<Kf8BookInput> {
+async function buildBook(
+  archive: EpubArchive,
+  filePath: string,
+  options: EpubToKf8Options,
+  limits: ArchiveLimits
+): Promise<Kf8BookInput> {
   await assertNotDrmProtected(archive)
   const pkg = await readPackage(archive)
   const spine = pkg.spine.filter((item) => archive.has(item.path))
@@ -117,7 +129,7 @@ async function buildBook(archive: EpubArchive, filePath: string, options: EpubTo
     await loadStylesheets(archive, pkg.manifest),
     partIndexByPath
   )
-  const docs = await transformSpine(archive, spine, registry, options)
+  const docs = await transformSpine(archive, spine, registry, options, limits.maxDocumentBytes)
   const anchors = docs.map((d) => d.anchors)
   const toc = locateToc(await readToc(archive, pkg), partIndexByPath, docs)
   const cover = chooseCover(registry, pkg, options)
@@ -148,9 +160,10 @@ async function buildBook(archive: EpubArchive, filePath: string, options: EpubTo
 /** Reads the EPUB at `filePath` into the KF8 writer's book model. */
 export async function epubToKf8(filePath: string, options: EpubToKf8Options): Promise<Kf8BookInput> {
   throwIfAborted(options.signal)
-  const archive = await openArchive(filePath, { ...DEFAULT_ARCHIVE_LIMITS, ...options.limits })
+  const limits = { ...DEFAULT_ARCHIVE_LIMITS, ...options.limits }
+  const archive = await openArchive(filePath, limits)
   try {
-    const book = await buildBook(archive, filePath, options)
+    const book = await buildBook(archive, filePath, options, limits)
     options.onProgress?.(100)
     return book
   } finally {

@@ -35,8 +35,15 @@ const VOID_ELEMENTS = new Set([
 const FOREIGN_ROOTS = new Set(['svg', 'math'])
 const ANCHOR_ATTRIBUTES = new Set(['id', 'name'])
 
+/** C0 controls other than tab/LF/CR are not allowed anywhere in an XML document. */
+const XML_FORBIDDEN_CONTROLS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g
+
 export function escapeText(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return text
+    .replace(XML_FORBIDDEN_CONTROLS, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 }
 
 export function escapeAttribute(value: string): string {

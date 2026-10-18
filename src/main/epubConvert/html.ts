@@ -1,6 +1,7 @@
 import { DomUtils } from 'htmlparser2'
-import { isCDATA, isTag, isText, type ChildNode, type Element } from 'domhandler'
+import { hasChildren, isCDATA, isTag, isText, type ChildNode, type Document, type Element } from 'domhandler'
 import { findAllByName, findFirstByName, localName, normalizedText, parseHtml } from './dom'
+import { EpubInvalidError } from './errors'
 import { isExternalHref, resolveHref, type ResolvedHref } from './paths'
 import { serialize, type XElement, type XNode } from './serialize'
 
@@ -36,6 +37,25 @@ const HTML_ATTRIBUTES = new Set(['lang', 'xml:lang', 'dir'])
 const PLAIN_ATTRIBUTE = /^[A-Za-z_][-A-Za-z0-9_.]*$/
 const ALLOWED_PREFIX = /^(xml|xmlns|xlink):[A-Za-z_][-A-Za-z0-9_.]*$/
 const IMG_SOURCE_ATTRIBUTES: ReadonlySet<string> = new Set(['src', 'srcset', 'sizes'])
+/** htmlparser2 accepts `"`, `<`, `=` in tag names; writing them out would corrupt the XHTML. */
+const VALID_ELEMENT_NAME = /^[A-Za-z_][-A-Za-z0-9_.:]*$/
+/**
+ * Real books nest a few dozen levels at most. The cap keeps the recursive
+ * transform/serialize (and DomUtils helpers) far from the stack limit.
+ */
+const MAX_NESTING_DEPTH = 256
+
+/** Checked iteratively, before anything recursive walks the tree. */
+function assertReasonableDepth(doc: Document): void {
+  const stack: Array<[ChildNode[], number]> = [[doc.children, 1]]
+  for (let next = stack.pop(); next; next = stack.pop()) {
+    const [nodes, depth] = next
+    if (depth > MAX_NESTING_DEPTH) throw new EpubInvalidError('A content document is nested too deeply')
+    for (const node of nodes) {
+      if (hasChildren(node)) stack.push([node.children, depth + 1])
+    }
+  }
+}
 
 function isAllowedAttribute(name: string): boolean {
   const lower = name.toLowerCase()
@@ -102,14 +122,22 @@ function foreignImageAttributes(el: Element, attrs: Attribute[], ctx: DocumentCo
 function convertElement(el: Element, ctx: DocumentContext, foreign: boolean): XNode[] {
   const lower = el.name.toLowerCase()
   if (DROPPED.has(lower)) return []
+  if (!VALID_ELEMENT_NAME.test(el.name)) return el.children.flatMap((c) => convertNode(c, ctx, foreign))
   if (lower === 'img') return convertImg(el, ctx)
   const cover = lower === 'svg' && !foreign ? svgCover(el, ctx) : undefined
   if (cover) return cover
 
   const inForeign = foreign || lower === 'svg' || lower === 'math'
+  const isForeignImage = inForeign && localName(lower) === 'image'
   const cleaned = cleanAttributes(el.attribs, ctx)
-  const linked = lower === 'a' || lower === 'area' ? rewriteHref(cleaned, ctx) : cleaned
-  const attrs = inForeign && localName(lower) === 'image' ? foreignImageAttributes(el, linked, ctx) : linked
+  // Inside SVG only <image> keeps a reference (rewritten below); SVG links have
+  // no Kindle target and would otherwise pass arbitrary URLs through.
+  const linked = inForeign
+    ? cleaned.filter(([n]) => isForeignImage || (n !== 'href' && n !== 'xlink:href'))
+    : lower === 'a' || lower === 'area'
+      ? rewriteHref(cleaned, ctx)
+      : cleaned
+  const attrs = isForeignImage ? foreignImageAttributes(el, linked, ctx) : linked
   if (!attrs) return []
   return [element(el.name, attrs, el.children.flatMap((c) => convertNode(c, ctx, inForeign)))]
 }
@@ -148,6 +176,7 @@ function documentTitle(head: Element | undefined, body: Element | undefined): st
 /** Turns one content document into a KF8 part body plus what the book needs to know about it. */
 export function transformDocument(source: string, ctx: DocumentContext): TransformedDocument {
   const doc = parseHtml(source)
+  assertReasonableDepth(doc)
   const html = findFirstByName(doc, 'html')
   const head = html ? findFirstByName(html, 'head') : undefined
   const body = findFirstByName(doc, 'body')

@@ -1,3 +1,4 @@
+import { randomInt } from 'crypto'
 import { kindleEmbedUri, kindlePosUri } from '../kf8'
 import { sanitizeCss } from './css'
 import { sniffImageMime, type KindleImageMime } from './images'
@@ -31,18 +32,31 @@ export interface BookRegistry {
   resolveLinks(body: string, anchorsByPart: ReadonlyArray<ReadonlyMap<string, number>>): string
 }
 
-const PLACEHOLDER_PREFIX = 'kindle:pos:fid:zzzz:off:'
-const PLACEHOLDER = /kindle:pos:fid:zzzz:off:([a-z]{10})/g
 const PLACEHOLDER_DIGITS = 10
+const NONCE_LENGTH = 4
 
-function encodePlaceholder(n: number): string {
+function base26(n: number, width: number): string {
   let code = ''
   let rest = n
   do {
     code = String.fromCharCode(97 + (rest % 26)) + code
     rest = Math.floor(rest / 26)
   } while (rest > 0)
-  return PLACEHOLDER_PREFIX + code.padStart(PLACEHOLDER_DIGITS, 'a')
+  return code.padStart(width, 'a')
+}
+
+/**
+ * Placeholders are `kindle:pos:fid:<nonce>:off:<10 letters>` — exactly as long
+ * as a real URI. The lowercase nonce (never valid base 32, and random per book)
+ * keeps text in the book that happens to look like a placeholder from being
+ * mistaken for one.
+ */
+function placeholderScheme(): { encode: (n: number) => string; pattern: RegExp } {
+  const nonce = base26(randomInt(26 ** NONCE_LENGTH), NONCE_LENGTH)
+  return {
+    encode: (n) => `kindle:pos:fid:${nonce}:off:${base26(n, PLACEHOLDER_DIGITS)}`,
+    pattern: new RegExp(`kindle:pos:fid:${nonce}:off:([a-z]{${PLACEHOLDER_DIGITS}})`, 'g')
+  }
 }
 
 function decodePlaceholder(code: string): number {
@@ -59,6 +73,7 @@ export function createRegistry(
   const flows: string[] = []
   const flowByKey = new Map<string, number>()
   const links: Array<{ part: number; fragment?: string }> = []
+  const placeholder = placeholderScheme()
 
   const imageIndex = (archivePath: string): number | undefined => {
     const known = imageIndexByPath.get(archivePath)
@@ -110,11 +125,12 @@ export function createRegistry(
       const part = partIndexByPath.get(target.path)
       if (part === undefined) return undefined
       links.push(target.fragment ? { part, fragment: target.fragment } : { part })
-      return encodePlaceholder(links.length - 1)
+      return placeholder.encode(links.length - 1)
     },
     resolveLinks(body, anchorsByPart) {
-      return body.replace(PLACEHOLDER, (_match, code: string) => {
+      return body.replace(placeholder.pattern, (match, code: string) => {
         const link = links[decodePlaceholder(code)]
+        if (!link) return match
         const offset = link.fragment ? (anchorsByPart[link.part]?.get(link.fragment) ?? 0) : 0
         return kindlePosUri(link.part, offset)
       })

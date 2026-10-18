@@ -408,8 +408,8 @@ export function BooksGrid({
     let sent = 0
     let failed = 0
     let stopped = false
-    // The first failure the main process could explain (DRM, damaged EPUB…).
-    let firstFailureKey = ''
+    // Why each failure happened, as far as the main process could say ('' = unknown).
+    const failureKeys = new Set<string>()
 
     for (const [index, book] of sendable.entries()) {
       if (stopRef.current) {
@@ -427,7 +427,7 @@ export function BooksGrid({
       } catch (err) {
         console.error(`[bulk-send] "${book.title}" failed:`, err)
         failed++
-        firstFailureKey ||= errorMessageKey(err, '')
+        failureKeys.add(errorMessageKey(err, ''))
       }
     }
 
@@ -435,10 +435,13 @@ export function BooksGrid({
     setProgress(null)
     setIsRunning(false)
 
+    // A reason is only shown when every failure shares it — one DRM book among
+    // three different failures must not make the whole batch read "DRM-protected".
+    const [sharedFailureKey] = failureKeys.size === 1 ? [...failureKeys] : ['']
     const summary = [
       sent > 0 ? t('selection.sentCount', { count: sent }) : null,
       failed > 0 ? t('selection.failedCount', { count: failed }) : null,
-      firstFailureKey ? t(firstFailureKey) : null,
+      sharedFailureKey ? t(sharedFailureKey) : null,
       stopped ? t('selection.stopped') : null
     ]
       .filter(Boolean)
