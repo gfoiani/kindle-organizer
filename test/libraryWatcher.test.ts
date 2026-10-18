@@ -259,6 +259,26 @@ describe('startLibraryFolderWatching', () => {
     watching.stop()
   })
 
+  test('a watcher that failed is re-armed by the sync its failure triggers', async () => {
+    // Arrange
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const root = path.join(scratch, 'Books')
+    mkdirSync(root)
+    await addLibraryFolder(root)
+    const fake = fakeWatch()
+    const watching = startLibraryFolderWatching(vi.fn(), { watch: fake.watch, debounceMs: 5 })
+    watching.refresh()
+
+    // Act
+    fake.watchers[0].fail(new Error('EMFILE'))
+
+    // Assert
+    await vi.waitFor(() => expect(fake.watchers).toHaveLength(2))
+    expect(fake.watchers[1].closed).toBe(false)
+    watching.stop()
+    errorSpy.mockRestore()
+  })
+
   test('syncAll announces only when something changed, and re-arms the watchers', async () => {
     // Arrange
     const root = path.join(scratch, 'Books')

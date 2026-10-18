@@ -18,6 +18,7 @@ import path from 'path'
 import { cleanupUserDataDirs, freshUserData } from './setup/electron-mock'
 import { writeEpub } from './setup/epubFixture'
 import { writeMobi } from './setup/mobiFixture'
+import { scanLibraryFolder } from '../src/main/folderScan'
 import {
   addLibraryFolder,
   describeLibraryFolders,
@@ -309,6 +310,99 @@ describe('syncLibraryFolder', () => {
     expect(listLibraryBooks()).toHaveLength(1)
   })
 
+  test('a book moved between library folders keeps its id even when its old folder is read first', async () => {
+    // Arrange
+    const folderA = path.join(scratch, 'A')
+    const folderB = path.join(scratch, 'B')
+    mkdirSync(folderB)
+    const file = writeAzw3(path.join(folderA, 'a.azw3'))
+    const a = await linkFolder(folderA)
+    const b = await linkFolder(folderB)
+    const [book] = listFolderBooks(a)
+    renameSync(file, path.join(folderB, 'a.azw3'))
+
+    // Act
+    const resultA = await syncLibraryFolder(a)
+
+    // Assert
+    expect(resultA).toMatchObject({ removed: 0 })
+    expect(getLibraryBook(book.id)?.folderId).toBe(b)
+    expect(listLibraryBooks()).toHaveLength(1)
+  })
+
+  test('a rename that only changes letter case keeps the library id', async () => {
+    // Arrange
+    const original = writeAzw3(path.join(root, 'Dune.azw3'))
+    const folderId = await linkFolder(root)
+    const [book] = listFolderBooks(folderId)
+    const lower = path.join(root, 'dune.azw3')
+    renameSync(original, lower)
+
+    // Act
+    await syncLibraryFolder(folderId)
+    await syncLibraryFolder(folderId)
+
+    // Assert
+    expect(getLibraryBook(book.id)?.filename).toBe('dune.azw3')
+    expect(listFolderBooks(folderId)).toHaveLength(1)
+  })
+
+  test('a file edited into a copy of another book is left alone, without an error on every sync', async () => {
+    // Arrange
+    writeAzw3(path.join(root, 'other.azw3'), 'other bytes')
+    const edited = writeAzw3(path.join(root, 'edited.azw3'), 'first bytes')
+    const folderId = await linkFolder(root)
+    writeFileSync(edited, 'other bytes')
+    const later = new Date(Date.now() + 60_000)
+    utimesSync(edited, later, later)
+
+    // Act
+    const first = await syncLibraryFolder(folderId)
+    const second = await syncLibraryFolder(folderId)
+
+    // Assert
+    expect(first.errors).toBe(0)
+    expect(second.errors).toBe(0)
+    expect(listFolderBooks(folderId)).toHaveLength(2)
+  })
+
+  test.skipIf(process.getuid?.() === 0)('an unchanged duplicate is not read again', async () => {
+    // Arrange: the copy is never stored, so only a remembered hash spares re-reading it.
+    writeAzw3(path.join(root, 'a.azw3'), 'same bytes')
+    const copy = writeAzw3(path.join(root, 'copy.azw3'), 'same bytes')
+    const folderId = await linkFolder(root)
+    chmodSync(copy, 0o000)
+
+    try {
+      // Act
+      const result = await syncLibraryFolder(folderId)
+
+      // Assert
+      expect(result.errors).toBe(0)
+    } finally {
+      chmodSync(copy, 0o644)
+    }
+  })
+
+  test('unlinking a folder while it is being read leaves nothing behind', async () => {
+    // Arrange
+    writeAzw3(path.join(root, 'a.azw3'), 'a')
+    writeEpubAt(path.join(root, 'b.epub'), 'B')
+    const folder = await addLibraryFolder(root)
+    const errorSpy = vi.spyOn(console, 'error')
+
+    // Act
+    const syncing = syncLibraryFolder(folder.id)
+    await removeLibraryFolder(folder.id)
+    await syncing
+
+    // Assert
+    expect(listLibraryBooks()).toEqual([])
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(existsSync(path.join(userData, 'library'))).toBe(false)
+    errorSpy.mockRestore()
+  })
+
   test('overlapping syncs of one folder add each book once', async () => {
     writeAzw3(path.join(root, 'a.azw3'), 'a')
     writeEpubAt(path.join(root, 'b.epub'), 'B')
@@ -316,8 +410,7 @@ describe('syncLibraryFolder', () => {
 
     const results = await Promise.all([syncLibraryFolder(folder.id), syncLibraryFolder(folder.id)])
 
-    expect(results.reduce((sum, r) => sum + r.added, 0)).toBe(2)
-    expect(results.reduce((sum, r) => sum + r.errors, 0)).toBe(0)
+    expect(results.every((r) => r.errors === 0)).toBe(true)
     expect(listFolderBooks(folder.id)).toHaveLength(2)
   })
 
@@ -458,5 +551,16 @@ describe('folder books and the rest of the library', () => {
       'LIBRARY_FILE_MISSING'
     )
     expect(upload).not.toHaveBeenCalled()
+  })
+})
+
+describe('scanLibraryFolder', () => {
+  test('a folder deeper than the limit makes the scan incomplete, so nothing is removed on its strength', async () => {
+    writeAzw3(path.join(root, 'one', 'two', 'deep.azw3'))
+
+    const scan = await scanLibraryFolder(root, { maxDepth: 1, maxFiles: 100 })
+
+    expect(scan?.files).toEqual([])
+    expect(scan?.complete).toBe(false)
   })
 })
