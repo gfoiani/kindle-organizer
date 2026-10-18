@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - **Delete from Kindle** — one book from its detail panel, or a whole selection. The book's reading data (`.sdr`), home-screen thumbnail, `metadata.calibre` record and collection memberships go with it.
-- **Backups of `metadata.calibre`** — every change first copies the previous file to `.kindle-organizer/backups/` on the Kindle (the last 10). *Settings → Collections on the Kindle* restores the latest copy, and a restore can itself be undone.
+- **Backups of `metadata.calibre`** — every change first copies the previous file to `.kindle-organizer/backups/` on the Kindle (the last 10). *Settings → Collections on the Kindle* restores the copy you pick, and a restore can itself be undone.
 - **Sort the grid** by title, author or recently added.
 - **Logs** — errors and warnings are written to `main.log`; *Settings → Diagnostics* opens its folder.
 - **Update notice** — a link at the bottom of the sidebar when a newer release is out.

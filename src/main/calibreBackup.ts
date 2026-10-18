@@ -66,6 +66,17 @@ export function listCalibreBackups(mountpoint: string): CalibreBackup[] {
     .sort((a, b) => b.takenAt.localeCompare(a.takenAt) || b.sequence - a.sequence)
 }
 
+/** What the renderer may see of a backup: its file name (the id a restore asks for) and when it was taken. */
+export interface CalibreBackupSummary {
+  id: string
+  takenAt: string
+}
+
+/** The device's backups, newest first, without their paths. */
+export function describeCalibreBackups(mountpoint: string): CalibreBackupSummary[] {
+  return listCalibreBackups(mountpoint).map((backup) => ({ id: path.basename(backup.file), takenAt: backup.takenAt }))
+}
+
 /** Whether the newest copy was taken within RECENT_BACKUP_MS. */
 export function hasRecentCalibreBackup(mountpoint: string, now = Date.now()): boolean {
   const [newest] = listCalibreBackups(mountpoint)
@@ -83,9 +94,21 @@ export function backupCalibreMetadata(mountpoint: string, metadataPath: string, 
   const existing = new Set(fs.readdirSync(dir))
   let sequence = 0
   while (existing.has(backupName(now, sequence))) sequence++
-  fs.copyFileSync(metadataPath, path.join(dir, backupName(now, sequence)))
+  const target = path.join(dir, backupName(now, sequence))
+  try {
+    fs.copyFileSync(metadataPath, target)
+  } catch (err) {
+    // A full device can leave a truncated copy behind: it must not pass for a backup.
+    fs.removeSync(target)
+    throw err
+  }
 
+  // The copy exists, so a failed prune only costs space: it must not block the write.
   for (const stale of listCalibreBackups(mountpoint).slice(CALIBRE_BACKUP_LIMIT)) {
-    fs.removeSync(stale.file)
+    try {
+      fs.removeSync(stale.file)
+    } catch (err) {
+      console.error(`[calibre] Could not prune the old backup ${stale.file}:`, err instanceof Error ? err.message : String(err))
+    }
   }
 }

@@ -17,29 +17,52 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+function isBookFile(name: string): boolean {
+  return SUPPORTED_EXTENSIONS.includes(path.extname(name).toLowerCase())
+}
+
+/** Whether `dir`, with every link resolved, is `documents/` or inside it. */
+async function resolvesInsideDocuments(mountpoint: string, dir: string): Promise<boolean> {
+  const documents = await fs.realpath(path.join(mountpoint, 'documents'))
+  const real = await fs.realpath(dir)
+  return real === documents || real.startsWith(documents + path.sep)
+}
+
 /**
  * The book's path under `documents/` when `bookPath` is a book file there,
  * else undefined. The path comes from the renderer, so it is never trusted:
- * anything outside `documents/`, any other file type and any symbolic link
- * (which could point off the device) is refused.
+ * anything outside `documents/`, any other file type, a symbolic link and a
+ * folder that links off the device are all refused.
  */
 async function deletableRelpath(mountpoint: string, bookPath: string): Promise<string | undefined> {
   const relpath = toDeviceRelpath(bookPath, mountpoint)
-  const extension = path.extname(bookPath).toLowerCase()
-  if (relpath === undefined || !SUPPORTED_EXTENSIONS.includes(extension)) return undefined
+  if (relpath === undefined || !isBookFile(bookPath)) return undefined
+  if (!(await resolvesInsideDocuments(mountpoint, path.dirname(bookPath)))) return undefined
   const stats = await fs.lstat(bookPath)
   return stats.isFile() ? relpath : undefined
 }
 
 /**
+ * The firmware names reading data by stem, so `Book.azw3` and `Book.pdf` in
+ * one folder share `Book.sdr` (compared ignoring case, as FAT does).
+ */
+async function stemStillInUse(bookPath: string): Promise<boolean> {
+  const stem = path.parse(bookPath).name.toLowerCase()
+  const siblings = await fs.readdir(path.dirname(bookPath))
+  return siblings.some((name) => isBookFile(name) && path.parse(name).name.toLowerCase() === stem)
+}
+
+/**
  * What the firmware keeps beside a book: the `<name>.sdr` folder (reading
- * position, highlights) and the home-screen thumbnail. Best-effort — the book
- * is already gone, so a leftover is logged rather than reported as a failure.
+ * position, highlights) unless another book still uses it, and the
+ * home-screen thumbnail. Best-effort — the book is already gone, so a leftover
+ * is logged rather than reported as a failure.
  */
 async function removeSidecars(mountpoint: string, bookPath: string, identifiers: MobiIdentifiers | null): Promise<void> {
   const sidecarDir = path.join(path.dirname(bookPath), `${path.parse(bookPath).name}.sdr`)
+  const sidecars = (await stemStillInUse(bookPath)) ? [] : [sidecarDir]
   const thumbnails = identifiers ? [path.join(getThumbnailDir(mountpoint), thumbnailFilename(identifiers))] : []
-  for (const leftover of [sidecarDir, ...thumbnails]) {
+  for (const leftover of [...sidecars, ...thumbnails]) {
     await fs.remove(leftover).catch((err: unknown) => {
       console.error(`[delete] Could not remove ${leftover}:`, errorText(err))
     })

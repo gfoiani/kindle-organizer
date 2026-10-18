@@ -7,6 +7,7 @@ import {
   writeCalibreMetadata,
   readCalibreIsbnMap,
   restoreCalibreBackup,
+  describeCalibreBackups,
   type DeviceBookInfo
 } from './calibre'
 import { deleteDeviceBooks } from './deviceDelete'
@@ -382,11 +383,21 @@ export function registerIpcHandlers(): void {
   )
 
   ipcMain.handle(
-    'kindle:restore-collections-backup',
-    withErrorLogging('kindle:restore-collections-backup', async (_, mountpoint: unknown) => {
+    'kindle:list-collections-backups',
+    withErrorLogging('kindle:list-collections-backups', async (_, mountpoint: unknown) => {
       assertString(mountpoint, 'mountpoint')
       await requireKindleDrive(mountpoint)
-      return restoreCalibreBackup(mountpoint)
+      return describeCalibreBackups(mountpoint)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle:restore-collections-backup',
+    withErrorLogging('kindle:restore-collections-backup', async (_, mountpoint: unknown, id: unknown) => {
+      assertString(mountpoint, 'mountpoint')
+      assertString(id, 'id')
+      await requireKindleDrive(mountpoint)
+      return restoreCalibreBackup(mountpoint, id)
     })
   )
 

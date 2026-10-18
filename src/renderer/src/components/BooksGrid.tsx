@@ -506,9 +506,10 @@ export function BooksGrid({
 
   const runBulkDeleteFromKindle = useCallback(async () => {
     setIsRunning(true)
-    await deleteBooks(deletable)
+    const attempted = await deleteBooks(deletable)
     setIsRunning(false)
-    exitSelection()
+    // Cancelling the confirmation keeps the selection the user built.
+    if (attempted) exitSelection()
   }, [deleteBooks, deletable, exitSelection])
 
   const runBulkAddToCollection = useCallback(

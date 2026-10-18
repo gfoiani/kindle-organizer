@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto'
 import { stripDocumentsPrefix } from './paths'
 import { backupCalibreMetadata, hasRecentCalibreBackup, listCalibreBackups } from './calibreBackup'
 
-export { CALIBRE_BACKUP_LIMIT } from './calibreBackup'
+export { CALIBRE_BACKUP_LIMIT, describeCalibreBackups, type CalibreBackupSummary } from './calibreBackup'
 
 export interface CalibreBook {
   lpath: string
@@ -175,21 +175,22 @@ export function writeCalibreMetadata(
 }
 
 /**
- * Puts back the most recent readable backup of `metadata.calibre` (a damaged
- * copy is skipped). The file it replaces is backed up in turn, so a restore
- * can itself be undone. Null when the device has no usable backup; throws
- * when the restored file cannot be written.
+ * Puts back the backup of `metadata.calibre` named `id` (one of
+ * `describeCalibreBackups`). The file it replaces is backed up in turn, so a
+ * restore can itself be undone by choosing that copy. `id` comes from the
+ * renderer, so it is only ever matched against the device's own backups —
+ * never used as a path. Null when it is not one of them; throws when the copy
+ * is damaged or the restored file cannot be written.
  */
-export function restoreCalibreBackup(mountpoint: string): { takenAt: string } | null {
-  for (const backup of listCalibreBackups(mountpoint)) {
-    const entries = readEntryArray(backup.file)
-    if (!entries) continue
-    if (!writeEntryArray(getMetadataPath(mountpoint), entries)) {
-      throw new Error(`Could not restore the ${backup.takenAt} backup of ${METADATA_FILENAME}`)
-    }
-    return { takenAt: backup.takenAt }
+export function restoreCalibreBackup(mountpoint: string, id: string): { takenAt: string } | null {
+  const backup = listCalibreBackups(mountpoint).find((candidate) => path.basename(candidate.file) === id)
+  if (!backup) return null
+  const entries = readEntryArray(backup.file)
+  if (!entries) throw new Error(`The ${backup.takenAt} backup of ${METADATA_FILENAME} is not readable`)
+  if (!writeEntryArray(getMetadataPath(mountpoint), entries)) {
+    throw new Error(`Could not restore the ${backup.takenAt} backup of ${METADATA_FILENAME}`)
   }
-  return null
+  return { takenAt: backup.takenAt }
 }
 
 /**

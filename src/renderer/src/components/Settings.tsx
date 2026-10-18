@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18next from '../i18n'
 import { STATUS_RESET_MS } from '../utils/constants'
 import { errorMessageKey } from '../utils/appError'
+import type { CalibreBackupSummary } from '../../../preload/api'
 
 interface SettingsProps {
   /** Connected device mountpoint, or null when no Kindle is attached. */
@@ -25,30 +26,69 @@ const STATUS_COLORS: Record<StatusLine['kind'], string> = {
 const SECONDARY_BUTTON =
   'px-4 py-2 rounded-md text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-600 transition-colors disabled:opacity-50'
 
-/** Restores the latest metadata.calibre backup kept on the connected Kindle. */
+const formatTakenAt = (takenAt: string): string => new Date(takenAt).toLocaleString(i18next.language)
+
+/** The metadata.calibre backups kept on the Kindle, reloaded whenever the device changes. */
+function useDeviceBackups(mountpoint: string | null): {
+  backups: CalibreBackupSummary[]
+  reload: () => Promise<void>
+  loadFailed: boolean
+} {
+  const [backups, setBackups] = useState<CalibreBackupSummary[]>([])
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  const reload = useCallback(async () => {
+    setLoadFailed(false)
+    if (!mountpoint) {
+      setBackups([])
+      return
+    }
+    try {
+      setBackups(await window.kindleAPI.listCollectionsBackups(mountpoint))
+    } catch (err) {
+      console.error('Failed to list the collections backups:', err)
+      setBackups([])
+      setLoadFailed(true)
+    }
+  }, [mountpoint])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
+
+  return { backups, reload, loadFailed }
+}
+
+/** Restores one of the metadata.calibre backups kept on the connected Kindle. */
 function DeviceCollectionsSection({ mountpoint, onCollectionsRestored }: SettingsProps) {
   const { t } = useTranslation()
+  const { backups, reload, loadFailed } = useDeviceBackups(mountpoint)
+  const [chosenId, setChosenId] = useState<string | null>(null)
   const [isRestoring, setIsRestoring] = useState(false)
   const [status, setStatus] = useState<StatusLine | null>(null)
+  // The newest copy unless the user picked another that still exists.
+  const chosen = backups.find((backup) => backup.id === chosenId) ?? backups[0]
 
   async function handleRestore() {
-    if (!mountpoint || !window.confirm(t('settings.restoreConfirm'))) return
+    if (!mountpoint || !chosen) return
+    if (!window.confirm(t('settings.restoreConfirm', { date: formatTakenAt(chosen.takenAt) }))) return
     setIsRestoring(true)
     setStatus(null)
     try {
-      const restored = await window.kindleAPI.restoreCollectionsBackup(mountpoint)
-      if (restored) {
-        const date = new Date(restored.takenAt).toLocaleString(i18next.language)
-        setStatus({ kind: 'success', text: t('settings.restoreDone', { date }) })
-        onCollectionsRestored()
-      } else {
-        setStatus({ kind: 'info', text: t('settings.restoreNone') })
-      }
+      const restored = await window.kindleAPI.restoreCollectionsBackup(mountpoint, chosen.id)
+      setStatus(
+        restored
+          ? { kind: 'success', text: t('settings.restoreDone', { date: formatTakenAt(restored.takenAt) }) }
+          : { kind: 'info', text: t('settings.restoreNone') }
+      )
+      if (restored) onCollectionsRestored()
     } catch (err) {
       console.error('Failed to restore the collections backup:', err)
       setStatus({ kind: 'error', text: t(errorMessageKey(err, 'settings.restoreError')) })
     } finally {
       setIsRestoring(false)
+      setChosenId(null)
+      await reload()
     }
   }
 
@@ -56,10 +96,32 @@ function DeviceCollectionsSection({ mountpoint, onCollectionsRestored }: Setting
     <div>
       <h3 className="text-white font-semibold mb-4">{t('settings.deviceCollections')}</h3>
       <p className="text-gray-400 text-sm mb-4">{t('settings.deviceCollectionsDescription')}</p>
-      <button onClick={handleRestore} disabled={!mountpoint || isRestoring} className={SECONDARY_BUTTON}>
-        {isRestoring ? t('settings.restoring') : t('settings.restoreBackup')}
-      </button>
-      {!mountpoint && <p className="text-gray-500 text-xs mt-3">{t('settings.restoreNeedsKindle')}</p>}
+      {mountpoint && backups.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-sm text-gray-300">
+            {t('settings.backupLabel')}
+            <select
+              value={chosen?.id ?? ''}
+              onChange={(e) => setChosenId(e.target.value)}
+              disabled={isRestoring}
+              className="bg-gray-800 border border-gray-600 rounded-md px-2 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+            >
+              {backups.map((backup) => (
+                <option key={backup.id} value={backup.id}>
+                  {formatTakenAt(backup.takenAt)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button onClick={handleRestore} disabled={isRestoring} className={SECONDARY_BUTTON}>
+            {isRestoring ? t('settings.restoring') : t('settings.restoreBackup')}
+          </button>
+        </div>
+      )}
+      {mountpoint && backups.length === 0 && (
+        <p className="text-gray-500 text-xs">{t(loadFailed ? 'settings.backupsError' : 'settings.restoreNone')}</p>
+      )}
+      {!mountpoint && <p className="text-gray-500 text-xs">{t('settings.restoreNeedsKindle')}</p>}
       <p role="status" aria-live="polite" className={`text-xs mt-3 ${status ? STATUS_COLORS[status.kind] : ''}`}>
         {status?.text ?? ''}
       </p>

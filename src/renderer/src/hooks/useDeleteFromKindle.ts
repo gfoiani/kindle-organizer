@@ -15,8 +15,12 @@ interface DeleteFromKindleOptions {
 }
 
 export interface DeleteFromKindle {
-  /** Asks for confirmation, deletes, reports the outcome. Resolves once everything is refreshed. */
-  deleteBooks: (books: readonly DisplayBook[]) => Promise<void>
+  /**
+   * Asks for confirmation, deletes, reports the outcome. Resolves once
+   * everything is refreshed: false when nothing was attempted (no device, no
+   * book, or the user cancelled), so the caller can keep its selection.
+   */
+  deleteBooks: (books: readonly DisplayBook[]) => Promise<boolean>
   /** Re-reads the collection list after books left the device. */
   refreshCollections: () => Promise<void>
 }
@@ -40,8 +44,8 @@ export function useDeleteFromKindle({
 
   const deleteBooks = useCallback(
     async (books: readonly DisplayBook[]) => {
-      if (!mountpoint || books.length === 0) return
-      if (!window.confirm(t('selection.confirmDeleteFromKindle', { count: books.length }))) return
+      if (!mountpoint || books.length === 0) return false
+      if (!window.confirm(t('selection.confirmDeleteFromKindle', { count: books.length }))) return false
       try {
         const { deleted, failed } = await window.kindleAPI.deleteDeviceBooks(
           mountpoint,
@@ -60,6 +64,7 @@ export function useDeleteFromKindle({
       }
       onLibraryChanged()
       await refreshCollections()
+      return true
     },
     [mountpoint, t, onNotify, onLibraryChanged, refreshCollections]
   )

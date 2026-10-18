@@ -8,9 +8,11 @@ import type { RenameTarget } from '../main/localCollections'
 import type { AppErrorCode } from '../main/appErrors'
 import type { DeleteResult } from '../main/deviceDelete'
 import type { AvailableUpdate } from '../main/updateCheck'
+import type { CalibreBackupSummary } from '../main/calibreBackup'
 
 export type {
   DeleteResult,
+  CalibreBackupSummary,
   AvailableUpdate,
   KindleDrive,
   KindleBook,
@@ -91,8 +93,10 @@ export interface KindleAPI {
    * memberships. Rejects with DEVICE_NOT_FOUND unless a Kindle is mounted there.
    */
   deleteDeviceBooks: (mountpoint: string, bookPaths: string[]) => Promise<DeleteResult>
-  /** Puts back the latest metadata.calibre backup; null when the device has none. */
-  restoreCollectionsBackup: (mountpoint: string) => Promise<{ takenAt: string } | null>
+  /** The metadata.calibre backups kept on the Kindle, newest first. */
+  listCollectionsBackups: (mountpoint: string) => Promise<CalibreBackupSummary[]>
+  /** Puts back the backup `id` (from listCollectionsBackups); null when it is not one of them. */
+  restoreCollectionsBackup: (mountpoint: string, id: string) => Promise<{ takenAt: string } | null>
   /** Opens the folder holding `main.log` in the system file manager. */
   openLogsFolder: () => Promise<void>
   /** A newer GitHub release, or null (also when the check could not run). */
@@ -207,7 +211,9 @@ export const kindleAPI: KindleAPI = {
   removeLibraryBook: (id: string) => ipcRenderer.invoke('kindle:remove-library-book', id),
   deleteDeviceBooks: (mountpoint: string, bookPaths: string[]) =>
     ipcRenderer.invoke('kindle:delete-device-books', mountpoint, bookPaths),
-  restoreCollectionsBackup: (mountpoint: string) => ipcRenderer.invoke('kindle:restore-collections-backup', mountpoint),
+  listCollectionsBackups: (mountpoint: string) => ipcRenderer.invoke('kindle:list-collections-backups', mountpoint),
+  restoreCollectionsBackup: (mountpoint: string, id: string) =>
+    ipcRenderer.invoke('kindle:restore-collections-backup', mountpoint, id),
   openLogsFolder: () => ipcRenderer.invoke('kindle:open-logs-folder'),
   checkForUpdate: () => ipcRenderer.invoke('kindle:check-for-update'),
 
