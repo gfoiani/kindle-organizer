@@ -16,7 +16,7 @@
     "collections": "Collezioni",
     "newCollection": "Nuova collezione",
     "collectionPlaceholder": "Nome collezione...",
-    "noCollections": "Nessuna collezione. Usa il tasto {{symbol}} per crearne una, o connetti un Kindle con Calibre per importarle automaticamente.",
+    "noCollections": "Nessuna collezione. Usa il tasto {{symbol}} per crearne una; quelle già salvate sul Kindle vengono importate automaticamente quando lo colleghi.",
     "rename": "Rinomina",
     "delete": "Elimina",
     "confirmDelete": "Eliminare la collezione \"{{name}}\" ({{count}} libri)? L'operazione non può essere annullata.",

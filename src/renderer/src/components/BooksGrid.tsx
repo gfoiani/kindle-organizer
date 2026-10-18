@@ -17,6 +17,7 @@ import {
 } from '../utils/bulkSelection'
 import { SelectionToolbar, type BulkProgress } from './SelectionToolbar'
 import type { NoticeKind } from '../hooks/useNotice'
+import { errorMessageKey } from '../utils/appError'
 import {
   columnsForWidth,
   GRID_GAP_PX,
@@ -393,8 +394,8 @@ export function BooksGrid({
   /**
    * Sends the eligible books ONE AT A TIME.
    *
-   * Not parallel on purpose: each send spawns Calibre (CPU-bound) and then
-   * streams to a single FAT32 volume, so concurrency would only make them
+   * Not parallel on purpose: each send converts in-process (CPU-bound) and
+   * then streams to a single FAT32 volume, so concurrency would only make them
    * contend. Stopping takes effect between books — `sendToKindle` does not yet
    * accept an AbortSignal, so a conversion already running is left to finish.
    */
@@ -407,6 +408,8 @@ export function BooksGrid({
     let sent = 0
     let failed = 0
     let stopped = false
+    // The first failure the main process could explain (DRM, damaged EPUB…).
+    let firstFailureKey = ''
 
     for (const [index, book] of sendable.entries()) {
       if (stopRef.current) {
@@ -424,6 +427,7 @@ export function BooksGrid({
       } catch (err) {
         console.error(`[bulk-send] "${book.title}" failed:`, err)
         failed++
+        firstFailureKey ||= errorMessageKey(err, '')
       }
     }
 
@@ -434,6 +438,7 @@ export function BooksGrid({
     const summary = [
       sent > 0 ? t('selection.sentCount', { count: sent }) : null,
       failed > 0 ? t('selection.failedCount', { count: failed }) : null,
+      firstFailureKey ? t(firstFailureKey) : null,
       stopped ? t('selection.stopped') : null
     ]
       .filter(Boolean)

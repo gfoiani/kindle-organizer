@@ -16,7 +16,7 @@
     "collections": "Collections",
     "newCollection": "New collection",
     "collectionPlaceholder": "Collection name...",
-    "noCollections": "No collections. Use the {{symbol}} button to create one, or connect a Kindle with Calibre to import them automatically.",
+    "noCollections": "No collections. Use the {{symbol}} button to create one; any already saved on your Kindle are imported automatically when you connect it.",
     "rename": "Rename",
     "delete": "Delete",
     "confirmDelete": "Delete the collection \"{{name}}\" ({{count}} books)? This cannot be undone.",

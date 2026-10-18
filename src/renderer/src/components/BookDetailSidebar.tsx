@@ -6,6 +6,7 @@ import { CoverPlaceholder } from './CoverPlaceholder'
 import { formatSize } from '../utils/format'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { useCover } from '../hooks/useCover'
+import { errorMessageKey } from '../utils/appError'
 
 type SendPhase = 'idle' | 'converting' | 'uploading' | 'done' | 'error'
 
@@ -41,6 +42,9 @@ export function BookDetailSidebar({
 
   const [sendPhase, setSendPhase] = useState<SendPhase>('idle')
   const [sendPercent, setSendPercent] = useState(0)
+  // i18n key of WHY the last send failed (DRM, damaged EPUB…), when the main
+  // process said so; the generic button label covers everything else.
+  const [sendFailureKey, setSendFailureKey] = useState<string | null>(null)
   const [isRemoving, setIsRemoving] = useState(false)
   const [targetFormat, setTargetFormat] = useState<KindleFormat | null>(null)
 
@@ -49,8 +53,8 @@ export function BookDetailSidebar({
   // A library-only EPUB is converted before sending; already-Kindle formats aren't.
   const willConvert = isLibraryOnly && book.extension === 'EPUB'
 
-  // Load the configured target format so the send action can show what the EPUB
-  // will be converted to (reflects a format change in Settings).
+  // Load the target format so the send action can show what the EPUB will be
+  // converted to.
   useEffect(() => {
     if (!willConvert) return
     window.kindleAPI
@@ -87,12 +91,15 @@ export function BookDetailSidebar({
     // button doesn't flash a bogus "Converting 0%" before the first progress push.
     setSendPhase(willConvert ? 'converting' : 'uploading')
     setSendPercent(0)
+    setSendFailureKey(null)
     try {
       await window.kindleAPI.uploadBook(book.libraryId, mountpoint)
       setSendPhase('done')
       onSent()
     } catch (err) {
       console.error('Failed to send to Kindle:', err)
+      const key = errorMessageKey(err, '')
+      setSendFailureKey(key || null)
       setSendPhase('error')
     }
   }
@@ -325,6 +332,12 @@ export function BookDetailSidebar({
                     </>
                   )}
                 </button>
+
+                {sendPhase === 'error' && sendFailureKey && (
+                  <p role="alert" className="text-red-300 text-xs">
+                    {t(sendFailureKey)}
+                  </p>
+                )}
 
                 {isSending && (
                   <div className="w-full h-1.5 bg-gray-800 rounded overflow-hidden">
