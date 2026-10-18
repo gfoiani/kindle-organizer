@@ -12,7 +12,10 @@ const CODE_MESSAGE_KEYS: Record<AppErrorCode, string> = {
   COLLECTION_NAME_EMPTY: 'errors.collectionNameEmpty',
   DEVICE_NOT_FOUND: 'errors.deviceNotFound',
   EJECT_BUSY: 'errors.ejectBusy',
-  EJECT_FAILED: 'errors.ejectFailed'
+  EJECT_FAILED: 'errors.ejectFailed',
+  EPUB_INVALID: 'errors.epubInvalid',
+  EPUB_DRM_PROTECTED: 'errors.epubDrmProtected',
+  CONVERSION_FAILED: 'errors.conversionFailed'
 }
 
 /**

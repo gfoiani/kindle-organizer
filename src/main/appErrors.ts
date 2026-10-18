@@ -19,6 +19,9 @@ export type AppErrorCode =
   | 'DEVICE_NOT_FOUND'
   | 'EJECT_BUSY'
   | 'EJECT_FAILED'
+  | 'EPUB_INVALID'
+  | 'EPUB_DRM_PROTECTED'
+  | 'CONVERSION_FAILED'
 
 /** An error whose message is a stable code the renderer can translate. */
 export class AppError extends Error {

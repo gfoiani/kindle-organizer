@@ -280,7 +280,7 @@ export async function sendToKindle(
         outputPath,
         // Stamp the app's own metadata into the book, like calibre does: the
         // device reads title/author/cover from the file itself.
-        metadata: { title: book.title, author: book.author, coverPath },
+        metadata: { title: book.title, author: book.author, coverPath, identifier: book.id },
         onProgress: (percent) => emit('convert:progress', { libraryId: id, percent })
       })
     } catch (err) {

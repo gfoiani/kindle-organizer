@@ -244,6 +244,9 @@
   "errors": {
     "collectionNameTaken": "A collection with this name already exists.",
     "collectionNameEmpty": "A collection name cannot be empty.",
+    "epubInvalid": "The EPUB file is damaged or not a valid EPUB.",
+    "epubDrmProtected": "This EPUB is DRM-protected and cannot be converted.",
+    "conversionFailed": "Could not convert the book for the Kindle.",
     "createCollection": "Could not create the collection.",
     "renameCollection": "Could not rename the collection.",
     "deleteCollection": "Could not delete the collection.",
