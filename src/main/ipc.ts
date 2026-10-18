@@ -1,12 +1,12 @@
 import { app, ipcMain } from 'electron'
-import { detectKindleDrives, readDocuments } from './kindle'
+import { detectKindleDrives, readDocuments, requireKindleDrive, type KindleBook } from './kindle'
 import { ejectDrive } from './eject'
 import { AppError } from './appErrors'
-import { readCalibreMetadata, writeCalibreMetadata, readCalibreIsbnMap } from './calibre'
+import { readCalibreMetadata, writeCalibreMetadata, readCalibreIsbnMap, type DeviceBookInfo } from './calibre'
 import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
 import { applyOverrides, setOverride } from './bookOverrides'
 import { setMenuLabels, popupAppMenu } from './menu'
-import { stripDocumentsBase } from './paths'
+import { stripDocumentsBase, toDeviceRelpath } from './paths'
 import { KINDLE_FORMAT } from './settings'
 import { addDroppedFiles, removeLibraryBook, sendToKindle, type SendProgress } from './libraryService'
 import { listLibraryBooks } from './library'
@@ -83,6 +83,30 @@ function assertRenameTargets(value: unknown, name: string): asserts value is Ren
     const rec = entry as Record<string, unknown>
     assertString(rec.id, `${name}[].id`)
     assertString(rec.newName, `${name}[].newName`)
+  }
+}
+
+/**
+ * What `writeCalibreMetadata` needs about the books on the device. Collections
+ * are keyed by the app's relpath (`stripDocumentsBase`), metadata.calibre by
+ * the path under `documents/`: the two differ on Windows, so the tags of every
+ * book on the device are re-keyed to the latter. Every book is seeded (an empty
+ * list for no collection) so leaving all collections is written back too.
+ */
+function calibreSyncInput(
+  books: readonly KindleBook[],
+  mountpoint: string
+): { bookTagMap: Map<string, string[]>; deviceBooks: DeviceBookInfo[] } {
+  const documentsBase = `${mountpoint}/documents/`
+  const located = books.flatMap((book) => {
+    const relpath = toDeviceRelpath(book.path, mountpoint)
+    return relpath === undefined ? [] : [{ book, relpath, appKey: stripDocumentsBase(book.path, documentsBase) }]
+  })
+  const tagsByAppKey = getAllBookTags(located.map((entry) => entry.appKey))
+  const deviceTags = located.map(({ relpath, appKey }): [string, string[]] => [relpath, tagsByAppKey.get(appKey) ?? []])
+  return {
+    bookTagMap: new Map([...tagsByAppKey, ...deviceTags]),
+    deviceBooks: located.map(({ book, relpath }) => ({ relpath, title: book.title, author: book.author, size: book.size }))
   }
 }
 
@@ -174,20 +198,11 @@ export function registerIpcHandlers(): void {
     'kindle:write-to-kindle',
     withErrorLogging('kindle:write-to-kindle', async (_, mountpoint: unknown) => {
       assertString(mountpoint, 'mountpoint')
-      // Seed the tag map with every book actually on the device so books removed
-      // from all collections are written back with an explicit empty tag list
-      // (authoritative sync — H1 fix).
-      const books = await readDocuments(mountpoint)
-      const documentsBase = `${mountpoint}/documents/`
-      const deviceBooks = books.map((book) => ({
-        relpath: stripDocumentsBase(book.path, documentsBase),
-        title: book.title,
-        author: book.author,
-        size: book.size
-      }))
-      const bookTagMap = getAllBookTags(deviceBooks.map((book) => book.relpath))
-      // deviceBooks lets books calibre never registered (or a device with no
-      // metadata.calibre at all) join their collections.
+      // This may create metadata.calibre, so the path must be a connected Kindle.
+      await requireKindleDrive(mountpoint)
+      // Authoritative sync (H1 fix); deviceBooks lets books calibre never
+      // registered (or a device with no metadata.calibre at all) join their collections.
+      const { bookTagMap, deviceBooks } = calibreSyncInput(await readDocuments(mountpoint), mountpoint)
       return writeCalibreMetadata(mountpoint, bookTagMap, deviceBooks)
     })
   )
@@ -371,6 +386,9 @@ export function registerIpcHandlers(): void {
       async (event, id: unknown, mountpoint: unknown) => {
         assertString(id, 'id')
         assertString(mountpoint, 'mountpoint')
+        // The book, its thumbnail and its metadata.calibre record land under
+        // this path, so it must be a connected Kindle.
+        await requireKindleDrive(mountpoint)
         // This push is request-scoped (tied to this invoke), so event.sender is
         // the right target — guarded against a renderer that navigated away.
         const emit = (channel: string, payload: SendProgress): void => {

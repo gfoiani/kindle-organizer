@@ -65,7 +65,10 @@ export function BookDetailSidebar({
 
   // The panel is reused across books: another book must not inherit the last
   // send's outcome (e.g. a "DRM-protected" alert that belonged to the previous one).
+  // The ref lets a send that settles after the switch tell it is no longer shown.
+  const shownLibraryId = useRef(book.libraryId)
   useEffect(() => {
+    shownLibraryId.current = book.libraryId
     setSendPhase('idle')
     setSendPercent(0)
     setSendFailureKey(null)
@@ -94,18 +97,21 @@ export function BookDetailSidebar({
   }, [book.libraryId])
 
   async function handleSend() {
-    if (!book.libraryId || !mountpoint) return
+    const libraryId = book.libraryId
+    if (!libraryId || !mountpoint) return
     // Already-Kindle formats skip conversion — open straight on 'uploading' so the
     // button doesn't flash a bogus "Converting 0%" before the first progress push.
     setSendPhase(willConvert ? 'converting' : 'uploading')
     setSendPercent(0)
     setSendFailureKey(null)
+    const stillShown = (): boolean => shownLibraryId.current === libraryId
     try {
-      await window.kindleAPI.uploadBook(book.libraryId, mountpoint)
-      setSendPhase('done')
+      await window.kindleAPI.uploadBook(libraryId, mountpoint)
       onSent()
+      if (stillShown()) setSendPhase('done')
     } catch (err) {
       console.error('Failed to send to Kindle:', err)
+      if (!stillShown()) return
       const key = errorMessageKey(err, '')
       setSendFailureKey(key || null)
       setSendPhase('error')

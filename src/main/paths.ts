@@ -1,3 +1,5 @@
+import path from 'path'
+
 /**
  * Shared book-path helpers.
  *
@@ -23,4 +25,19 @@ export function stripDocumentsPrefix(lpath: string): string {
 /** Strips the full `{mountpoint}/documents/` base off an absolute book path. */
 export function stripDocumentsBase(bookPath: string, documentsBase: string): string {
   return bookPath.startsWith(documentsBase) ? bookPath.slice(documentsBase.length) : bookPath
+}
+
+type PathApi = Pick<typeof path, 'join' | 'relative' | 'isAbsolute' | 'sep'>
+
+/**
+ * The book's path under the device's `documents/`, POSIX-style — a calibre
+ * `lpath` without its `documents/` prefix. Unlike `stripDocumentsBase` it
+ * holds on Windows, where book paths use `\` and the mountpoint may be a bare
+ * `E:`: the base is joined exactly as `readDocuments` joins it. Undefined for
+ * a path outside `documents/`.
+ */
+export function toDeviceRelpath(bookPath: string, mountpoint: string, pathApi: PathApi = path): string | undefined {
+  const relative = pathApi.relative(pathApi.join(mountpoint, 'documents'), bookPath)
+  const outside = relative === '..' || relative.startsWith(`..${pathApi.sep}`) || pathApi.isAbsolute(relative)
+  return relative && !outside ? relative.split(pathApi.sep).join('/') : undefined
 }

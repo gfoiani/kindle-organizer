@@ -11,9 +11,18 @@ export type ImageResolver = (archivePath: string) => string | undefined
  * endless whitespace).
  */
 
+/**
+ * Lowercases A–Z only, so an index into the result is an index into `css`.
+ * `toLowerCase` can lengthen the string ('İ' becomes two code units), and the
+ * scanners below slice the original with the positions they find.
+ */
+function asciiLowerCase(css: string): string {
+  return css.replace(/[A-Z]+/g, (letters) => letters.toLowerCase())
+}
+
 /** Removes every `start … end` span; an unterminated one runs to the end of the sheet. */
 function removeSpans(css: string, start: string, end: string, caseInsensitive = false): string {
-  const haystack = caseInsensitive ? css.toLowerCase() : css
+  const haystack = caseInsensitive ? asciiLowerCase(css) : css
   const parts: string[] = []
   let pos = 0
   for (;;) {
@@ -29,7 +38,7 @@ function removeSpans(css: string, start: string, end: string, caseInsensitive = 
 
 /** `@font-face { … }`: the block, up to its closing brace. */
 function removeFontFaces(css: string): string {
-  const lower = css.toLowerCase()
+  const lower = asciiLowerCase(css)
   const parts: string[] = []
   let pos = 0
   for (;;) {
@@ -53,7 +62,7 @@ function unquote(value: string): string {
 
 /** Rewrites `url(…)` references the resolver knows; leaves every other url() untouched. */
 function rewriteUrls(css: string, basePath: string, resolveImage: ImageResolver): string {
-  const lower = css.toLowerCase()
+  const lower = asciiLowerCase(css)
   const parts: string[] = []
   let pos = 0
   for (;;) {

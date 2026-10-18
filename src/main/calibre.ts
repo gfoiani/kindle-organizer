@@ -87,6 +87,14 @@ function toPosixRelpath(relpath: string): string {
   return relpath.split(path.sep).join('/')
 }
 
+/**
+ * Whether a POSIX relpath really lies under `documents/`: an absolute path, a
+ * drive letter or a `..` would become a bogus `lpath` next to the real record.
+ */
+function isDocumentsRelpath(relpath: string): boolean {
+  return relpath !== '' && !relpath.startsWith('/') && !/^[A-Za-z]:/.test(relpath) && !relpath.split('/').includes('..')
+}
+
 function entryRelpath(entry: unknown): string | undefined {
   if (typeof entry !== 'object' || entry === null) return undefined
   const lpath = (entry as Record<string, unknown>)['lpath']
@@ -130,7 +138,7 @@ export function writeCalibreMetadata(
   const added = deviceBooks.flatMap((book) => {
     const relpath = toPosixRelpath(book.relpath)
     const tags = bookTagMap.get(book.relpath)
-    if (!tags || tags.length === 0 || listed.has(relpath)) return []
+    if (!tags || tags.length === 0 || listed.has(relpath) || !isDocumentsRelpath(relpath)) return []
     const input = { ...book, relpath, mime: calibreMimeType(relpath), uuid: randomUUID() }
     return [{ ...buildEntry(input, relpath, undefined), tags }]
   })

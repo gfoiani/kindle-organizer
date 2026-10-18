@@ -2,6 +2,7 @@ import { app } from 'electron'
 import si from 'systeminformation'
 import * as fs from 'fs-extra'
 import path from 'path'
+import { AppError } from './appErrors'
 
 // Dev-only verbose logging. Silent in packaged builds.
 const debug = (...args: unknown[]): void => {
@@ -56,6 +57,28 @@ export async function detectKindleDrives(): Promise<KindleDrive[]> {
       size: device.size,
       isReadOnly: false
     }))
+}
+
+/** How long a successful `requireKindleDrive` check is reused (a bulk send makes one call per book). */
+export const KINDLE_VERIFY_TTL_MS = 30_000
+
+let lastVerified: { drive: KindleDrive; at: number } | undefined
+
+/**
+ * The connected Kindle mounted at `mountpoint`, for IPC handlers that write
+ * to the device: a renderer-supplied path is only trusted once a detection
+ * reports a Kindle there. Detection is slow (seconds on Windows), so a recent
+ * success for the same mountpoint is reused for `KINDLE_VERIFY_TTL_MS`.
+ */
+export async function requireKindleDrive(mountpoint: string, now = Date.now()): Promise<KindleDrive> {
+  const cached = lastVerified
+  if (cached && cached.drive.mountpoint === mountpoint && now - cached.at < KINDLE_VERIFY_TTL_MS) {
+    return cached.drive
+  }
+  const drive = (await detectKindleDrives()).find((candidate) => candidate.mountpoint === mountpoint)
+  lastVerified = drive ? { drive, at: now } : undefined
+  if (!drive) throw new AppError('DEVICE_NOT_FOUND')
+  return drive
 }
 
 /**

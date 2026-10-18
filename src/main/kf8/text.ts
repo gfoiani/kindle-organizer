@@ -29,13 +29,16 @@ function overlapLength(text: Buffer, end: number): number {
 /**
  * The TBS strand for the record [from, to): port of leotaku/mobi's
  * TrailProvider (MIT). Only flat (single-level) navigation is supported.
+ * The scan starts at `first` and stops once a range starts past the record:
+ * neither those before nor those after can touch it (ranges sorted by start).
  */
-function tbsBytes(from: number, to: number, ranges: TextRange[]): Buffer {
+function tbsBytes(from: number, to: number, ranges: TextRange[], first: number): Buffer {
   let index = -1
   let spans = false
   let siblings = 0
 
-  for (const [i, r] of ranges.entries()) {
+  for (let i = first; i < ranges.length && ranges[i].start <= to; i++) {
+    const r = ranges[i]
     const end = r.start + r.length
     if (r.start <= from && end >= to) {
       index = i
@@ -71,16 +74,19 @@ function sizedEntry(data: Buffer): Buffer {
  * Splits the text into uncompressed 4096-byte records, each followed by the
  * trailing entries the extra-data flags announce: the multibyte overlap
  * (bytes completing a character cut by the boundary, then their count) and
- * the TBS indexing entry.
+ * the TBS indexing entry. `ranges` must be sorted by start, as the NCX is.
  */
 export function buildTextRecords(text: Buffer, ranges: TextRange[]): Buffer[] {
   const records: Buffer[] = []
+  let first = 0
   for (let from = 0; from < text.length; from += TEXT_RECORD_SIZE) {
     const to = Math.min(from + TEXT_RECORD_SIZE, text.length)
+    // A range ending before this record ends before every later one too, so
+    // the scan never restarts from 0: linear in records + ranges, not their product.
+    while (first < ranges.length && ranges[first].start + ranges[first].length < from) first++
     const overlap = text.subarray(to, to + overlapLength(text, to))
-    records.push(
-      Buffer.concat([text.subarray(from, to), overlap, u8(overlap.length), sizedEntry(tbsBytes(from, to, ranges))])
-    )
+    const tbs = tbsBytes(from, to, ranges, first)
+    records.push(Buffer.concat([text.subarray(from, to), overlap, u8(overlap.length), sizedEntry(tbs)]))
   }
   return records
 }
