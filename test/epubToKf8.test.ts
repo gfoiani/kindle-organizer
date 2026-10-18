@@ -346,3 +346,29 @@ describe('epubToKf8 → writeKf8', () => {
     expect(titles).toEqual(['A', 'B'])
   })
 })
+
+describe('epubToKf8 — document identity', () => {
+  test('an anchor written as ID= is a link target', async () => {
+    const input = await convert({
+      docs: [
+        { path: 'a.xhtml', body: '<a href="b.xhtml#t">t</a>' },
+        { path: 'b.xhtml', body: '<p>pad</p><h2 ID="t">Target</h2>' }
+      ]
+    })
+
+    const [href] = hrefs(input.parts[0].body)
+    expect(resolvePos(input, href)).toMatch(/^<h2 id="t">Target/)
+  })
+
+  test('a document listed more than once in the spine becomes one part', async () => {
+    const input = await convert({
+      docs: [
+        { path: 'a.xhtml', body: '<p>a</p>' },
+        { path: 'b.xhtml', body: '<p>b</p>' }
+      ],
+      spine: ['a.xhtml', 'a.xhtml', 'b.xhtml', 'a.xhtml']
+    })
+
+    expect(input.parts.map((p) => p.body)).toEqual(['<p>a</p>', '<p>b</p>'])
+  })
+})

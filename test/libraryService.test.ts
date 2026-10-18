@@ -120,7 +120,7 @@ describe('sendToKindle', () => {
 
   /** A converter that produces a real (fixture) AZW3 at the requested path. */
   function fakeConverter(): ReturnType<typeof vi.fn> {
-    return vi.fn(async (_in: string, _fmt: string, opts: ConvertArgs) => {
+    return vi.fn(async (_in: string, opts: ConvertArgs) => {
       opts.onProgress?.(50)
       writeMobi(opts.outputPath, { uuid: BOOK_UUID, cdetype: 'EBOK' })
       return opts.outputPath
@@ -185,7 +185,7 @@ describe('sendToKindle', () => {
       uploadFile: fakeUploader()
     })
 
-    const [, , options] = convertMock.mock.calls[0] as [string, string, ConvertArgs]
+    const [, options] = convertMock.mock.calls[0] as [string, ConvertArgs]
     expect(options.metadata).toEqual({
       title: 'Dune',
       author: 'Frank Herbert',

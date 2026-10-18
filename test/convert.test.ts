@@ -49,7 +49,7 @@ describe('convert', () => {
     const outputPath = path.join(dir, 'out.azw3')
 
     // Act
-    const result = await convert(epub(), 'azw3', { outputPath })
+    const result = await convert(epub(), { outputPath })
 
     // Assert
     expect(result).toBe(outputPath)
@@ -65,7 +65,7 @@ describe('convert', () => {
     writeFileSync(coverPath, PNG)
     const outputPath = path.join(dir, 'out.azw3')
 
-    await convert(epub(), 'azw3', {
+    await convert(epub(), {
       outputPath,
       metadata: { title: 'Titolo App', author: 'Autore App', coverPath, identifier: BOOK_ID }
     })
@@ -81,7 +81,7 @@ describe('convert', () => {
   test("keeps the EPUB's own cover when the app's cover file cannot be read", async () => {
     const outputPath = path.join(dir, 'out.azw3')
 
-    await convert(epub(), 'azw3', { outputPath, metadata: { coverPath: path.join(dir, 'missing.jpg') } })
+    await convert(epub(), { outputPath, metadata: { coverPath: path.join(dir, 'missing.jpg') } })
 
     const kf8 = readKf8(readFileSync(outputPath))
     expect(kf8.images[0]).toEqual(JPEG)
@@ -91,7 +91,7 @@ describe('convert', () => {
     const outputPath = path.join(dir, 'out.azw3')
     writeFileSync(outputPath, 'stale')
 
-    await convert(epub(), 'azw3', { outputPath })
+    await convert(epub(), { outputPath })
 
     expect(readFileSync(outputPath).subarray(60, 68).toString('latin1')).toBe('BOOKMOBI')
     expect(readdirSync(dir).sort()).toEqual(['in.epub', 'out.azw3'])
@@ -100,7 +100,7 @@ describe('convert', () => {
   test('reports progress that ends at 100%', async () => {
     const seen: number[] = []
 
-    await convert(epub(), 'azw3', { outputPath: path.join(dir, 'out.azw3'), onProgress: (p) => seen.push(p) })
+    await convert(epub(), { outputPath: path.join(dir, 'out.azw3'), onProgress: (p) => seen.push(p) })
 
     expect(seen.length).toBeGreaterThan(1)
     expect(seen[seen.length - 1]).toBe(100)
@@ -112,7 +112,7 @@ describe('convert', () => {
       extraEntries: [{ name: 'META-INF/rights.xml', data: Buffer.from('<rights/>') }]
     })
 
-    const error = await convert(drm, 'azw3', { outputPath: path.join(dir, 'out.azw3') }).catch((e: unknown) => e)
+    const error = await convert(drm, { outputPath: path.join(dir, 'out.azw3') }).catch((e: unknown) => e)
 
     expect(error).toBeInstanceOf(AppError)
     expect((error as AppError).code).toBe('EPUB_DRM_PROTECTED')
@@ -123,7 +123,7 @@ describe('convert', () => {
     const notEpub = path.join(dir, 'in.epub')
     writeFileSync(notEpub, 'plain text')
 
-    const error = await convert(notEpub, 'azw3', { outputPath: path.join(dir, 'out.azw3') }).catch((e: unknown) => e)
+    const error = await convert(notEpub, { outputPath: path.join(dir, 'out.azw3') }).catch((e: unknown) => e)
 
     expect((error as AppError).code).toBe('EPUB_INVALID')
   })
@@ -133,7 +133,7 @@ describe('convert', () => {
     controller.abort()
     const outputPath = path.join(dir, 'out.azw3')
 
-    const error = await convert(epub(), 'azw3', { outputPath, signal: controller.signal }).catch((e: unknown) => e)
+    const error = await convert(epub(), { outputPath, signal: controller.signal }).catch((e: unknown) => e)
 
     expect((error as Error).name).toBe('AbortError')
     expect(existsSync(outputPath)).toBe(false)

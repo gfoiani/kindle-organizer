@@ -345,3 +345,60 @@ describe('upsertCalibreEntry', () => {
     expect(readFileSync(path.join(mountpoint, 'metadata.calibre'), 'utf-8')).toBe(raw)
   })
 })
+
+describe('calibre records survive the app', () => {
+  const DUNE = {
+    relpath: 'Dune.azw3',
+    title: 'Dune',
+    author: 'Frank Herbert',
+    size: 2048,
+    mime: 'application/x-mobi8-ebook',
+    uuid: '3f6d9a1e-1c4b-4a2d-8f77-0b9c2e5d1a33'
+  }
+
+  test('re-uploading keeps the fields calibre filled in', () => {
+    // Arrange
+    writeMetadata([
+      {
+        lpath: 'documents/Dune.azw3',
+        title: 'Old title',
+        identifiers: { isbn: '9788834739679' },
+        series: 'Dune',
+        series_index: 1,
+        publisher: 'Fanucci',
+        tags: ['SF']
+      }
+    ])
+
+    // Act
+    upsertCalibreEntry(mountpoint, DUNE)
+
+    // Assert
+    const [entry] = readMetadata()
+    expect(entry).toMatchObject({
+      title: 'Dune',
+      size: 2048,
+      identifiers: { isbn: '9788834739679' },
+      series: 'Dune',
+      series_index: 1,
+      publisher: 'Fanucci',
+      tags: ['SF']
+    })
+  })
+
+  test('re-uploading updates a record whose lpath differs only in case', () => {
+    writeMetadata([{ lpath: 'documents/Dune.AZW3', tags: ['SF'] }])
+
+    upsertCalibreEntry(mountpoint, DUNE)
+
+    expect(readMetadata().map((e) => [e.lpath, e.tags])).toEqual([['documents/Dune.azw3', ['SF']]])
+  })
+
+  test('collections reach a record whose lpath differs only in case, without a duplicate', () => {
+    writeMetadata([{ lpath: 'documents/Dune.AZW3', tags: ['Old'] }])
+
+    writeCalibreMetadata(mountpoint, new Map([['Dune.azw3', ['SF']]]), [{ relpath: 'Dune.azw3', title: 'Dune', size: 1 }])
+
+    expect(readMetadata().map((e) => [e.lpath, e.tags])).toEqual([['documents/Dune.AZW3', ['SF']]])
+  })
+})

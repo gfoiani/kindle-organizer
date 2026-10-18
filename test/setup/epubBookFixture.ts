@@ -31,6 +31,8 @@ export interface EpubBookSpec {
   encryption?: string
   /** Extra raw zip entries (full archive paths). */
   extraEntries?: Array<{ name: string; data: Buffer }>
+  /** Spine order as doc paths, when it is not simply `docs` (repeats, omissions). */
+  spine?: string[]
 }
 
 const ROOT = 'OEBPS'
@@ -63,9 +65,9 @@ function buildOpf(spec: EpubBookSpec): string {
     ...(spec.nav !== undefined ? ['<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'] : []),
     ...(spec.ncx !== undefined ? ['<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'] : [])
   ]
-  const spine = spec.docs
-    .map((d, i) => `<itemref idref="doc${i}"${d.linear === false ? ' linear="no"' : ''}/>`)
-    .join('')
+  const spine = spec.spine
+    ? spec.spine.map((p) => `<itemref idref="doc${spec.docs.findIndex((d) => d.path === p)}"/>`).join('')
+    : spec.docs.map((d, i) => `<itemref idref="doc${i}"${d.linear === false ? ' linear="no"' : ''}/>`).join('')
   return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">

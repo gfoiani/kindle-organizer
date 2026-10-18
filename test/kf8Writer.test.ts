@@ -6,6 +6,7 @@ import {
   type Kf8BookInput,
   type Kf8Part
 } from '../src/main/kf8'
+import { buildPalmDb } from '../src/main/kf8/palmdb'
 import { buildTextRecords } from '../src/main/kf8/text'
 import { parseMobiIdentifiers } from '../src/main/mobiHeader'
 import {
@@ -328,5 +329,34 @@ describe('writeKf8 — large books', () => {
     const summary = readIndexHeaderEntries(header)
     expect(summary.reduce((sum, s) => sum + s.count, 0)).toBe(5000)
     expect(summary[summary.length - 1].label).toBe(kf8.chunks.entries[4999].label)
+  })
+})
+
+describe('writeKf8 — limits', () => {
+  test('caps navigation and part titles so one huge title cannot overflow a CNCX record', () => {
+    // Arrange
+    const huge = 'T'.repeat(100_000)
+
+    // Act
+    const kf8 = readKf8(writeKf8(book({ parts: [part('<p>x</p>', huge)], toc: [{ title: huge, part: 0, offset: 0 }] })))
+
+    // Assert
+    const title = kf8.ncx.cncx.get(kf8.ncx.entries[0].tags[3][0]) ?? ''
+    expect(title.length).toBeLessThanOrEqual(256)
+    expect(kf8.parts[0].length).toBeLessThan(1000)
+  })
+
+  test('cuts a title on a character boundary, never inside a surrogate pair', () => {
+    const title = 'a' + '\u{1F600}'.repeat(300)
+
+    const kf8 = readKf8(writeKf8(book({ toc: [{ title, part: 0, offset: 0 }] })))
+
+    expect(kf8.ncx.cncx.get(kf8.ncx.entries[0].tags[3][0])).toBe('a' + '\u{1F600}'.repeat(127))
+  })
+
+  test('refuses more records than a PalmDB can number, with a clear message', () => {
+    const records = Array.from({ length: 0x10000 }, () => Buffer.alloc(0))
+
+    expect(() => buildPalmDb('t', new Date(0), records)).toThrow(/65535 records/)
   })
 })

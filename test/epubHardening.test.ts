@@ -198,3 +198,39 @@ describe('encodings', () => {
     expect(body).toBe('<p>Città</p>')
   })
 })
+
+describe('HTML is normalized to XHTML', () => {
+  test('uppercase tags and attribute names come out lowercase, keeping the text after <BR>', async () => {
+    const body = await convert({ docs: [{ path: 'a.xhtml', body: '<P CLASS="x">a<BR>b</P>' }] })
+
+    expect(body).toBe('<p class="x">a<br/>b</p>')
+  })
+
+  test('an uppercase HREF is vetted like a lowercase one', async () => {
+    const body = await convert({ docs: [{ path: 'a.xhtml', body: '<a HREF="javascript:alert(1)">x</a>' }] })
+
+    expect(body).toBe('<a>x</a>')
+  })
+
+  test('SVG keeps its case-sensitive names', async () => {
+    const body = await convert({
+      docs: [{ path: 'a.xhtml', body: '<svg viewBox="0 0 1 1"><linearGradient id="g"></linearGradient><rect/></svg>' }]
+    })
+
+    expect(body).toContain('viewBox="0 0 1 1"')
+    expect(body).toContain('<linearGradient id="g"/>')
+  })
+
+  test('URL attributes outside <img> are dropped, not left as broken references', async () => {
+    const body = await convert({
+      docs: [
+        {
+          path: 'a.xhtml',
+          body: '<picture><source srcset="http://e.example/a.jpg"/></picture><input type="image" src="http://e.example/b.png"/>'
+        }
+      ]
+    })
+
+    expect(body).not.toContain('e.example')
+  })
+})
