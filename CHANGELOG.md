@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Library folders** — add one or more folders on your computer in *Settings → Library folders* and their books (subfolders included) appear in the library without being copied. The app watches the folders while it is open: a book added, renamed, moved or deleted there shows up in the grid by itself, and a renamed or moved book keeps its link to the copy on the Kindle. The files are never changed or deleted; a folder on a disk that is not plugged in keeps its books until it comes back.
 - **Delete from Kindle** — one book from its detail panel, or a whole selection. The book's reading data (`.sdr`), home-screen thumbnail, `metadata.calibre` record and collection memberships go with it.
 - **Backups of `metadata.calibre`** — every change first copies the previous file to `.kindle-organizer/backups/` on the Kindle (the last 10). *Settings → Collections on the Kindle* restores the copy you pick, and a restore can itself be undone.
 - **Sort the grid** by title, author or recently added.
