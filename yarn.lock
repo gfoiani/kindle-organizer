@@ -2550,7 +2550,7 @@ dmg-builder@26.15.3:
     fs-extra "^10.1.0"
     js-yaml "^4.1.0"
 
-dom-serializer@3.1.1, dom-serializer@^3.0.0:
+dom-serializer@^3.0.0:
   version "3.1.1"
   resolved "https://registry.yarnpkg.com/dom-serializer/-/dom-serializer-3.1.1.tgz#54be70ee4fcc2da010f488165e62294798dc57d3"
   integrity sha512-4MEa38/QexBob6gFNwu+EGdWvhJ1OKuNwdYY3Y3NyeWDQfnGeDYQUDfIRzWu5B5gsv03so2Uxd28YC6zrsx3Lw==
