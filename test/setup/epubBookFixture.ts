@@ -11,7 +11,16 @@ export interface EpubBookSpec {
   author?: string
   language?: string
   /** Spine documents, in reading order. `body` is the XHTML inside <body>. */
-  docs: Array<{ path: string; body: string; head?: string; title?: string; bodyAttrs?: string; linear?: boolean }>
+  docs: Array<{
+    path: string
+    body: string
+    head?: string
+    title?: string
+    bodyAttrs?: string
+    linear?: boolean
+    /** Exact bytes of the document, bypassing the XHTML template (encodings, malformed files). */
+    raw?: Buffer
+  }>
   stylesheets?: Array<{ path: string; css: string }>
   images?: Array<{ path: string; data: Buffer; mediaType?: string; cover?: boolean }>
   /** EPUB3 navigation document body (inside <nav epub:type="toc">). */
@@ -82,7 +91,7 @@ export function buildEpubBook(spec: EpubBookSpec): Buffer {
       `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="${ROOT}/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`
     ),
     entry(`${ROOT}/content.opf`, buildOpf(spec)),
-    ...spec.docs.map((d) => entry(`${ROOT}/${d.path}`, xhtml(d.body, d.head, d.title, d.bodyAttrs))),
+    ...spec.docs.map((d) => entry(`${ROOT}/${d.path}`, d.raw ?? xhtml(d.body, d.head, d.title, d.bodyAttrs))),
     ...(spec.stylesheets ?? []).map((s) => entry(`${ROOT}/${s.path}`, s.css)),
     ...(spec.images ?? []).map((img) => entry(`${ROOT}/${img.path}`, img.data)),
     ...(spec.nav !== undefined
