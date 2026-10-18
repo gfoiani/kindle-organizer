@@ -250,7 +250,8 @@ describe('writeKf8 — resources', () => {
 
   test('formats embed URIs with a 1-based base-32 index', () => {
     expect(kindleEmbedUri(0, 'image/jpeg')).toBe('kindle:embed:0001?mime=image/jpeg')
-    expect(kindleEmbedUri(31, 'image/png')).toBe('kindle:embed:000W?mime=image/png')
+    expect(kindleEmbedUri(30, 'image/png')).toBe('kindle:embed:000V?mime=image/png')
+    expect(kindleEmbedUri(31, 'image/png')).toBe('kindle:embed:0010?mime=image/png')
   })
 })
 
