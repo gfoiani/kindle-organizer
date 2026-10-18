@@ -21,6 +21,7 @@ D3 create `metadata.calibre` when the Kindle has none.
 | AZW3 is the only format | `31e9732` — `KINDLE_FORMAT` missing, `mobi` accepted | `a9cac7f` — suite 355 |
 | Collections without `metadata.calibre` | `dd83fb6` — refused when file absent | `5a73050` — suite 357 |
 | Hostile-input hardening | `865c4c4` — bomb accepted, `@font-face` scan 18.8 s, stack overflow… | `c6ba16c` — suite 367 |
+| Branch code-review findings (Windows relpaths, CSS offsets, TBS cost, IPC mountpoint) | `2d4c328` — 10 failing: no `toDeviceRelpath`/`requireKindleDrive`, `E:/documents/…` appended, `@fon` left behind, TBS 4.1 s | `99a810f` — suite 378, TBS 81 ms |
 
 Validation commands: `yarn type-check` (clean), `npx vitest run` (34 files,
 367 tests passing), `yarn build` (succeeds).
@@ -37,6 +38,10 @@ Validation commands: `yarn type-check` (clean), `npx vitest run` (34 files,
 | 6 | `convert()` runs no external program | `test/convert.test.ts` | integration |
 | 7 | Collections are written to a Kindle with no `metadata.calibre` | `test/calibre.test.ts` | unit |
 | 8 | Zip bombs, ReDoS CSS, deep nesting, bad tag names are contained | `test/epubHardening.test.ts` | unit |
+| 9 | A Windows book path maps to its POSIX path under `documents/`; absolute/drive/`..` relpaths are never written to `metadata.calibre` | `test/paths.test.ts`, `test/calibre.test.ts` | unit |
+| 10 | CSS rewriting is not shifted by characters whose lowercase is longer (`İ`) | `test/epubHardening.test.ts` | unit |
+| 11 | TBS bytes are unchanged and their cost is linear in NCX entries (200k entries < 1 s) | `test/kf8Writer.test.ts` | unit |
+| 12 | Device writes need a detected Kindle at the mountpoint; a stale verification is redone | `test/kindleDrive.test.ts` | unit |
 
 ## Manual verification (not in CI)
 
@@ -48,6 +53,12 @@ Validation commands: `yarn type-check` (clean), `npx vitest run` (34 files,
 `npx vitest run --coverage`: `kf8/` 98.8 % lines, `epubConvert/` 97 %,
 `convert.ts` 85 %, `calibre.ts` 95 %. The project total (76 %) is held down by
 files this work did not touch (`ipc.ts`, `index.ts`, `menu.ts`, `kindle.ts`).
+
+After the review fixes, four real EPUBs were re-converted and round-tripped
+through calibre without errors. The sidebar fix (a send settling after
+another book is shown) has no automated test, like the rest of the renderer.
+The IPC handlers themselves are untested; `requireKindleDrive` and
+`toDeviceRelpath`, which they call, are.
 
 Not yet verified: rendering on a physical Kindle. Renderer changes (failure
 reasons in the detail sidebar and bulk send) have no automated test — the
