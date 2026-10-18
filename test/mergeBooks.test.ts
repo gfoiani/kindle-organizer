@@ -185,3 +185,29 @@ describe('mergeBooks — dates', () => {
     expect(card.addedAt).toBe(1234)
   })
 })
+
+describe('mergeBooks — library folders', () => {
+  test('a library-only card read from a library folder says so', () => {
+    const lib = libraryBook({ id: 'f-1', folderId: 'folder-1' })
+
+    const [card] = mergeBooks([], [lib], BASE)
+
+    expect(card.libraryFolderId).toBe('folder-1')
+  })
+
+  test('a device card reconciled with a folder book keeps the folder link', () => {
+    const lib = libraryBook({ id: 'f-1', folderId: 'folder-1', targetRelpath: 'Book.azw3' })
+
+    const [card] = mergeBooks([deviceBook()], [lib], BASE)
+
+    expect(card.onDevice).toBe(true)
+    expect(card.libraryId).toBe('f-1')
+    expect(card.libraryFolderId).toBe('folder-1')
+  })
+
+  test('a dropped book has no folder link', () => {
+    const [card] = mergeBooks([], [libraryBook()], BASE)
+
+    expect(card.libraryFolderId).toBeUndefined()
+  })
+})

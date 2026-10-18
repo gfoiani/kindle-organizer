@@ -105,3 +105,11 @@ describe('eligibility partitions', () => {
     expect(collectable.some((key) => sendable.has(key))).toBe(false)
   })
 })
+
+describe('removableBooks — library folders', () => {
+  test('excludes books read from a library folder: their file belongs to the user', () => {
+    const fromFolder: DisplayBook = { ...STAGED, libraryId: 'lib-9', libraryFolderId: 'folder-1' }
+
+    expect(removableBooks([fromFolder, SENT]).map((b) => b.title)).toEqual(['Dune'])
+  })
+})

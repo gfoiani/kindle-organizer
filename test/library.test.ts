@@ -1,13 +1,22 @@
 import { afterAll, beforeEach, describe, expect, test } from 'vitest'
+import Database from 'better-sqlite3'
+import path from 'path'
 import { cleanupUserDataDirs, freshUserData } from './setup/electron-mock'
 import {
   deleteLibraryBook,
+  deleteLibraryFolder,
   findByContentHash,
   getConversion,
   getLibraryBook,
+  getLibraryFolder,
   insertLibraryBook,
+  insertLibraryFolder,
+  listFolderBooks,
   listLibraryBooks,
+  listLibraryFolders,
   setUploaded,
+  updateFolderBookContent,
+  updateFolderBookLocation,
   upsertConversion,
   type LibraryBookInput
 } from '../src/main/library'
@@ -155,5 +164,147 @@ describe('setUploaded', () => {
     const book = getLibraryBook('up')
     expect(book?.targetRelpath).toBe('A Sample Book.azw3')
     expect(typeof book?.uploadedAt).toBe('number')
+  })
+})
+
+describe('library folders', () => {
+  test('stores folders and reads them back in the order they were added', () => {
+    // Act
+    insertLibraryFolder('f1', '/books/novels')
+    insertLibraryFolder('f2', '/books/essays')
+
+    // Assert
+    expect(listLibraryFolders().map((f) => [f.id, f.path])).toEqual([
+      ['f1', '/books/novels'],
+      ['f2', '/books/essays']
+    ])
+    expect(getLibraryFolder('f2')?.path).toBe('/books/essays')
+    expect(typeof getLibraryFolder('f2')?.addedAt).toBe('number')
+    expect(getLibraryFolder('nope')).toBeNull()
+  })
+
+  test('refuses the same folder twice', () => {
+    insertLibraryFolder('f1', '/books')
+
+    expect(() => insertLibraryFolder('f2', '/books')).toThrow()
+  })
+
+  test('a folder book carries its folder and file signature', () => {
+    // Arrange
+    insertLibraryFolder('f1', '/books')
+
+    // Act
+    insertLibraryBook(
+      sampleInput({ id: 'fb', contentHash: 'hfb', originalPath: '/books/a.epub', folderId: 'f1', fileSize: 42, fileMtime: 1000 })
+    )
+
+    // Assert
+    const book = getLibraryBook('fb')
+    expect(book?.folderId).toBe('f1')
+    expect(book?.fileSize).toBe(42)
+    expect(book?.fileMtime).toBe(1000)
+    expect(listFolderBooks('f1').map((b) => b.id)).toEqual(['fb'])
+  })
+
+  test('a dropped book belongs to no folder', () => {
+    insertLibraryBook(sampleInput())
+
+    expect(getLibraryBook('book-1')?.folderId).toBeUndefined()
+  })
+
+  test('deleting a folder drops its books and nothing else', () => {
+    // Arrange
+    insertLibraryFolder('f1', '/books')
+    insertLibraryBook(sampleInput({ id: 'fb', contentHash: 'hfb', folderId: 'f1', fileSize: 1, fileMtime: 1 }))
+    insertLibraryBook(sampleInput({ id: 'dropped', contentHash: 'hd' }))
+
+    // Act
+    deleteLibraryFolder('f1')
+
+    // Assert
+    expect(listLibraryFolders()).toEqual([])
+    expect(listLibraryBooks().map((b) => b.id)).toEqual(['dropped'])
+  })
+
+  test('moving a folder book keeps its id, upload stamp and conversions', () => {
+    // Arrange
+    insertLibraryFolder('f1', '/a')
+    insertLibraryFolder('f2', '/b')
+    insertLibraryBook(sampleInput({ id: 'fb', contentHash: 'h', originalPath: '/a/x.epub', folderId: 'f1', fileSize: 1, fileMtime: 1 }))
+    setUploaded('fb', 'x.azw3')
+
+    // Act
+    updateFolderBookLocation('fb', { folderId: 'f2', originalPath: '/b/y.epub', filename: 'y.epub', fileSize: 1, fileMtime: 2 })
+
+    // Assert
+    const book = getLibraryBook('fb')
+    expect(book?.folderId).toBe('f2')
+    expect(book?.originalPath).toBe('/b/y.epub')
+    expect(book?.filename).toBe('y.epub')
+    expect(book?.fileMtime).toBe(2)
+    expect(book?.targetRelpath).toBe('x.azw3')
+  })
+
+  test('new content at the same path replaces hash and metadata, clearing a stale author and cover', () => {
+    // Arrange
+    insertLibraryFolder('f1', '/a')
+    insertLibraryBook(
+      sampleInput({ id: 'fb', contentHash: 'old', folderId: 'f1', fileSize: 1, fileMtime: 1, coverKey: 'k' })
+    )
+
+    // Act
+    updateFolderBookContent('fb', {
+      contentHash: 'new',
+      title: 'New Title',
+      sourceFormat: 'epub',
+      fileSize: 9,
+      fileMtime: 5
+    })
+
+    // Assert
+    const book = getLibraryBook('fb')
+    expect(book?.contentHash).toBe('new')
+    expect(book?.title).toBe('New Title')
+    expect(book?.author).toBeUndefined()
+    expect(book?.coverKey).toBeUndefined()
+    expect(book?.fileSize).toBe(9)
+    expect(findByContentHash('old')).toBeNull()
+  })
+})
+
+describe('schema upgrade', () => {
+  test('a library.db from before folders existed keeps its books and gains folder support', () => {
+    // Arrange: the 0.4.0 schema, written before the store ever opens the file.
+    const dir = freshUserData()
+    const old = new Database(path.join(dir, 'library.db'))
+    old.exec(`
+      CREATE TABLE library_books (
+        id TEXT PRIMARY KEY, content_hash TEXT UNIQUE NOT NULL, original_path TEXT NOT NULL,
+        filename TEXT NOT NULL, title TEXT NOT NULL, author TEXT, source_format TEXT NOT NULL,
+        cover_key TEXT, target_relpath TEXT, uploaded_at INTEGER, created_at INTEGER NOT NULL
+      );
+      CREATE TABLE library_conversions (
+        library_id TEXT NOT NULL REFERENCES library_books(id) ON DELETE CASCADE,
+        format TEXT NOT NULL, output_path TEXT, status TEXT NOT NULL, error TEXT,
+        PRIMARY KEY (library_id, format)
+      );
+    `)
+    old
+      .prepare(
+        `INSERT INTO library_books (id, content_hash, original_path, filename, title, source_format, created_at)
+         VALUES ('legacy', 'hl', '/lib/legacy/original.epub', 'l.epub', 'Legacy', 'epub', 1)`
+      )
+      .run()
+    old.close()
+
+    // Act
+    const books = listLibraryBooks()
+    insertLibraryFolder('f1', '/books')
+    insertLibraryBook(sampleInput({ id: 'fb', contentHash: 'hfb', folderId: 'f1', fileSize: 1, fileMtime: 1 }))
+
+    // Assert
+    expect(books.map((b) => b.id)).toEqual(['legacy'])
+    expect(books[0].folderId).toBeUndefined()
+    expect(listFolderBooks('f1').map((b) => b.id)).toEqual(['fb'])
   })
 })
