@@ -5,7 +5,8 @@ import path from 'path'
 import {
   readCalibreMetadata,
   writeCalibreMetadata,
-  readCalibreIsbnMap
+  readCalibreIsbnMap,
+  upsertCalibreEntry
 } from '../src/main/calibre'
 
 let mountpoint: string
@@ -185,5 +186,104 @@ describe('readCalibreIsbnMap', () => {
 
   test('returns an empty map when the file is absent', () => {
     expect(readCalibreIsbnMap(mountpoint).size).toBe(0)
+  })
+})
+
+describe('upsertCalibreEntry', () => {
+  const DUNE = {
+    relpath: 'Dune.azw3',
+    title: 'Dune',
+    author: 'Frank Herbert',
+    size: 2048,
+    mime: 'application/x-mobi8-ebook',
+    uuid: '3f6d9a1e-1c4b-4a2d-8f77-0b9c2e5d1a33'
+  }
+
+  test('creates metadata.calibre with a calibre-shaped record when the device has none', () => {
+    // Act
+    const ok = upsertCalibreEntry(mountpoint, DUNE)
+
+    // Assert
+    expect(ok).toBe(true)
+    const [entry] = readMetadata()
+    expect(entry).toMatchObject({
+      lpath: 'documents/Dune.azw3',
+      title: 'Dune',
+      title_sort: 'Dune',
+      authors: ['Frank Herbert'],
+      author_sort: 'Herbert, Frank',
+      tags: [],
+      device_collections: [],
+      uuid: DUNE.uuid,
+      size: 2048,
+      mime: 'application/x-mobi8-ebook'
+    })
+    expect(typeof entry['last_modified']).toBe('string')
+  })
+
+  test('falls back to Unknown when the book has no author', () => {
+    upsertCalibreEntry(mountpoint, { ...DUNE, author: undefined })
+
+    expect(readMetadata()[0]).toMatchObject({ authors: ['Unknown'], author_sort: 'Unknown' })
+  })
+
+  test('appends to an existing list without disturbing the other books', () => {
+    writeMetadata([{ lpath: 'documents/Other.azw3', tags: ['Keep'] }])
+
+    upsertCalibreEntry(mountpoint, DUNE)
+
+    const entries = readMetadata()
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).toEqual({ lpath: 'documents/Other.azw3', tags: ['Keep'] })
+    expect(entries[1]['lpath']).toBe('documents/Dune.azw3')
+  })
+
+  test('updates the record in place on re-upload, preserving its collections', () => {
+    writeMetadata([
+      {
+        lpath: 'documents/Dune.azw3',
+        title: 'Old title',
+        tags: ['Sci-Fi'],
+        device_collections: ['Sci-Fi'],
+        size: 1
+      }
+    ])
+
+    upsertCalibreEntry(mountpoint, DUNE)
+
+    const entries = readMetadata()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      title: 'Dune',
+      size: 2048,
+      tags: ['Sci-Fi'],
+      device_collections: ['Sci-Fi']
+    })
+  })
+
+  test('matches an existing record whose lpath omits the documents/ prefix', () => {
+    writeMetadata([{ lpath: 'Dune.azw3', tags: ['Sci-Fi'] }])
+
+    upsertCalibreEntry(mountpoint, DUNE)
+
+    const entries = readMetadata()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ tags: ['Sci-Fi'], title: 'Dune' })
+  })
+
+  test('normalizes a nested relpath to a posix lpath', () => {
+    upsertCalibreEntry(mountpoint, { ...DUNE, relpath: path.join('Sci-Fi', 'Dune.azw3') })
+
+    expect(readMetadata()[0]['lpath']).toBe('documents/Sci-Fi/Dune.azw3')
+  })
+
+  test('refuses to touch a corrupt metadata.calibre rather than overwriting it', () => {
+    const raw = '{ this is not json'
+    writeFileSync(path.join(mountpoint, 'metadata.calibre'), raw, 'utf-8')
+
+    const ok = upsertCalibreEntry(mountpoint, DUNE)
+
+    expect(ok).toBe(false)
+    expect(readFileSync(path.join(mountpoint, 'metadata.calibre'), 'utf-8')).toBe(raw)
   })
 })

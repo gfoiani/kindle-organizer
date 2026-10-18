@@ -108,6 +108,54 @@ describe('convert — calibre engine', () => {
     )
   })
 
+  test("forces the app's title, author and cover onto the output, like calibre does", async () => {
+    setExisting([CALIBRE_MAC])
+    const child = new FakeChild()
+    execFileMock.mockReturnValue(child)
+
+    const p = convert('/in/book.epub', 'azw3', {
+      outputPath: '/out/book.azw3',
+      metadata: { title: 'Dune', author: 'Frank Herbert', coverPath: '/covers/dune.jpg' }
+    })
+    child.emit('close', 0)
+
+    await expect(p).resolves.toBe('/out/book.azw3')
+    expect(execFileMock).toHaveBeenCalledWith(
+      CALIBRE_MAC,
+      [
+        '/in/book.epub',
+        '/out/book.azw3',
+        '--output-profile',
+        'kindle_pw3',
+        '--title',
+        'Dune',
+        '--authors',
+        'Frank Herbert',
+        '--cover',
+        '/covers/dune.jpg'
+      ],
+      expect.any(Object)
+    )
+  })
+
+  test('omits the metadata flags that have no value', async () => {
+    setExisting([CALIBRE_MAC])
+    const child = new FakeChild()
+    execFileMock.mockReturnValue(child)
+
+    const p = convert('/in/book.epub', 'azw3', {
+      outputPath: '/out/book.azw3',
+      metadata: { title: 'Dune' }
+    })
+    child.emit('close', 0)
+
+    await p
+    const [, args] = execFileMock.mock.calls[0]
+    expect(args).toContain('--title')
+    expect(args).not.toContain('--authors')
+    expect(args).not.toContain('--cover')
+  })
+
   test('reports progress from a tolerant "\\d+%" match on stderr', async () => {
     setExisting([CALIBRE_MAC])
     const child = new FakeChild()

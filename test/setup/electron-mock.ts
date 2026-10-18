@@ -44,5 +44,21 @@ vi.mock('electron', () => ({
   protocol: {
     registerSchemesAsPrivileged: () => {},
     handle: () => {}
+  },
+  // `nativeImage` has no Vitest-side implementation (it is Chromium's image
+  // decoder), so the stub reports an EMPTY image. That is a real production
+  // state — an undecodable buffer — and it drives `kindleThumbnails.toKindleJpeg`
+  // down its fallback branch, where the original bytes are written unchanged.
+  // Tests therefore assert our policy (naming, location, atomicity) against
+  // known bytes; the resize/re-encode itself is Electron's code, not ours.
+  nativeImage: {
+    createFromBuffer: () => ({
+      isEmpty: () => true,
+      getSize: () => ({ width: 0, height: 0 }),
+      resize: () => {
+        throw new Error('nativeImage.resize is not stubbed: an empty image must never be resized')
+      },
+      toJPEG: () => Buffer.alloc(0)
+    })
   }
 }))

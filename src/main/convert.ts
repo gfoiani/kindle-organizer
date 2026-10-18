@@ -128,6 +128,19 @@ export function detectEngine(): ConversionEngine {
 
 // ─── Conversion ───────────────────────────────────────────────────────────────
 
+/**
+ * Metadata forced onto the converted book, overriding whatever the source file
+ * declares. This is how the app's title/author — and the cover it extracted or
+ * fetched — end up INSIDE the file the Kindle reads, exactly as calibre does
+ * when it sends a book to a device.
+ */
+export interface ConvertMetadata {
+  title?: string
+  author?: string
+  /** Absolute path to an image embedded as the book's cover. */
+  coverPath?: string
+}
+
 export interface ConvertOptions {
   /** Where the converted file should end up. */
   outputPath: string
@@ -135,6 +148,8 @@ export interface ConvertOptions {
   signal?: AbortSignal
   /** Called with an integer percent (0–100) as Calibre reports progress, or never for indeterminate engines. */
   onProgress?: (percent: number) => void
+  /** Title/author/cover to stamp into the output. Omitted fields are left alone. */
+  metadata?: ConvertMetadata
 }
 
 const MAX_STDERR_TAIL = 2000
@@ -146,17 +161,36 @@ function parseProgress(text: string): number | null {
   return Math.max(0, Math.min(100, parseInt(match[1], 10)))
 }
 
+/** `ebook-convert` metadata flags, skipping every field the caller left empty. */
+function metadataArgs(metadata: ConvertMetadata | undefined): string[] {
+  if (!metadata) return []
+  return [
+    ...(metadata.title ? ['--title', metadata.title] : []),
+    ...(metadata.author ? ['--authors', metadata.author] : []),
+    ...(metadata.coverPath ? ['--cover', metadata.coverPath] : [])
+  ]
+}
+
 function buildArgs(
   engine: ConversionEngine,
   inputPath: string,
-  outputPath: string
+  outputPath: string,
+  metadata?: ConvertMetadata
 ): { command: string; args: string[] } {
   if (engine === 'calibre') {
     return {
       command: cachedCalibrePath ?? 'ebook-convert',
-      args: [inputPath, outputPath, '--output-profile', 'kindle_pw3']
+      args: [
+        inputPath,
+        outputPath,
+        '--output-profile',
+        'kindle_pw3',
+        ...metadataArgs(metadata)
+      ]
     }
   }
+  // The bundled converter takes its metadata from the source file and exposes no
+  // override flags, so `metadata` is deliberately ignored on this path.
   // Bundled (AZW3 only): writes into the output directory; the caller reconciles
   // the produced filename with outputPath.
   return {
@@ -197,7 +231,7 @@ export function convert(
       return
     }
 
-    const { command, args } = buildArgs(engine, inputPath, options.outputPath)
+    const { command, args } = buildArgs(engine, inputPath, options.outputPath, options.metadata)
     debug(`[convert] ${engine}: ${command} ${args.join(' ')}`)
 
     const child = execFile(command, args, { maxBuffer: 32 * 1024 * 1024 })

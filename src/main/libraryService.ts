@@ -18,6 +18,9 @@ import {
 import { convert, type ConvertOptions } from './convert'
 import { uploadFile } from './deviceUpload'
 import { titleFromFilename } from './titleFromFilename'
+import { getCacheKey, getCachePath } from './coverPaths'
+import { upsertCalibreEntry } from './calibre'
+import { writeKindleThumbnail } from './kindleThumbnails'
 import type { KindleFormat } from './settings'
 
 export type AddStatus = 'added' | 'duplicate' | 'unsupported' | 'error'
@@ -151,6 +154,89 @@ export interface SendDeps {
   uploadFile?: UploadFn
 }
 
+/** MIME types calibre records for the formats this app can put on a device. */
+const MIME_BY_FORMAT: Record<string, string> = {
+  azw3: 'application/x-mobi8-ebook',
+  azw: 'application/vnd.amazon.ebook',
+  mobi: 'application/x-mobipocket-ebook',
+  pdf: 'application/pdf',
+  txt: 'text/plain',
+  epub: 'application/epub+zip'
+}
+
+/**
+ * On-disk path of the cover the UI shows for this book, or undefined when there
+ * is none yet.
+ *
+ * Two keys are tried because a book can be covered from either side: `coverKey`
+ * is stamped at import time from an embedded EPUB cover, while a cover the
+ * renderer later fetched online lands under `getCacheKey(title, author)`. A
+ * 0-byte file is the cache's "no cover exists" marker, not a cover.
+ */
+async function findCoverPath(book: LibraryBook): Promise<string | undefined> {
+  const keys = [...new Set([book.coverKey, getCacheKey(book.title, book.author)])]
+
+  for (const key of keys) {
+    if (!key) continue
+    const cachePath = getCachePath(key)
+    if (!(await fs.pathExists(cachePath))) continue
+    if ((await fs.stat(cachePath)).size > 0) return cachePath
+  }
+  return undefined
+}
+
+/**
+ * Reproduces the bookkeeping calibre does after copying a book onto a Kindle:
+ *
+ *  1. the home-screen cover under `system/thumbnails/` — without it the firmware
+ *     paints a blank placeholder for sideloaded books, which is exactly what
+ *     "the book has no cover" looks like on the device;
+ *  2. a record in `metadata.calibre`, so the book can carry collections.
+ *
+ * Best-effort on purpose: the file is already safely on the device by now, so
+ * every failure here is logged and swallowed rather than failing the send.
+ */
+async function applyCalibreSidecars(
+  book: LibraryBook,
+  uploadSource: string,
+  mountpoint: string,
+  targetRelpath: string,
+  coverPath: string | undefined
+): Promise<void> {
+  // The two sidecars fail independently: a cover we cannot read must not cost
+  // the book its metadata.calibre record.
+  if (coverPath) {
+    try {
+      // Read the LOCAL copy of the book: byte-identical to what was uploaded,
+      // and far cheaper than reading it back over USB.
+      await writeKindleThumbnail(mountpoint, uploadSource, await fs.readFile(coverPath))
+    } catch (err) {
+      logSidecarFailure('cover thumbnail', book, err)
+    }
+  }
+
+  try {
+    const format = path.extname(targetRelpath).slice(1).toLowerCase()
+    upsertCalibreEntry(mountpoint, {
+      relpath: targetRelpath,
+      title: book.title,
+      author: book.author,
+      size: (await fs.stat(uploadSource)).size,
+      mime: MIME_BY_FORMAT[format],
+      uuid: book.id
+    })
+  } catch (err) {
+    logSidecarFailure('metadata.calibre entry', book, err)
+  }
+}
+
+function logSidecarFailure(what: string, book: LibraryBook, err: unknown): void {
+  console.error(
+    `[library] Failed to write the ${what} for "${book.title}":`,
+    err instanceof Error ? err.message : String(err)
+  )
+}
+
 /** Makes a title safe to use as a device filename. */
 function sanitizeFilename(name: string): string {
   const cleaned = name
@@ -163,9 +249,11 @@ function sanitizeFilename(name: string): string {
 
 /**
  * Converts (EPUB → the requested format) and uploads a library book to the
- * device. Already-Kindle formats and PDFs are uploaded as-is. Progress is
- * forwarded through `emit` (convert:progress then upload:progress). On success
- * the book is stamped uploaded. `convert`/`uploadFile` are injectable for tests.
+ * device, then writes the same sidecars calibre would (cover thumbnail +
+ * metadata.calibre record) so the book shows a cover on the home screen.
+ * Already-Kindle formats and PDFs are uploaded as-is. Progress is forwarded
+ * through `emit` (convert:progress then upload:progress). On success the book
+ * is stamped uploaded. `convert`/`uploadFile` are injectable for tests.
  */
 export async function sendToKindle(
   id: string,
@@ -180,6 +268,7 @@ export async function sendToKindle(
   const book = getLibraryBook(id)
   if (!book) throw new Error(`Library book ${id} not found`)
 
+  const coverPath = await findCoverPath(book)
   let uploadSource: string
   let targetFilename: string
 
@@ -189,6 +278,9 @@ export async function sendToKindle(
     try {
       await convertFn(book.originalPath, format, {
         outputPath,
+        // Stamp the app's own metadata into the book, like calibre does: the
+        // device reads title/author/cover from the file itself.
+        metadata: { title: book.title, author: book.author, coverPath },
         onProgress: (percent) => emit('convert:progress', { libraryId: id, percent })
       })
     } catch (err) {
@@ -212,6 +304,8 @@ export async function sendToKindle(
   const targetRelpath = await uploadFn(uploadSource, mountpoint, targetFilename, (percent) =>
     emit('upload:progress', { libraryId: id, percent })
   )
+
+  await applyCalibreSidecars(book, uploadSource, mountpoint, targetRelpath, coverPath)
 
   setUploaded(id, targetRelpath)
   return { targetRelpath }

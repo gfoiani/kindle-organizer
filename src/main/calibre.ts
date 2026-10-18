@@ -7,6 +7,56 @@ export interface CalibreBook {
   tags: string[]
 }
 
+const METADATA_FILENAME = 'metadata.calibre'
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function getMetadataPath(mountpoint: string): string {
+  return path.join(mountpoint, METADATA_FILENAME)
+}
+
+/**
+ * Reads `metadata.calibre` as its raw entry array. Returns null when the file is
+ * absent, unreadable, malformed, or not the expected top-level array — callers
+ * decide whether that means "nothing to do" or "refuse to write".
+ */
+function readEntryArray(metadataPath: string): unknown[] | null {
+  if (!fs.existsSync(metadataPath)) return null
+
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'))
+    return Array.isArray(parsed) ? parsed : null
+  } catch (err) {
+    console.error(`[calibre] Failed to read metadata from ${metadataPath}:`, errorText(err))
+    return null
+  }
+}
+
+/**
+ * Atomic write: temp file then rename, so the device's `metadata.calibre` is
+ * never left half-written if the Kindle is unplugged mid-write. A failed write
+ * cleans up its temp file rather than leaving a stale `.tmp` on the device.
+ */
+function writeEntryArray(metadataPath: string, entries: unknown[]): boolean {
+  const tempPath = `${metadataPath}.tmp`
+
+  try {
+    fs.writeFileSync(tempPath, JSON.stringify(entries, null, 2), 'utf-8')
+    fs.renameSync(tempPath, metadataPath)
+    return true
+  } catch (err) {
+    console.error(`[calibre] Failed to write metadata to ${metadataPath}:`, errorText(err))
+    try {
+      fs.removeSync(tempPath)
+    } catch (cleanupErr) {
+      console.error(`[calibre] Failed to clean up temp file ${tempPath}:`, errorText(cleanupErr))
+    }
+    return false
+  }
+}
+
 /**
  * Writes updated tags back to `metadata.calibre` on the Kindle.
  *
@@ -22,97 +72,47 @@ export function writeCalibreMetadata(
   mountpoint: string,
   bookTagMap: Map<string, string[]>
 ): boolean {
-  const metadataPath = path.join(mountpoint, 'metadata.calibre')
-  const tempPath = `${metadataPath}.tmp`
+  const metadataPath = getMetadataPath(mountpoint)
+  const entries = readEntryArray(metadataPath)
+  if (!entries) return false
 
-  if (!fs.existsSync(metadataPath)) return false
+  const updated = entries.map((entry) => {
+    if (typeof entry !== 'object' || entry === null) return entry
+    const rec = entry as Record<string, unknown>
+    const lpath = rec['lpath']
+    if (typeof lpath !== 'string') return entry
 
-  try {
-    const raw = fs.readFileSync(metadataPath, 'utf-8')
-    const parsed: unknown = JSON.parse(raw)
+    const tags = bookTagMap.get(stripDocumentsPrefix(lpath))
+    return tags !== undefined ? { ...rec, tags } : entry
+  })
 
-    if (!Array.isArray(parsed)) return false
-
-    const updated = parsed.map((entry) => {
-      if (typeof entry !== 'object' || entry === null) return entry
-      const rec = entry as Record<string, unknown>
-      const lpath = rec['lpath']
-      if (typeof lpath !== 'string') return entry
-
-      const relpath = stripDocumentsPrefix(lpath)
-
-      const tags = bookTagMap.get(relpath)
-      if (tags !== undefined) {
-        return { ...rec, tags }
-      }
-      return entry
-    })
-
-    // Atomic write: write to a temp file then rename, so the device's
-    // metadata.calibre is never left half-written if the Kindle is unplugged mid-write.
-    fs.writeFileSync(tempPath, JSON.stringify(updated, null, 2), 'utf-8')
-    fs.renameSync(tempPath, metadataPath)
-    return true
-  } catch (err) {
-    console.error(
-      `[calibre] Failed to write metadata to ${metadataPath}:`,
-      err instanceof Error ? err.message : String(err)
-    )
-    // Clean up the orphaned temp file so a failed write doesn't leave a stale
-    // `.tmp` behind on the device.
-    try {
-      fs.removeSync(tempPath)
-    } catch (cleanupErr) {
-      console.error(
-        `[calibre] Failed to clean up temp file ${tempPath}:`,
-        cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
-      )
-    }
-    return false
-  }
+  return writeEntryArray(metadataPath, updated)
 }
 
 export function readCalibreMetadata(mountpoint: string): CalibreBook[] {
-  const metadataPath = path.join(mountpoint, 'metadata.calibre')
+  const entries = readEntryArray(getMetadataPath(mountpoint))
+  if (!entries) return []
 
-  if (!fs.existsSync(metadataPath)) {
-    return []
+  const books: CalibreBook[] = []
+
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) continue
+
+    const lpath = (entry as Record<string, unknown>)['lpath']
+    const tags = (entry as Record<string, unknown>)['tags']
+
+    if (typeof lpath !== 'string') continue
+
+    const normalizedTags = Array.isArray(tags)
+      ? tags.filter((t): t is string => typeof t === 'string')
+      : []
+
+    if (normalizedTags.length > 0) {
+      books.push({ lpath, tags: normalizedTags })
+    }
   }
 
-  try {
-    const raw = fs.readFileSync(metadataPath, 'utf-8')
-    const parsed: unknown = JSON.parse(raw)
-
-    if (!Array.isArray(parsed)) {
-      return []
-    }
-
-    const books: CalibreBook[] = []
-
-    for (const entry of parsed) {
-      if (typeof entry !== 'object' || entry === null) continue
-
-      const lpath = (entry as Record<string, unknown>)['lpath']
-      const tags = (entry as Record<string, unknown>)['tags']
-
-      if (typeof lpath !== 'string') continue
-
-      const normalizedTags =
-        Array.isArray(tags) ? tags.filter((t): t is string => typeof t === 'string') : []
-
-      if (normalizedTags.length > 0) {
-        books.push({ lpath, tags: normalizedTags })
-      }
-    }
-
-    return books
-  } catch (err) {
-    console.error(
-      `[calibre] Failed to read metadata from ${metadataPath}:`,
-      err instanceof Error ? err.message : String(err)
-    )
-    return []
-  }
+  return books
 }
 
 /** Normalizes a raw ISBN string; returns it only if it looks like an ISBN-10/13. */
@@ -138,34 +138,134 @@ function extractIsbn(rec: Record<string, unknown>): string | undefined {
  * source). Unlike readCalibreMetadata, this is not limited to tagged books.
  */
 export function readCalibreIsbnMap(mountpoint: string): Map<string, string> {
-  const metadataPath = path.join(mountpoint, 'metadata.calibre')
   const result = new Map<string, string>()
+  const entries = readEntryArray(getMetadataPath(mountpoint))
+  if (!entries) return result
 
-  if (!fs.existsSync(metadataPath)) return result
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const rec = entry as Record<string, unknown>
+    const lpath = rec['lpath']
+    if (typeof lpath !== 'string') continue
 
-  try {
-    const raw = fs.readFileSync(metadataPath, 'utf-8')
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return result
+    const isbn = extractIsbn(rec)
+    if (!isbn) continue
 
-    for (const entry of parsed) {
-      if (typeof entry !== 'object' || entry === null) continue
-      const rec = entry as Record<string, unknown>
-      const lpath = rec['lpath']
-      if (typeof lpath !== 'string') continue
-
-      const isbn = extractIsbn(rec)
-      if (!isbn) continue
-
-      const relpath = stripDocumentsPrefix(lpath)
-      result.set(relpath, isbn)
-    }
-  } catch (err) {
-    console.error(
-      `[calibre] Failed to read ISBNs from ${metadataPath}:`,
-      err instanceof Error ? err.message : String(err)
-    )
+    result.set(stripDocumentsPrefix(lpath), isbn)
   }
 
   return result
+}
+
+// ─── Registering an uploaded book ─────────────────────────────────────────────
+
+/** What the app knows about a book it has just copied into `documents/`. */
+export interface CalibreEntryInput {
+  /** Path under `documents/`, e.g. `Dune.azw3` (platform separators are fine). */
+  relpath: string
+  title: string
+  author?: string
+  /** Size of the uploaded file in bytes. */
+  size: number
+  /** MIME type of the uploaded format, when known. */
+  mime?: string
+  /** Stable identity for the book — the UUID stamped inside it when available. */
+  uuid: string
+}
+
+/** Calibre's placeholder for a book with no author. */
+const UNKNOWN_AUTHOR = 'Unknown'
+
+/** Renders `Frank Herbert` as `Herbert, Frank`, the way calibre sorts authors. */
+function toAuthorSort(author: string): string {
+  const parts = author.trim().split(/\s+/)
+  if (parts.length < 2) return author.trim()
+  const last = parts[parts.length - 1]
+  return `${last}, ${parts.slice(0, -1).join(' ')}`
+}
+
+/** Preserves an existing string array (tags, collections) across a re-upload. */
+function keepStringArray(rec: Record<string, unknown> | undefined, field: string): string[] {
+  const value = rec?.[field]
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+/**
+ * Builds the record calibre would write for this book. Only the fields that
+ * actually travel between calibre and a device are filled in; the rest are the
+ * explicit nulls calibre emits, so the entry round-trips through its reader
+ * (and through ours) unchanged.
+ */
+function buildEntry(
+  input: CalibreEntryInput,
+  relpath: string,
+  existing: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  const author = input.author?.trim() || UNKNOWN_AUTHOR
+
+  return {
+    lpath: `documents/${relpath}`,
+    title: input.title,
+    title_sort: input.title,
+    authors: [author],
+    author_sort: toAuthorSort(author),
+    // Tags ARE collections for this app (see writeCalibreMetadata) — a re-upload
+    // must not silently drop the book out of every collection it belongs to.
+    tags: keepStringArray(existing, 'tags'),
+    device_collections: keepStringArray(existing, 'device_collections'),
+    uuid: input.uuid,
+    size: input.size,
+    mime: input.mime ?? null,
+    last_modified: new Date().toISOString(),
+    application_id: null,
+    book_producer: null,
+    comments: null,
+    cover: null,
+    identifiers: {},
+    languages: [],
+    pubdate: null,
+    publisher: null,
+    rating: null,
+    series: null,
+    series_index: null,
+    thumbnail: null
+  }
+}
+
+/**
+ * Registers a freshly uploaded book in the device's `metadata.calibre`, creating
+ * the file when the device has none — this is the bookkeeping calibre does after
+ * copying a book, and what lets the book take part in collections.
+ *
+ * Re-uploading the same relpath updates that record in place (keeping its tags
+ * and collections) instead of duplicating it. A `metadata.calibre` we cannot
+ * parse is left strictly untouched: overwriting it would wipe every collection
+ * on the device. Returns whether the file now contains the entry.
+ */
+export function upsertCalibreEntry(mountpoint: string, input: CalibreEntryInput): boolean {
+  const metadataPath = getMetadataPath(mountpoint)
+  const exists = fs.existsSync(metadataPath)
+  const entries = exists ? readEntryArray(metadataPath) : []
+
+  if (!entries) {
+    console.error(
+      `[calibre] Refusing to register "${input.relpath}": ${metadataPath} is not readable JSON`
+    )
+    return false
+  }
+
+  // `lpath` is always posix-separated, whatever the host platform uses.
+  const relpath = input.relpath.split(path.sep).join('/')
+
+  const index = entries.findIndex((entry) => {
+    if (typeof entry !== 'object' || entry === null) return false
+    const lpath = (entry as Record<string, unknown>)['lpath']
+    return typeof lpath === 'string' && stripDocumentsPrefix(lpath) === relpath
+  })
+
+  const existing = index >= 0 ? (entries[index] as Record<string, unknown>) : undefined
+  const entry = buildEntry(input, relpath, existing)
+  const updated = index >= 0 ? entries.map((e, i) => (i === index ? entry : e)) : [...entries, entry]
+
+  return writeEntryArray(metadataPath, updated)
 }
