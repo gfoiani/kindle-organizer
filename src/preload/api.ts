@@ -1,6 +1,7 @@
 import { ipcRenderer, webUtils } from 'electron'
 import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
-import type { BookMetadata, CoverStatus, EnsureCoverResult } from '../main/covers'
+import type { CoverStatus, EnsureCoverResult } from '../main/covers'
+import type { BookMetadata } from '../main/bookMetadata'
 import type { KindleFormat } from '../main/settings'
 import type { LibraryBook } from '../main/library'
 import type { AddResult, SendProgress, SendResult, SendSidecar } from '../main/libraryService'

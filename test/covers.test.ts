@@ -15,10 +15,10 @@ import {
   cancelAllCovers,
   clearCoverCache,
   ensureCover,
-  getBookMetadata,
   importLocalCover,
   setCoverWindowProvider
 } from '../src/main/covers'
+import { getBookMetadata } from '../src/main/bookMetadata'
 import { httpGetImpl, mockRoute, resetHttpMock } from './setup/httpMock'
 
 let userData: string

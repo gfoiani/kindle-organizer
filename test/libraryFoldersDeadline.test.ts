@@ -21,7 +21,10 @@ const { addLibraryFolder, configureSyncDeadlines, describeLibraryFolders, syncAl
   await import('../src/main/libraryFolders')
 const { listFolderBooks } = await import('../src/main/library')
 
-const DEADLINE_MS = 50
+// The hung operation never settles, so any deadline exposes it; the healthy
+// scans and reads in the same test must finish within it even when the whole
+// suite runs in parallel (50 ms was occasionally too short).
+const DEADLINE_MS = 1000
 const never = <T>(): Promise<T> => new Promise<T>(() => undefined)
 
 let scratch: string

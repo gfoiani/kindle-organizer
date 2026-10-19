@@ -6,6 +6,13 @@ import { AbortError, hostKey, noteRateLimited, schedule } from './requestSchedul
 // Re-export so covers.ts and tests get the whole error taxonomy from one place.
 export { AbortError }
 
+// Cancellation flows as an AbortError (name-matched so it survives realm/module
+// boundaries). It must NEVER be treated as a network failure — an aborted
+// download schedules no retry and writes no negative cache.
+export function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError'
+}
+
 // Dev-only verbose logging. Silent in packaged builds.
 const debug = (...args: unknown[]): void => {
   if (!app.isPackaged) console.log(...args)
