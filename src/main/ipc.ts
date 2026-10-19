@@ -345,7 +345,8 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
   ipcMain.handle(
     'kindle:clear-cover-cache',
     withErrorLogging('kindle:clear-cover-cache', async () => {
-      await clearCoverCache()
+      // A library book's embedded cover was taken from its file: nothing could fetch it back.
+      await clearCoverCache(listLibraryBooks().flatMap((book) => book.coverKey ?? []))
     })
   )
 

@@ -39,6 +39,24 @@ function readEntryArray(metadataPath: string): unknown[] | null {
 }
 
 /**
+ * The `uuid` of every record in `metadata.calibre`, lowercased — the
+ * identifier calibre and this app name a book's thumbnail after. Empty when
+ * the device has no such file; null when it cannot be read.
+ */
+export function readCalibreUuids(mountpoint: string): Set<string> | null {
+  const metadataPath = getMetadataPath(mountpoint)
+  if (!fs.existsSync(metadataPath)) return new Set()
+  const entries = readEntryArray(metadataPath)
+  if (!entries) return null
+  return new Set(
+    entries.flatMap((entry) => {
+      const uuid = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>).uuid : undefined
+      return typeof uuid === 'string' ? [uuid.toLowerCase()] : []
+    })
+  )
+}
+
+/**
  * Atomic write: temp file then rename, so the device's `metadata.calibre` is
  * never left half-written if the Kindle is unplugged mid-write. A failed write
  * cleans up its temp file rather than leaving a stale `.tmp` on the device.

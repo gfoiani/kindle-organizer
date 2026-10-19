@@ -10,6 +10,26 @@ export class DeviceDocumentsMissingError extends Error {
   }
 }
 
+/** How many ` (n)` suffixes `availableFilename` tries before giving up. */
+const MAX_NAME_SUFFIX = 999
+
+/**
+ * `wanted`, or `Name (2).ext`, `Name (3).ext`… when another book already has
+ * that name in the device's `documents/`: a send never replaces a book it did
+ * not put there. `own` is where this book was sent before — replacing its own
+ * copy is a re-send. FAT ignores case, so names are compared ignoring it too.
+ */
+export async function availableFilename(mountpoint: string, wanted: string, own?: string): Promise<string> {
+  const documentsDir = path.join(mountpoint, 'documents')
+  const { name, ext } = path.parse(wanted)
+  for (let n = 1; n <= MAX_NAME_SUFFIX; n++) {
+    const candidate = n === 1 ? wanted : `${name} (${n})${ext}`
+    const isOwn = own !== undefined && candidate.toLowerCase() === own.toLowerCase()
+    if (isOwn || !(await fs.pathExists(path.join(documentsDir, candidate)))) return candidate
+  }
+  throw new Error(`No free file name for ${wanted} in ${documentsDir}`)
+}
+
 /**
  * Copies a local file into the device's `documents/` folder atomically: it
  * streams to a hidden `.<name>.tmp` staged ON THE DEVICE (same filesystem, so

@@ -417,6 +417,7 @@ export function BooksGrid({
 
     const total = sendable.length
     let sent = 0
+    let incomplete = 0
     let failed = 0
     let stopped = false
     // Why each failure happened, as far as the main process could say ('' = unknown).
@@ -433,8 +434,9 @@ export function BooksGrid({
       setSendingId(libraryId)
       setProgress({ done: index, total, phase: 'converting', percent: 0 })
       try {
-        await window.kindleAPI.uploadBook(libraryId, mountpoint)
+        const { unwrittenSidecars } = await window.kindleAPI.uploadBook(libraryId, mountpoint)
         sent++
+        if (unwrittenSidecars.length > 0) incomplete++
       } catch (err) {
         console.error(`[bulk-send] "${book.title}" failed:`, err)
         failed++
@@ -451,6 +453,7 @@ export function BooksGrid({
     const [sharedFailureKey] = failureKeys.size === 1 ? [...failureKeys] : ['']
     const summary = [
       sent > 0 ? t('selection.sentCount', { count: sent }) : null,
+      incomplete > 0 ? t('selection.incompleteCount', { count: incomplete }) : null,
       failed > 0 ? t('selection.failedCount', { count: failed }) : null,
       sharedFailureKey ? t(sharedFailureKey) : null,
       stopped ? t('selection.stopped') : null

@@ -77,11 +77,15 @@ let lastVerified: { drive: KindleDrive; at: number } | undefined
  * The connected Kindle mounted at `mountpoint`, for IPC handlers that write
  * to the device: a renderer-supplied path is only trusted once a detection
  * reports a Kindle there. Detection is slow (seconds on Windows), so a recent
- * success for the same mountpoint is reused for `KINDLE_VERIFY_TTL_MS`.
+ * success for the same mountpoint is reused for `KINDLE_VERIFY_TTL_MS` while
+ * the volume's `documents/` is still there.
  */
 export async function requireKindleDrive(mountpoint: string, now = Date.now()): Promise<KindleDrive> {
   const cached = lastVerified
-  if (cached && cached.drive.mountpoint === mountpoint && now - cached.at < KINDLE_VERIFY_TTL_MS) {
+  // A recent success only stands while the volume is still mounted: an unplug
+  // takes its documents/ folder with it, and that costs one stat, not a detection.
+  const fresh = cached && cached.drive.mountpoint === mountpoint && now - cached.at < KINDLE_VERIFY_TTL_MS
+  if (cached && fresh && (await fs.pathExists(path.join(mountpoint, 'documents')))) {
     return cached.drive
   }
   const drive = (await detectKindleDrives()).find((candidate) => candidate.mountpoint === mountpoint)

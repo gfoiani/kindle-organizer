@@ -101,13 +101,13 @@ describe('writeKindleThumbnail', () => {
     expect(existsSync(thumbnailsDir())).toBe(false)
   })
 
-  test('resolves null instead of throwing when the device is gone mid-write', async () => {
+  test('rejects when the device is gone mid-write, so the send can report the missing cover', async () => {
     const book = writeMobi(path.join(books, 'converted.azw3'), { uuid: UUID })
     rmSync(mountpoint, { recursive: true, force: true })
     // A file where the mountpoint should be: every write under it must fail.
     writeFileSync(mountpoint, Buffer.from('not a directory'))
 
-    await expect(writeKindleThumbnail(mountpoint, book, fakeJpeg())).resolves.toBeNull()
+    await expect(writeKindleThumbnail(mountpoint, book, fakeJpeg())).rejects.toThrow()
   })
 })
 

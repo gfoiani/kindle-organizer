@@ -1,6 +1,6 @@
 import * as fs from 'fs-extra'
 import path from 'path'
-import { removeCalibreEntries } from './calibre'
+import { readCalibreUuids, removeCalibreEntries } from './calibre'
 import { SUPPORTED_EXTENSIONS } from './kindle'
 import { getThumbnailDir, thumbnailFilename } from './kindleThumbnails'
 import { readMobiIdentifiers, type MobiIdentifiers } from './mobiHeader'
@@ -53,24 +53,26 @@ async function stemStillInUse(bookPath: string): Promise<boolean> {
 }
 
 /**
- * What the firmware keeps beside a book: the `<name>.sdr` folder (reading
- * position, highlights) unless another book still uses it, and the
- * home-screen thumbnail. Best-effort — the book is already gone, so a leftover
- * is logged rather than reported as a failure.
+ * Best-effort removal of what the firmware keeps beside a book — the book is
+ * already gone, so a leftover is logged rather than reported as a failure.
  */
-async function removeSidecars(mountpoint: string, bookPath: string, identifiers: MobiIdentifiers | null): Promise<void> {
-  const sidecarDir = path.join(path.dirname(bookPath), `${path.parse(bookPath).name}.sdr`)
-  const sidecars = (await stemStillInUse(bookPath)) ? [] : [sidecarDir]
-  const thumbnails = identifiers ? [path.join(getThumbnailDir(mountpoint), thumbnailFilename(identifiers))] : []
-  for (const leftover of [...sidecars, ...thumbnails]) {
-    await fs.remove(leftover).catch((err: unknown) => {
-      console.error(`[delete] Could not remove ${leftover}:`, errorText(err))
-    })
-  }
+async function removeLeftover(leftover: string): Promise<void> {
+  await fs.remove(leftover).catch((err: unknown) => {
+    console.error(`[delete] Could not remove ${leftover}:`, errorText(err))
+  })
 }
 
-/** Deletes one book; resolves its relpath under `documents/`, or undefined when it was not deleted. */
-async function deleteOne(mountpoint: string, bookPath: string): Promise<string | undefined> {
+/** A deleted book: its path under `documents/` and the identifiers its thumbnail is named after. */
+interface DeletedBook {
+  relpath: string
+  identifiers: MobiIdentifiers | null
+}
+
+/**
+ * Deletes one book and its `<name>.sdr` folder (reading position, highlights)
+ * unless another book still uses it. Undefined when it was not deleted.
+ */
+async function deleteOne(mountpoint: string, bookPath: string): Promise<DeletedBook | undefined> {
   const relpath = await deletableRelpath(mountpoint, bookPath)
   if (relpath === undefined) {
     console.error(`[delete] Refusing to delete ${bookPath}: not a book file under documents/`)
@@ -79,8 +81,30 @@ async function deleteOne(mountpoint: string, bookPath: string): Promise<string |
   // Read before the file goes: the identifiers name the thumbnail.
   const identifiers = await readMobiIdentifiers(bookPath)
   await fs.unlink(bookPath)
-  await removeSidecars(mountpoint, bookPath, identifiers)
-  return relpath
+  if (!(await stemStillInUse(bookPath))) {
+    await removeLeftover(path.join(path.dirname(bookPath), `${path.parse(bookPath).name}.sdr`))
+  }
+  return { relpath, identifiers }
+}
+
+/**
+ * Removes the home-screen thumbnails of deleted books, except one another copy
+ * of the same book still shows: copies share an identifier, and every book
+ * calibre or this app sent is recorded in metadata.calibre under it. When that
+ * file cannot be read the thumbnails stay — a stray image is harmless, a
+ * missing cover is not.
+ */
+async function removeThumbnails(mountpoint: string, deleted: readonly DeletedBook[]): Promise<void> {
+  const identified = deleted.flatMap((book) => (book.identifiers ? [book.identifiers] : []))
+  if (identified.length === 0) return
+  const stillRecorded = readCalibreUuids(mountpoint)
+  if (!stillRecorded) {
+    console.error('[delete] metadata.calibre is not readable; keeping the thumbnails of the deleted books')
+    return
+  }
+  for (const identifiers of identified.filter((ids) => !stillRecorded.has(ids.asin.toLowerCase()))) {
+    await removeLeftover(path.join(getThumbnailDir(mountpoint), thumbnailFilename(identifiers)))
+  }
 }
 
 /**
@@ -89,21 +113,23 @@ async function deleteOne(mountpoint: string, bookPath: string): Promise<string |
  * book is independent — one that cannot be deleted does not stop the rest.
  */
 export async function deleteDeviceBooks(mountpoint: string, bookPaths: readonly string[]): Promise<DeleteResult> {
-  const outcomes: Array<{ bookPath: string; relpath?: string }> = []
+  const outcomes: Array<{ bookPath: string; deleted?: DeletedBook }> = []
   for (const bookPath of bookPaths) {
-    const relpath = await deleteOne(mountpoint, bookPath).catch((err: unknown) => {
+    const deleted = await deleteOne(mountpoint, bookPath).catch((err: unknown) => {
       console.error(`[delete] Could not delete ${bookPath}:`, errorText(err))
       return undefined
     })
-    outcomes.push({ bookPath, relpath })
+    outcomes.push({ bookPath, deleted })
   }
 
-  const deletedRelpaths = outcomes.flatMap((o) => (o.relpath === undefined ? [] : [o.relpath]))
-  if (deletedRelpaths.length > 0 && !removeCalibreEntries(mountpoint, deletedRelpaths)) {
+  const deletedBooks = outcomes.flatMap((o) => (o.deleted ? [o.deleted] : []))
+  if (deletedBooks.length > 0 && !removeCalibreEntries(mountpoint, deletedBooks.map((book) => book.relpath))) {
     console.error('[delete] metadata.calibre is not readable; the deleted books keep their records')
   }
+  // After the records go: a thumbnail is kept only for a book still recorded.
+  await removeThumbnails(mountpoint, deletedBooks)
   return {
-    deleted: outcomes.filter((o) => o.relpath !== undefined).map((o) => o.bookPath),
-    failed: outcomes.filter((o) => o.relpath === undefined).map((o) => o.bookPath)
+    deleted: outcomes.filter((o) => o.deleted).map((o) => o.bookPath),
+    failed: outcomes.filter((o) => !o.deleted).map((o) => o.bookPath)
   }
 }

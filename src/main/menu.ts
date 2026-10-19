@@ -15,7 +15,19 @@ const DEFAULT_LABELS: MenuLabels = {
 let currentWindow: BrowserWindow | null = null
 let currentLabels: MenuLabels = DEFAULT_LABELS
 
-function buildMenu(mainWindow: BrowserWindow, labels: MenuLabels): Menu {
+/**
+ * Shows the app's About page, or the system About panel when there is no
+ * window to show it in: on macOS the app (and its menu) outlive the window.
+ */
+function showAbout(): void {
+  if (currentWindow && !currentWindow.isDestroyed()) {
+    currentWindow.webContents.send('show-about')
+  } else {
+    app.showAboutPanel()
+  }
+}
+
+function buildMenu(labels: MenuLabels): Menu {
   const isMac = process.platform === 'darwin'
 
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -26,9 +38,7 @@ function buildMenu(mainWindow: BrowserWindow, labels: MenuLabels): Menu {
             submenu: [
               {
                 label: labels.about,
-                click: (): void => {
-                  mainWindow.webContents.send('show-about')
-                }
+                click: showAbout
               },
               { type: 'separator' },
               { role: 'services' },
@@ -69,9 +79,7 @@ function buildMenu(mainWindow: BrowserWindow, labels: MenuLabels): Menu {
               { type: 'separator' },
               {
                 label: labels.about,
-                click: (): void => {
-                  mainWindow.webContents.send('show-about')
-                }
+                click: showAbout
               }
             ] as Electron.MenuItemConstructorOptions[])
           : [])
@@ -84,7 +92,7 @@ function buildMenu(mainWindow: BrowserWindow, labels: MenuLabels): Menu {
 
 export function setupMenu(mainWindow: BrowserWindow): void {
   currentWindow = mainWindow
-  Menu.setApplicationMenu(buildMenu(mainWindow, currentLabels))
+  Menu.setApplicationMenu(buildMenu(currentLabels))
 }
 
 /**
@@ -112,7 +120,5 @@ export function popupAppMenu(x: number, y: number): void {
  */
 export function setMenuLabels(labels: MenuLabels): void {
   currentLabels = labels
-  if (currentWindow && !currentWindow.isDestroyed()) {
-    Menu.setApplicationMenu(buildMenu(currentWindow, currentLabels))
-  }
+  Menu.setApplicationMenu(buildMenu(currentLabels))
 }

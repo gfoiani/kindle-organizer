@@ -79,8 +79,10 @@ export function toKindleJpeg(image: Buffer): Buffer | null {
 /**
  * Writes `cover` as the device thumbnail for the book at `bookPath` (the LOCAL
  * copy — byte-identical to the uploaded one, and far cheaper to read than the
- * file on the device). Returns the filename written, or null when the book
- * carries no usable identifier, the cover is empty, or the write failed.
+ * file on the device). Returns the filename written, or null when there is
+ * nothing to write: the book carries no usable identifier, the cover is empty
+ * or too large to decode. A failed write is thrown (after its temp file is
+ * removed), so the caller can tell the user the cover did not make it.
  *
  * Unlike calibre — which bails when `system/thumbnails` is absent — the folder
  * is created if needed: the caller has already proven this is a Kindle by
@@ -121,13 +123,12 @@ export async function writeKindleThumbnail(
     debug(`[thumbnails] Wrote ${filename}`)
     return filename
   } catch (err) {
-    console.error(`[thumbnails] Failed to write ${finalPath}:`, errorText(err))
     try {
       await fs.remove(tempPath)
     } catch (cleanupErr) {
       console.error(`[thumbnails] Failed to clean up ${tempPath}:`, errorText(cleanupErr))
     }
-    return null
+    throw err
   }
 }
 

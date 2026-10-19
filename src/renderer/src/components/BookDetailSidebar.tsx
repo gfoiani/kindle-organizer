@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { KindleBook, BookMetadata, KindleFormat } from '../../../preload/api'
+import type { KindleBook, BookMetadata, KindleFormat, SendSidecar } from '../../../preload/api'
 import type { DisplayBook } from '../utils/mergeBooks'
 import { CoverPlaceholder } from './CoverPlaceholder'
 import { formatSize } from '../utils/format'
@@ -9,6 +9,12 @@ import { useCover } from '../hooks/useCover'
 import { errorMessageKey } from '../utils/appError'
 
 type SendPhase = 'idle' | 'converting' | 'uploading' | 'done' | 'error'
+
+/** What to tell the user about each sidecar a send could not write. */
+const SIDECAR_WARNING_KEYS: Record<SendSidecar, string> = {
+  thumbnail: 'library.sidecarThumbnailMissing',
+  calibreRecord: 'library.sidecarCalibreRecordMissing'
+}
 
 interface Props {
   book: DisplayBook
@@ -48,6 +54,8 @@ export function BookDetailSidebar({
   // i18n key of WHY the last send failed (DRM, damaged EPUB…), when the main
   // process said so; the generic button label covers everything else.
   const [sendFailureKey, setSendFailureKey] = useState<string | null>(null)
+  // What a completed send could not write beside the book (its cover, its metadata.calibre record).
+  const [sendWarningKeys, setSendWarningKeys] = useState<string[]>([])
   const [isRemoving, setIsRemoving] = useState(false)
   const [revealFailed, setRevealFailed] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -79,6 +87,7 @@ export function BookDetailSidebar({
     setSendPhase('idle')
     setSendPercent(0)
     setSendFailureKey(null)
+    setSendWarningKeys([])
     setRevealFailed(false)
   }, [book.libraryId])
 
@@ -117,11 +126,14 @@ export function BookDetailSidebar({
     setSendPhase(willConvert ? 'converting' : 'uploading')
     setSendPercent(0)
     setSendFailureKey(null)
+    setSendWarningKeys([])
     const stillShown = (): boolean => shownLibraryId.current === libraryId
     try {
-      await window.kindleAPI.uploadBook(libraryId, mountpoint)
+      const { unwrittenSidecars } = await window.kindleAPI.uploadBook(libraryId, mountpoint)
       onSent()
-      if (stillShown()) setSendPhase('done')
+      if (!stillShown()) return
+      setSendWarningKeys(unwrittenSidecars.map((sidecar) => SIDECAR_WARNING_KEYS[sidecar]))
+      setSendPhase('done')
     } catch (err) {
       console.error('Failed to send to Kindle:', err)
       if (!stillShown()) return
@@ -398,6 +410,13 @@ export function BookDetailSidebar({
                   </p>
                 )}
 
+                {sendPhase === 'done' &&
+                  sendWarningKeys.map((key) => (
+                    <p key={key} className="text-amber-300 text-xs">
+                      {t(key)}
+                    </p>
+                  ))}
+
                 {isSending && (
                   <div className="w-full h-1.5 bg-gray-800 rounded overflow-hidden">
                     <div
@@ -446,7 +465,7 @@ export function BookDetailSidebar({
                     reason when there is one, so a failure is announced once. */}
                 <div role="status" aria-live="polite" className="sr-only">
                   {sendPhase === 'done'
-                    ? t('library.sent')
+                    ? [t('library.sent'), ...sendWarningKeys.map((key) => t(key))].join(' ')
                     : sendPhase === 'error'
                       ? t(sendFailureKey ?? 'library.sendError')
                       : ''}

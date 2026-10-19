@@ -3,7 +3,7 @@ import type { KindleDrive, KindleBook, Collection } from '../main/kindle'
 import type { BookMetadata, CoverStatus, EnsureCoverResult } from '../main/covers'
 import type { KindleFormat } from '../main/settings'
 import type { LibraryBook } from '../main/library'
-import type { AddResult, SendProgress } from '../main/libraryService'
+import type { AddResult, SendProgress, SendResult, SendSidecar } from '../main/libraryService'
 import type { RenameTarget } from '../main/localCollections'
 import type { AppErrorCode } from '../main/appErrors'
 import type { DeleteResult } from '../main/deviceDelete'
@@ -29,6 +29,8 @@ export type {
   LibraryBook,
   AddResult,
   SendProgress,
+  SendResult,
+  SendSidecar,
   RenameTarget,
   AppErrorCode
 }
@@ -123,7 +125,7 @@ export interface KindleAPI {
    * connected device. Progress arrives via onConvertProgress / onUploadProgress
    * (keyed by libraryId).
    */
-  uploadBook: (id: string, mountpoint: string) => Promise<{ targetRelpath: string }>
+  uploadBook: (id: string, mountpoint: string) => Promise<SendResult>
   /** Subscribe to conversion progress (libraryId + percent). Returns unsubscribe. */
   onConvertProgress: (callback: (progress: SendProgress) => void) => () => void
   /** Subscribe to upload progress (libraryId + percent). Returns unsubscribe. */

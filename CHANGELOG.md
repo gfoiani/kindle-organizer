@@ -37,6 +37,13 @@ All notable changes to this project will be documented in this file.
 - Refresh no longer spins forever when a book is sent or deleted while the Kindle is still being read.
 - Removing a library book checks that the id belongs to the library before touching the disk.
 - **Windows:** collections imported from calibre now show their books, title/author edits and ISBNs apply, and collections keep working when the Kindle gets a different drive letter. Collections and edits saved by earlier versions are carried over on first launch.
+- Sending a book no longer overwrites a different book with the same name already on the Kindle; the new one is saved as `Title (2)`.
+- A send that put the book on the Kindle but could not write its cover or its `metadata.calibre` record now says so instead of reporting full success.
+- Deleting one copy of a book no longer removes the home-screen cover of another copy still on the Kindle.
+- *Write to Kindle* and *Send* refuse a Kindle unplugged a moment earlier instead of reporting success.
+- *Clear cover cache* keeps the covers taken from the books' own files, which could not be downloaded again.
+- Dropping the same book twice at once no longer leaves an orphan copy in the library folder.
+- On macOS, *About* in the menu bar works after the window has been closed.
 - **macOS:** the collections and edits of a book with an accented file name no longer depend on whether macOS spells the name composed or decomposed.
 
 ## [0.4.0] - 2026-08-03

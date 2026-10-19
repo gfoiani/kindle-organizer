@@ -19,7 +19,7 @@ import {
 import { AppError } from './appErrors'
 import { isRegularFileInside } from './folderScan'
 import { convert, type ConvertOptions } from './convert'
-import { uploadFile } from './deviceUpload'
+import { availableFilename, uploadFile } from './deviceUpload'
 import { titleFromFilename } from './titleFromFilename'
 import { getCacheKey, getCachePath } from './coverPaths'
 import { calibreMimeType, upsertCalibreEntry } from './calibre'
@@ -88,19 +88,22 @@ async function addOneFile(filePath: string): Promise<AddResult> {
 
     // Copy the original into the library store under a fresh id.
     const id = crypto.randomUUID()
-    const dir = itemDir(id)
-    await fs.ensureDir(dir)
-    const originalPath = path.join(dir, `original${ext}`)
-    await fs.copy(filePath, originalPath)
-
-    const book = insertLibraryBook({
-      id,
-      contentHash,
-      originalPath,
-      filename: path.basename(filePath),
-      ...metadata,
-      sourceFormat: ext.slice(1)
+    const originalPath = path.join(itemDir(id), `original${ext}`)
+    const book = await storeCopy(filePath, originalPath, () =>
+      insertLibraryBook({
+        id,
+        contentHash,
+        originalPath,
+        filename: path.basename(filePath),
+        ...metadata,
+        sourceFormat: ext.slice(1)
+      })
+    ).catch((err: unknown) => {
+      // Refused because a concurrent add or a folder sync stored the same content meanwhile.
+      if (findByContentHash(contentHash)) return undefined
+      throw err
     })
+    if (!book) return { path: filePath, status: 'duplicate', book: findByContentHash(contentHash) ?? undefined }
     return { path: filePath, status: 'added', book }
   } catch (err) {
     console.error(
@@ -112,6 +115,22 @@ async function addOneFile(filePath: string): Promise<AddResult> {
       status: 'error',
       error: err instanceof Error ? err.message : String(err)
     }
+  }
+}
+
+/**
+ * Copies `source` to `target` (a fresh item directory) and records it with
+ * `insert`. When the record is refused the copy is removed again, so the store
+ * never holds a file without a row.
+ */
+async function storeCopy(source: string, target: string, insert: () => LibraryBook): Promise<LibraryBook> {
+  await fs.ensureDir(path.dirname(target))
+  await fs.copy(source, target)
+  try {
+    return insert()
+  } catch (err) {
+    await fs.remove(path.dirname(target))
+    throw err
   }
 }
 
@@ -217,6 +236,16 @@ async function findCoverPath(book: LibraryBook): Promise<string | undefined> {
   return undefined
 }
 
+/** A file calibre writes beside a sent book; a send reports the ones it could not write. */
+export type SendSidecar = 'thumbnail' | 'calibreRecord'
+
+/** What a send did: where the book landed, and which sidecars are missing. */
+export interface SendResult {
+  targetRelpath: string
+  /** Empty when the book is complete on the device. */
+  unwrittenSidecars: SendSidecar[]
+}
+
 /**
  * Reproduces the bookkeeping calibre does after copying a book onto a Kindle:
  *
@@ -225,8 +254,8 @@ async function findCoverPath(book: LibraryBook): Promise<string | undefined> {
  *     "the book has no cover" looks like on the device;
  *  2. a record in `metadata.calibre`, so the book can carry collections.
  *
- * Best-effort on purpose: the file is already safely on the device by now, so
- * every failure here is logged and swallowed rather than failing the send.
+ * The file is already safely on the device by now, so a failure here does not
+ * fail the send: it is logged and returned, for the UI to say what is missing.
  */
 async function applyCalibreSidecars(
   book: LibraryBook,
@@ -234,20 +263,16 @@ async function applyCalibreSidecars(
   mountpoint: string,
   targetRelpath: string,
   coverPath: string | undefined
-): Promise<void> {
+): Promise<SendSidecar[]> {
   // The two sidecars fail independently: a cover we cannot read must not cost
   // the book its metadata.calibre record.
-  if (coverPath) {
-    try {
-      // Read the LOCAL copy of the book: byte-identical to what was uploaded,
-      // and far cheaper than reading it back over USB.
-      await writeKindleThumbnail(mountpoint, uploadSource, await fs.readFile(coverPath))
-    } catch (err) {
-      logSidecarFailure('cover thumbnail', book, err)
-    }
-  }
-
-  try {
+  const thumbnailWritten = await attempt('cover thumbnail', book, async () => {
+    // Read the LOCAL copy of the book: byte-identical to what was uploaded,
+    // and far cheaper than reading it back over USB.
+    if (coverPath) await writeKindleThumbnail(mountpoint, uploadSource, await fs.readFile(coverPath))
+    return true
+  })
+  const recordWritten = await attempt('metadata.calibre entry', book, async () =>
     upsertCalibreEntry(mountpoint, {
       relpath: targetRelpath,
       title: book.title,
@@ -256,8 +281,17 @@ async function applyCalibreSidecars(
       mime: calibreMimeType(targetRelpath),
       uuid: book.id
     })
+  )
+  return [...(thumbnailWritten ? [] : ['thumbnail' as const]), ...(recordWritten ? [] : ['calibreRecord' as const])]
+}
+
+/** Runs one sidecar write; false when it threw (logged) or reported that it wrote nothing. */
+async function attempt(what: string, book: LibraryBook, write: () => Promise<boolean>): Promise<boolean> {
+  try {
+    return await write()
   } catch (err) {
-    logSidecarFailure('metadata.calibre entry', book, err)
+    logSidecarFailure(what, book, err)
+    return false
   }
 }
 
@@ -281,7 +315,9 @@ function sanitizeFilename(name: string): string {
 /**
  * Converts (EPUB → the requested format) and uploads a library book to the
  * device, then writes the same sidecars calibre would (cover thumbnail +
- * metadata.calibre record) so the book shows a cover on the home screen.
+ * metadata.calibre record) so the book shows a cover on the home screen. A
+ * different book already on the device under the same name is kept: this one
+ * gets a ` (2)` suffix.
  * Already-Kindle formats and PDFs are uploaded as-is. Progress is forwarded
  * through `emit` (convert:progress then upload:progress). On success the book
  * is stamped uploaded. `convert`/`uploadFile` are injectable for tests.
@@ -292,7 +328,7 @@ export async function sendToKindle(
   format: KindleFormat,
   emit: SendEmit,
   deps: SendDeps = {}
-): Promise<{ targetRelpath: string }> {
+): Promise<SendResult> {
   const convertFn = deps.convert ?? convert
   const uploadFn = deps.uploadFile ?? uploadFile
 
@@ -335,12 +371,13 @@ export async function sendToKindle(
     targetFilename = book.filename
   }
 
-  const targetRelpath = await uploadFn(uploadSource, mountpoint, targetFilename, (percent) =>
+  const freeFilename = await availableFilename(mountpoint, targetFilename, book.targetRelpath)
+  const targetRelpath = await uploadFn(uploadSource, mountpoint, freeFilename, (percent) =>
     emit('upload:progress', { libraryId: id, percent })
   )
 
-  await applyCalibreSidecars(book, uploadSource, mountpoint, targetRelpath, coverPath)
+  const unwrittenSidecars = await applyCalibreSidecars(book, uploadSource, mountpoint, targetRelpath, coverPath)
 
   setUploaded(id, targetRelpath)
-  return { targetRelpath }
+  return { targetRelpath, unwrittenSidecars }
 }

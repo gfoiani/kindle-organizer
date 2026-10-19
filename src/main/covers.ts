@@ -683,15 +683,20 @@ export function startCoverRetryLoop(getWindow: () => BrowserWindow | null): () =
   return () => clearInterval(handle)
 }
 
-export async function clearCoverCache(): Promise<void> {
+/**
+ * Empties the cover cache except the covers under `keep`: those taken from
+ * the books' own files (`importLocalCover`), which no download can bring back.
+ */
+export async function clearCoverCache(keep: Iterable<string> = []): Promise<void> {
   // Abort in-flight downloads + drop the scheduler queue so nothing re-writes a
   // file we're about to wipe.
   cancelAllCovers()
 
+  const kept = new Set([...keep].map((key) => path.basename(getCachePath(key))))
   const cacheDir = getCoverCacheDir()
   if (await fs.pathExists(cacheDir)) {
     const files = await fs.readdir(cacheDir)
-    for (const file of files) {
+    for (const file of files.filter((name) => !kept.has(name))) {
       await fs.remove(path.join(cacheDir, file))
     }
   }
