@@ -1,4 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from 'vitest'
+import Database from 'better-sqlite3'
+import path from 'path'
 import { cleanupUserDataDirs, freshUserData } from './setup/electron-mock'
 import type { CalibreBook } from '../src/main/calibre'
 import { AppError } from '../src/main/appErrors'
@@ -446,5 +448,54 @@ describe('forgetBooks', () => {
     // Assert
     expect(getCollectionBooks(sf.id)).toEqual(['Kept.azw3'])
     expect(getCollectionBooks(fav.id)).toEqual([])
+  })
+})
+
+describe('book keys stored by older versions', () => {
+  /** A collections.db as an older version left it, written before the store opens it. */
+  function legacyStore(memberships: [collection: string, key: string][]): void {
+    const old = new Database(path.join(freshUserData(), 'collections.db'))
+    old.exec(`
+      CREATE TABLE collections (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, source TEXT NOT NULL DEFAULT 'local');
+      CREATE TABLE collection_books (
+        collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+        book_relpath TEXT NOT NULL,
+        PRIMARY KEY (collection_id, book_relpath)
+      );
+    `)
+    const names = [...new Set(memberships.map(([name]) => name))]
+    for (const name of names) old.prepare('INSERT INTO collections (id, name) VALUES (?, ?)').run(name, name)
+    for (const [name, key] of memberships) {
+      old.prepare('INSERT INTO collection_books (collection_id, book_relpath) VALUES (?, ?)').run(name, key)
+    }
+    old.close()
+  }
+
+  test('a membership saved on Windows under the whole book path is found by its path under documents/', () => {
+    // Arrange
+    legacyStore([['Sci-Fi', 'E:\\documents\\Author\\Dune.azw3']])
+
+    // Act
+    const books = getCollectionBooks('Sci-Fi')
+
+    // Assert
+    expect(books).toEqual(['Author/Dune.azw3'])
+  })
+
+  test('a decomposed (NFD) key saved on macOS is composed', () => {
+    const key = 'Fabbri, Niccolò/Qualcosa.azw3'
+    legacyStore([['Italiani', key.normalize('NFD')]])
+
+    expect(getCollectionBooks('Italiani')).toEqual([key.normalize('NFC')])
+  })
+
+  test('the old and the new spelling of one book collapse into one membership', () => {
+    legacyStore([
+      ['Sci-Fi', 'E:\\documents\\Dune.azw3'],
+      ['Sci-Fi', 'Dune.azw3']
+    ])
+
+    expect(getCollectionBooks('Sci-Fi')).toEqual(['Dune.azw3'])
+    expect(findCollection('Sci-Fi')?.bookCount).toBe(1)
   })
 })

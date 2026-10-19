@@ -178,6 +178,21 @@ describe('mergeBooks', () => {
   })
 })
 
+describe('mergeBooks — Windows', () => {
+  test('reconciles by the book key even when the path uses backslashes and a drive letter', () => {
+    // Arrange: what readDocuments returns on Windows, and the base the grid used to strip.
+    const device = deviceBook({ path: 'E:\\documents\\Dune.azw3', relpath: 'Dune.azw3', title: 'Dune' })
+    const lib = libraryBook({ id: 'dune', title: 'Another title', targetRelpath: 'Dune.azw3' })
+
+    // Act
+    const result = mergeBooks([device], [lib], 'E:/documents/')
+
+    // Assert
+    expect(result).toHaveLength(1)
+    expect(result[0].libraryId).toBe('dune')
+  })
+})
+
 describe('mergeBooks — dates', () => {
   test('a library-only card is dated by when it entered the library', () => {
     const [card] = mergeBooks([], [libraryBook({ createdAt: 1234 })], BASE)

@@ -67,3 +67,28 @@ describe('readDocuments — dates', () => {
     expect(book.addedAt).toBeGreaterThan(0)
   })
 })
+
+describe('readDocuments — book keys', () => {
+  test('gives each book its POSIX path under documents/ as its key', async () => {
+    // Arrange
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kindle-scan-'))
+    tempRoots.push(root)
+    await fs.ensureDir(path.join(root, 'documents', 'Author'))
+    await fs.writeFile(path.join(root, 'documents', 'Author', 'Book.azw3'), '')
+
+    // Act
+    const [book] = await readDocuments(root)
+
+    // Assert: the key collections, overrides and metadata.calibre share on every OS.
+    expect(book.relpath).toBe('Author/Book.azw3')
+  })
+
+  test('composes a decomposed (NFD) name in the key, as metadata.calibre spells it', async () => {
+    const name = 'Non è ciò che volevo.azw3'
+    const root = await fakeDevice([name.normalize('NFD')])
+
+    const [book] = await readDocuments(root)
+
+    expect(book.relpath).toBe(name.normalize('NFC'))
+  })
+})
