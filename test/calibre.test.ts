@@ -58,14 +58,16 @@ describe('readCalibreMetadata', () => {
     expect(readCalibreMetadata(mountpoint)).toEqual([])
   })
 
-  test('returns [] on malformed JSON instead of throwing', () => {
+  // An unreadable file must not look like "no collections": the import would
+  // then delete every collection that came from calibre.
+  test('returns null on malformed JSON instead of throwing', () => {
     writeFileSync(path.join(mountpoint, 'metadata.calibre'), '{ not valid json', 'utf-8')
-    expect(readCalibreMetadata(mountpoint)).toEqual([])
+    expect(readCalibreMetadata(mountpoint)).toBeNull()
   })
 
-  test('returns [] when the parsed root is not an array', () => {
+  test('returns null when the parsed root is not an array', () => {
     writeMetadata({ lpath: 'documents/A/Book.azw3', tags: ['X'] })
-    expect(readCalibreMetadata(mountpoint)).toEqual([])
+    expect(readCalibreMetadata(mountpoint)).toBeNull()
   })
 })
 
@@ -400,5 +402,24 @@ describe('calibre records survive the app', () => {
     writeCalibreMetadata(mountpoint, new Map([['Dune.azw3', ['SF']]]), [{ relpath: 'Dune.azw3', title: 'Dune', size: 1 }])
 
     expect(readMetadata().map((e) => [e.lpath, e.tags])).toEqual([['documents/Dune.AZW3', ['SF']]])
+  })
+})
+
+describe('accented names (macOS hands back decomposed names)', () => {
+  test('a decomposed device name matches the composed calibre record: tags applied, no duplicate', () => {
+    // Arrange
+    writeMetadata([{ lpath: 'documents/Citt\u00e0.azw3', title: 'Città', uuid: 'u-1', tags: [] }])
+    const decomposed = 'Citta\u0300.azw3'
+
+    // Act
+    const ok = writeCalibreMetadata(mountpoint, new Map([[decomposed, ['Viaggi']]]), [
+      { relpath: decomposed, title: 'Città', size: 1 }
+    ])
+
+    // Assert
+    expect(ok).toBe(true)
+    const entries = readMetadata()
+    expect(entries).toHaveLength(1)
+    expect(entries[0].tags).toEqual(['Viaggi'])
   })
 })

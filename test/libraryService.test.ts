@@ -330,3 +330,21 @@ describe('removeLibraryBook', () => {
     expect(existsSync(dir)).toBe(false)
   })
 })
+
+describe('removeLibraryBook — untrusted ids', () => {
+  test('an id that is not a library book never reaches the file system', async () => {
+    // Arrange: a folder next to the library store, where "../victim" points.
+    const victim = path.join(userData, 'victim')
+    mkdirSync(victim)
+    writeFileSync(path.join(victim, 'keep.txt'), 'keep')
+
+    // Act + Assert
+    await expect(removeLibraryBook('../victim')).rejects.toThrow()
+    await expect(removeLibraryBook(path.join('..', '..', 'victim'))).rejects.toThrow()
+    expect(existsSync(path.join(victim, 'keep.txt'))).toBe(true)
+  })
+
+  test('an unknown id is refused', async () => {
+    await expect(removeLibraryBook('3f6d9a1e-1c4b-4a2d-8f77-0b9c2e5d1a33')).rejects.toThrow()
+  })
+})

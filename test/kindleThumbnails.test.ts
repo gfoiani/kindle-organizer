@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { nativeImage } from 'electron'
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +14,7 @@ import path from 'path'
 import './setup/electron-mock' // nativeImage stub → toKindleJpeg falls back to raw bytes
 import { writeMobi } from './setup/mobiFixture'
 import { fakeJpeg } from './setup/epubFixture'
+import { pngHeader } from './setup/imageHeaders'
 import { thumbnailFilename, writeKindleThumbnail } from '../src/main/kindleThumbnails'
 
 const UUID = '3f6d9a1e-1c4b-4a2d-8f77-0b9c2e5d1a33'
@@ -106,5 +108,22 @@ describe('writeKindleThumbnail', () => {
     writeFileSync(mountpoint, Buffer.from('not a directory'))
 
     await expect(writeKindleThumbnail(mountpoint, book, fakeJpeg())).resolves.toBeNull()
+  })
+})
+
+describe('writeKindleThumbnail — oversized covers', () => {
+  test('a cover whose header declares a huge image is never decoded and gets no thumbnail', async () => {
+    // Arrange: ~1 GP — a small file that would inflate to gigabytes in the decoder.
+    const book = writeMobi(path.join(books, 'converted.azw3'), { uuid: UUID, cdetype: 'EBOK' })
+    const decode = vi.spyOn(nativeImage, 'createFromBuffer')
+
+    // Act
+    const written = await writeKindleThumbnail(mountpoint, book, pngHeader(30_000, 30_000))
+
+    // Assert
+    expect(written).toBeNull()
+    expect(decode).not.toHaveBeenCalled()
+    expect(existsSync(thumbnailsDir()) ? readdirSync(thumbnailsDir()) : []).toEqual([])
+    decode.mockRestore()
   })
 })

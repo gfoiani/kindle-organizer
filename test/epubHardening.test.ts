@@ -221,6 +221,29 @@ describe('HTML is normalized to XHTML', () => {
     expect(body).toContain('<linearGradient id="g"/>')
   })
 
+  test('a legacy chapter of unclosed uppercase <P> converts flat instead of being refused as too deep', async () => {
+    const paragraphs = Array.from({ length: 300 }, (_, i) => `<P>p${i}`).join('')
+
+    const body = await convert({ docs: [{ path: 'a.xhtml', body: paragraphs }] })
+
+    expect(body.startsWith('<p>p0</p><p>p1</p><p>p2</p>')).toBe(true)
+  })
+
+  test('unclosed uppercase list items close each other like lowercase ones', async () => {
+    const body = await convert({ docs: [{ path: 'a.xhtml', body: '<UL><LI>a<LI>b</UL>' }] })
+
+    expect(body).toBe('<ul><li>a</li><li>b</li></ul>')
+  })
+
+  test('camelCase SVG element names survive, whatever case the source used', async () => {
+    const body = await convert({
+      docs: [{ path: 'a.xhtml', body: '<svg><clipPath id="c"></clipPath><FOREIGNOBJECT></FOREIGNOBJECT></svg>' }]
+    })
+
+    expect(body).toContain('<clipPath id="c"/>')
+    expect(body).toContain('<foreignObject/>')
+  })
+
   test('URL attributes outside <img> are dropped, not left as broken references', async () => {
     const body = await convert({
       docs: [

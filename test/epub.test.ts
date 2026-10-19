@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import './setup/electron-mock' // stubs `electron` so epub.ts can import `app`
-import { parseEpub } from '../src/main/epub'
+import { EPUB_METADATA_LIMITS, parseEpub } from '../src/main/epub'
 import { buildEpub, fakeJpeg, writeEpub } from './setup/epubFixture'
 
 let dir: string
@@ -127,5 +127,39 @@ describe('parseEpub — fixture builder self-check', () => {
 
     expect(buf.length).toBeGreaterThan(0)
     expect(meta.title).toBe('Roundtrip')
+  })
+})
+
+describe('parseEpub — hostile archives', () => {
+  const TINY = { maxEntryBytes: 16 * 1024, maxDocumentBytes: 16 * 1024, maxTotalBytes: 1024 * 1024 }
+
+  test('a cover past the size cap is skipped, the metadata still read', async () => {
+    // Arrange
+    const file = writeEpub(path.join(dir, 'big.epub'), {
+      title: 'Big Cover',
+      author: 'A',
+      cover: fakeJpeg(64 * 1024),
+      coverStyle: 'epub3'
+    })
+
+    // Act
+    const meta = await parseEpub(file, TINY)
+
+    // Assert
+    expect(meta.title).toBe('Big Cover')
+    expect(meta.coverImage).toBeUndefined()
+  })
+
+  test('package documents past the size cap degrade to the file-name title', async () => {
+    const file = writeEpub(path.join(dir, 'Fallback_Title.epub'), { title: 'Never Read' })
+
+    const meta = await parseEpub(file, { ...TINY, maxEntryBytes: 64 })
+
+    expect(meta.title).toBe('Fallback Title')
+  })
+
+  test('the default caps are far below what the converter allows a whole book', () => {
+    expect(EPUB_METADATA_LIMITS.maxEntryBytes).toBeLessThanOrEqual(16 * 1024 * 1024)
+    expect(EPUB_METADATA_LIMITS.maxTotalBytes).toBeLessThanOrEqual(32 * 1024 * 1024)
   })
 })
