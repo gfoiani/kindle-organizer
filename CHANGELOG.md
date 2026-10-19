@@ -36,6 +36,8 @@ All notable changes to this project will be documented in this file.
 - The book panel follows a book after it is sent or deleted from the Kindle, instead of showing its old state.
 - Refresh no longer spins forever when a book is sent or deleted while the Kindle is still being read.
 - Removing a library book checks that the id belongs to the library before touching the disk.
+- **Windows:** collections imported from calibre now show their books, title/author edits and ISBNs apply, and collections keep working when the Kindle gets a different drive letter. Collections and edits saved by earlier versions are carried over on first launch.
+- **macOS:** the collections and edits of a book with an accented file name no longer depend on whether macOS spells the name composed or decomposed.
 
 ## [0.4.0] - 2026-08-03
 

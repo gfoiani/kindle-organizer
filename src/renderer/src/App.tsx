@@ -476,7 +476,7 @@ export function App() {
       // one IPC round-trip and one SQLite transaction per suggestion.
       const byGenre = new Map<string, string[]>()
       for (const suggestion of filtered) {
-        const relpath = toBookRelpath(suggestion.book.path, documentsBase)
+        const relpath = toBookRelpath(suggestion.book)
         byGenre.set(suggestion.label, [...(byGenre.get(suggestion.label) ?? []), relpath])
       }
       const genreEntries: CollectionMembership[] = [...byGenre].map(([name, relpaths]) => ({
@@ -491,7 +491,7 @@ export function App() {
             filtered.map((s) => ({
               genre: s.label,
               author: s.book.author,
-              relpath: toBookRelpath(s.book.path, documentsBase)
+              relpath: toBookRelpath(s.book)
             }))
           )
         : []
@@ -519,7 +519,7 @@ export function App() {
     if (collections.length === 0 || books.length === 0) return
     setIsGroupingByAuthor(true)
     try {
-      const relpaths = books.map((b) => toBookRelpath(b.path, documentsBase))
+      const relpaths = books.map((b) => toBookRelpath(b))
       const authorByRelpath = new Map(relpaths.map((rp, i) => [rp, books[i].author]))
       const tagsByRelpath = await window.kindleAPI.getBookTags(relpaths)
 
@@ -593,13 +593,11 @@ export function App() {
     if (result.ok) setCollections(result.value)
   }
 
-  const documentsBase = kindle ? `${kindle.mountpoint}/documents/` : ''
-
   // The base list the grid renders: device books + staging library, reconciled
   // so a book that's both on-device and in the library shows as a single card.
   const displayBooks = useMemo(
-    () => mergeBooks(books, libraryBooks, documentsBase),
-    [books, libraryBooks, documentsBase]
+    () => mergeBooks(books, libraryBooks),
+    [books, libraryBooks]
   )
 
   // The library reads from local SQLite in milliseconds while the device takes
@@ -620,7 +618,7 @@ export function App() {
     selectedCollectionId === null
       ? displayBooks
       : displayBooks.filter((book) =>
-          collectionBookPaths.has(toBookRelpath(book.path, documentsBase))
+          collectionBookPaths.has(toBookRelpath(book))
         )
 
   // Drives the sidebar's "All books" entry: while anything is narrowing the list
@@ -799,7 +797,6 @@ export function App() {
                 kindleConnected={kindle !== null}
                 mountpoint={kindle?.mountpoint ?? null}
                 collections={collections}
-                documentsBase={documentsBase}
                 query={query}
                 onQueryChange={setQuery}
                 presence={presence}

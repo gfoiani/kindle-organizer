@@ -15,7 +15,7 @@ import { checkForUpdate } from './updateCheck'
 import { ensureCover, cancelCover, clearCoverCache, getBookMetadata, setCoverLocale } from './covers'
 import { applyOverrides, setOverride } from './bookOverrides'
 import { setMenuLabels, popupAppMenu } from './menu'
-import { stripDocumentsBase, toDeviceRelpath } from './paths'
+import { toBookKey } from './paths'
 import { KINDLE_FORMAT } from './settings'
 import { addDroppedFiles, removeLibraryBook, sendToKindle, type SendProgress } from './libraryService'
 import { getLibraryBook, listLibraryBooks } from './library'
@@ -99,25 +99,18 @@ function assertRenameTargets(value: unknown, name: string): asserts value is Ren
 }
 
 /**
- * What `writeCalibreMetadata` needs about the books on the device. Collections
- * are keyed by the app's relpath (`stripDocumentsBase`), metadata.calibre by
- * the path under `documents/`: the two differ on Windows, so the tags of every
- * book on the device are re-keyed to the latter. Every book is seeded (an empty
- * list for no collection) so leaving all collections is written back too.
+ * What `writeCalibreMetadata` needs about the books on the device: each
+ * book's tags by book key — the key metadata.calibre is matched by too. Every
+ * book is seeded (an empty list for no collection) so leaving all collections
+ * is written back too.
  */
-function calibreSyncInput(
-  books: readonly KindleBook[],
-  mountpoint: string
-): { bookTagMap: Map<string, string[]>; deviceBooks: DeviceBookInfo[] } {
-  const documentsBase = `${mountpoint}/documents/`
-  const located = books.flatMap((book) => {
-    const relpath = toDeviceRelpath(book.path, mountpoint)
-    return relpath === undefined ? [] : [{ book, relpath, appKey: stripDocumentsBase(book.path, documentsBase) }]
-  })
-  const tagsByAppKey = getAllBookTags(located.map((entry) => entry.appKey))
-  const deviceTags = located.map(({ relpath, appKey }): [string, string[]] => [relpath, tagsByAppKey.get(appKey) ?? []])
+function calibreSyncInput(books: readonly KindleBook[]): {
+  bookTagMap: Map<string, string[]>
+  deviceBooks: DeviceBookInfo[]
+} {
+  const located = books.flatMap((book) => (book.relpath === undefined ? [] : [{ book, relpath: book.relpath }]))
   return {
-    bookTagMap: new Map([...tagsByAppKey, ...deviceTags]),
+    bookTagMap: getAllBookTags(located.map((entry) => entry.relpath)),
     deviceBooks: located.map(({ book, relpath }) => ({ relpath, title: book.title, author: book.author, size: book.size }))
   }
 }
@@ -155,16 +148,14 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
     withErrorLogging('kindle:read-documents', async (_, kindleMountpoint: unknown) => {
       assertString(kindleMountpoint, 'kindleMountpoint')
       const books = await readDocuments(kindleMountpoint)
-      const documentsBase = `${kindleMountpoint}/documents/`
-      const withOverrides = applyOverrides(books, documentsBase)
+      const withOverrides = applyOverrides(books)
 
       // Attach ISBNs from Calibre metadata (when present) for reliable cover lookup.
       const isbnMap = readCalibreIsbnMap(kindleMountpoint)
       if (isbnMap.size === 0) return withOverrides
 
       return withOverrides.map((book) => {
-        const relpath = stripDocumentsBase(book.path, documentsBase)
-        const isbn = isbnMap.get(relpath)
+        const isbn = book.relpath === undefined ? undefined : isbnMap.get(book.relpath)
         return isbn ? { ...book, isbn } : book
       })
     })
@@ -220,7 +211,7 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
       await requireKindleDrive(mountpoint)
       // Authoritative sync (H1 fix); deviceBooks lets books calibre never
       // registered (or a device with no metadata.calibre at all) join their collections.
-      const { bookTagMap, deviceBooks } = calibreSyncInput(await readDocuments(mountpoint), mountpoint)
+      const { bookTagMap, deviceBooks } = calibreSyncInput(await readDocuments(mountpoint))
       return writeCalibreMetadata(mountpoint, bookTagMap, deviceBooks)
     })
   )
@@ -383,9 +374,7 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
       assertStringArray(bookPaths, 'bookPaths')
       await requireKindleDrive(mountpoint)
       const result = await deleteDeviceBooks(mountpoint, bookPaths)
-      // Collections are keyed by the app's relpath, like every other caller of getAllBookTags.
-      const documentsBase = `${mountpoint}/documents/`
-      forgetBooks(result.deleted.map((bookPath) => stripDocumentsBase(bookPath, documentsBase)))
+      forgetBooks(result.deleted.flatMap((bookPath) => toBookKey(bookPath, mountpoint) ?? []))
       return result
     })
   )

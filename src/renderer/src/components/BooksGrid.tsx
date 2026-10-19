@@ -44,7 +44,6 @@ interface BooksGridProps {
   /** Connected device mountpoint, or null when no Kindle is attached. */
   mountpoint: string | null
   collections: Collection[]
-  documentsBase: string
   /** Search text, owned by App so "All books" can clear every filter at once. */
   query: string
   onQueryChange: (query: string) => void
@@ -214,7 +213,6 @@ export function BooksGrid({
   kindleConnected,
   mountpoint,
   collections,
-  documentsBase,
   query,
   onQueryChange,
   presence,
@@ -300,9 +298,9 @@ export function BooksGrid({
       const current = refreshSelectedBook(books, prev.book)
       if (!current) return null
       if (current === prev.book) return prev
-      return { ...prev, book: current, bookRelpath: toBookRelpath(current.path, documentsBase) }
+      return { ...prev, book: current, bookRelpath: toBookRelpath(current) }
     })
-  }, [books, documentsBase])
+  }, [books])
 
   // The scroll container only renders once there are books to show, so it is
   // absent at mount. A one-shot effect keyed on `[]` would run against a null
@@ -524,7 +522,7 @@ export function BooksGrid({
 
       setIsRunning(true)
       try {
-        const relpaths = collectable.map((book) => toBookRelpath(book.path, documentsBase))
+        const relpaths = collectable.map((book) => toBookRelpath(book))
         const next = await window.kindleAPI.ensureCollectionsContain([
           { name: collection.name, relpaths }
         ])
@@ -541,7 +539,7 @@ export function BooksGrid({
         setIsRunning(false)
       }
     },
-    [collections, collectable, documentsBase, onCollectionsChanged, onNotify, t, exitSelection]
+    [collections, collectable, onCollectionsChanged, onNotify, t, exitSelection]
   )
 
   // Follow the convert/upload pushes for the book currently being sent, so the
@@ -733,7 +731,7 @@ export function BooksGrid({
                       <BookCard
                         key={bookKey(book)}
                         book={book}
-                        bookRelpath={toBookRelpath(book.path, documentsBase)}
+                        bookRelpath={toBookRelpath(book)}
                         collections={collections}
                         coverVersions={coverVersions}
                         coverMissing={coverMissing}

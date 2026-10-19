@@ -1,6 +1,6 @@
 import path from 'path'
 import { describe, expect, test } from 'vitest'
-import { stripDocumentsPrefix, stripDocumentsBase, toDeviceRelpath, canonicalBookKey } from '../src/main/paths'
+import { stripDocumentsPrefix, toDeviceRelpath, toBookKey, canonicalBookKey } from '../src/main/paths'
 
 describe('stripDocumentsPrefix', () => {
   test('strips a leading documents/ prefix from a Calibre lpath', () => {
@@ -32,35 +32,6 @@ describe('stripDocumentsPrefix', () => {
   })
 })
 
-describe('stripDocumentsBase', () => {
-  const base = '/Volumes/Kindle/documents/'
-
-  test('strips the full mountpoint documents base off an absolute book path', () => {
-    // Arrange
-    const bookPath = `${base}Author/Book.azw3`
-
-    // Act
-    const relpath = stripDocumentsBase(bookPath, base)
-
-    // Assert
-    expect(relpath).toBe('Author/Book.azw3')
-  })
-
-  test('returns the path unchanged when it does not start with the base', () => {
-    const bookPath = '/some/other/path/Book.azw3'
-    expect(stripDocumentsBase(bookPath, base)).toBe(bookPath)
-  })
-
-  test('handles a book directly in the documents root', () => {
-    expect(stripDocumentsBase(`${base}Book.azw3`, base)).toBe('Book.azw3')
-  })
-
-  test('is exact-prefix sensitive (a different mountpoint is untouched)', () => {
-    const bookPath = '/Volumes/Other/documents/Book.azw3'
-    expect(stripDocumentsBase(bookPath, base)).toBe(bookPath)
-  })
-})
-
 describe('toDeviceRelpath', () => {
   test('gives the POSIX path under documents/ for a Windows book path', () => {
     // Arrange: how readDocuments joins on Windows.
@@ -83,6 +54,14 @@ describe('toDeviceRelpath', () => {
   test('is undefined for a book outside documents/', () => {
     expect(toDeviceRelpath('/Volumes/Other/documents/B.azw3', '/Volumes/Kindle', path.posix)).toBeUndefined()
     expect(toDeviceRelpath('/Volumes/Kindle/B.azw3', '/Volumes/Kindle', path.posix)).toBeUndefined()
+  })
+})
+
+describe('toBookKey', () => {
+  test('is the composed path under documents/, with forward slashes on Windows', () => {
+    const bookPath = path.win32.join('E:\\', 'documents', 'Niccolò'.normalize('NFD'), 'Book.azw3')
+
+    expect(toBookKey(bookPath, 'E:\\', path.win32)).toBe('Niccolò/Book.azw3'.normalize('NFC'))
   })
 })
 

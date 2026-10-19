@@ -3,7 +3,8 @@ import type Database from 'better-sqlite3'
 import path from 'path'
 import type { Collection } from './kindle'
 import type { CalibreBook } from './calibre'
-import { stripDocumentsPrefix } from './paths'
+import { canonicalBookKey, stripDocumentsPrefix } from './paths'
+import { migrateBookKeys } from './bookKeyMigration'
 import { createCachedDb } from './sqlite'
 import { AppError } from './appErrors'
 
@@ -25,6 +26,7 @@ function initSchema(db: Database.Database): void {
       PRIMARY KEY (collection_id, book_relpath)
     );
   `)
+  migrateBookKeys(db, { table: 'collection_books', column: 'book_relpath' })
 }
 
 // One cached handle for the process lifetime instead of an open/init/close cycle
@@ -337,7 +339,7 @@ export function importFromCalibre(calibreBooks: CalibreBook[]): void {
           if (row) tagToId.set(tag, row.id)
         }
 
-        const relpath = stripDocumentsPrefix(book.lpath)
+        const relpath = canonicalBookKey(stripDocumentsPrefix(book.lpath))
         const collectionId = tagToId.get(tag)
         if (collectionId) insertBook.run(collectionId, relpath)
       }

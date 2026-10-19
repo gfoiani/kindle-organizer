@@ -4,8 +4,9 @@ import type { KindleBook, LibraryBook } from '../src/preload/api'
 
 const BASE = '/mnt/kindle/documents/'
 
+/** A device book whose key is its path under BASE, as readDocuments would give it. */
 function deviceBook(overrides: Partial<KindleBook> = {}): KindleBook {
-  return {
+  const book: KindleBook = {
     filename: 'Book.azw3',
     title: 'A Device Book',
     author: 'Device Author',
@@ -14,6 +15,7 @@ function deviceBook(overrides: Partial<KindleBook> = {}): KindleBook {
     path: `${BASE}Book.azw3`,
     ...overrides
   }
+  return { relpath: book.path.slice(BASE.length), ...book }
 }
 
 function libraryBook(overrides: Partial<LibraryBook> = {}): LibraryBook {
@@ -32,7 +34,7 @@ function libraryBook(overrides: Partial<LibraryBook> = {}): LibraryBook {
 
 describe('mergeBooks', () => {
   test('device books are marked onDevice with no libraryId when nothing reconciles', () => {
-    const result = mergeBooks([deviceBook()], [], BASE)
+    const result = mergeBooks([deviceBook()], [])
 
     expect(result).toHaveLength(1)
     expect(result[0].onDevice).toBe(true)
@@ -42,7 +44,7 @@ describe('mergeBooks', () => {
   test('a library-only book becomes its own card (onDevice false, libraryId set)', () => {
     const lib = libraryBook({ id: 'only-1', title: 'Solo', sourceFormat: 'epub' })
 
-    const result = mergeBooks([], [lib], BASE)
+    const result = mergeBooks([], [lib])
 
     expect(result).toHaveLength(1)
     expect(result[0].onDevice).toBe(false)
@@ -55,7 +57,7 @@ describe('mergeBooks', () => {
     const device = deviceBook({ path: `${BASE}Dune.azw3`, title: 'Dune' })
     const lib = libraryBook({ id: 'dune', title: 'Dune (epub source)', targetRelpath: 'Dune.azw3' })
 
-    const result = mergeBooks([device], [lib], BASE)
+    const result = mergeBooks([device], [lib])
 
     // One card only — the device card, now carrying the libraryId.
     expect(result).toHaveLength(1)
@@ -68,7 +70,7 @@ describe('mergeBooks', () => {
     // uploadedAt set → this staged book really was sent, so an identity match is trusted.
     const lib = libraryBook({ id: 'hob', title: '  the hobbit ', author: 'j.r.r. tolkien', uploadedAt: 111 })
 
-    const result = mergeBooks([device], [lib], BASE)
+    const result = mergeBooks([device], [lib])
 
     expect(result).toHaveLength(1)
     expect(result[0].libraryId).toBe('hob')
@@ -81,7 +83,7 @@ describe('mergeBooks', () => {
     // swallowed by the device card, or the user loses all send/remove UI for it.
     const lib = libraryBook({ id: 'hob', title: 'The Hobbit', author: 'J.R.R. Tolkien' })
 
-    const result = mergeBooks([device], [lib], BASE)
+    const result = mergeBooks([device], [lib])
 
     expect(result).toHaveLength(2)
     const deviceCard = result.find((b) => b.onDevice)
@@ -95,7 +97,7 @@ describe('mergeBooks', () => {
     const dupB = deviceBook({ path: `${BASE}Dune-2.azw3`, title: 'Dune', author: 'Herbert' })
     const lib = libraryBook({ id: 'dune', title: 'Dune', author: 'Herbert', uploadedAt: 222 })
 
-    const result = mergeBooks([dupA, dupB], [lib], BASE)
+    const result = mergeBooks([dupA, dupB], [lib])
 
     expect(result).toHaveLength(2)
     // The libraryId lands on exactly one card — no two cards share a React key.
@@ -108,15 +110,15 @@ describe('mergeBooks', () => {
     const device = deviceBook({ path: `${BASE}a.azw3`, title: 'Book A', author: 'X' })
     const lib = libraryBook({ id: 'b', title: 'Book B', author: 'Y' })
 
-    const result = mergeBooks([device], [lib], BASE)
+    const result = mergeBooks([device], [lib])
 
     expect(result).toHaveLength(2)
   })
 
-  test('with no device connected (empty documentsBase), all library books are library-only', () => {
+  test('with no device connected, all library books are library-only', () => {
     const libs = [libraryBook({ id: 'l1', contentHash: 'h1' }), libraryBook({ id: 'l2', contentHash: 'h2' })]
 
-    const result = mergeBooks([], libs, '')
+    const result = mergeBooks([], libs)
 
     expect(result).toHaveLength(2)
     expect(result.every((b) => b.onDevice === false)).toBe(true)
@@ -133,7 +135,7 @@ describe('mergeBooks', () => {
     const device = deviceBook({ path: `${BASE}${nfd}`, title: 'Non è ciò che volevo'.normalize('NFD') })
     const lib = libraryBook({ id: 'accented', title: 'Non è ciò che volevo', targetRelpath: nfc })
 
-    const result = mergeBooks([device], [lib], BASE)
+    const result = mergeBooks([device], [lib])
 
     expect(result).toHaveLength(1)
     expect(result[0].onDevice).toBe(true)
@@ -153,7 +155,7 @@ describe('mergeBooks', () => {
       uploadedAt: 222
     })
 
-    const result = mergeBooks([device], [lib], BASE)
+    const result = mergeBooks([device], [lib])
 
     expect(result).toHaveLength(1)
     expect(result[0].libraryId).toBe('accented-id')
@@ -165,7 +167,7 @@ describe('mergeBooks', () => {
     const reconciledLib = libraryBook({ id: 'shared', title: 'Shared', author: 'S', targetRelpath: 'Shared.azw3' })
     const libOnly = libraryBook({ id: 'libonly', title: 'Library Only', author: 'L' })
 
-    const result = mergeBooks([deviceOnly, reconciledDevice], [reconciledLib, libOnly], BASE)
+    const result = mergeBooks([deviceOnly, reconciledDevice], [reconciledLib, libOnly])
 
     expect(result).toHaveLength(3)
     const byTitle = Object.fromEntries(result.map((b) => [b.title, b]))
@@ -185,7 +187,7 @@ describe('mergeBooks — Windows', () => {
     const lib = libraryBook({ id: 'dune', title: 'Another title', targetRelpath: 'Dune.azw3' })
 
     // Act
-    const result = mergeBooks([device], [lib], 'E:/documents/')
+    const result = mergeBooks([device], [lib])
 
     // Assert
     expect(result).toHaveLength(1)
@@ -195,7 +197,7 @@ describe('mergeBooks — Windows', () => {
 
 describe('mergeBooks — dates', () => {
   test('a library-only card is dated by when it entered the library', () => {
-    const [card] = mergeBooks([], [libraryBook({ createdAt: 1234 })], BASE)
+    const [card] = mergeBooks([], [libraryBook({ createdAt: 1234 })])
 
     expect(card.addedAt).toBe(1234)
   })
@@ -205,7 +207,7 @@ describe('mergeBooks — library folders', () => {
   test('a library-only card read from a library folder says so', () => {
     const lib = libraryBook({ id: 'f-1', folderId: 'folder-1' })
 
-    const [card] = mergeBooks([], [lib], BASE)
+    const [card] = mergeBooks([], [lib])
 
     expect(card.libraryFolderId).toBe('folder-1')
   })
@@ -213,7 +215,7 @@ describe('mergeBooks — library folders', () => {
   test('a device card reconciled with a folder book keeps the folder link', () => {
     const lib = libraryBook({ id: 'f-1', folderId: 'folder-1', targetRelpath: 'Book.azw3' })
 
-    const [card] = mergeBooks([deviceBook()], [lib], BASE)
+    const [card] = mergeBooks([deviceBook()], [lib])
 
     expect(card.onDevice).toBe(true)
     expect(card.libraryId).toBe('f-1')
@@ -221,7 +223,7 @@ describe('mergeBooks — library folders', () => {
   })
 
   test('a dropped book has no folder link', () => {
-    const [card] = mergeBooks([], [libraryBook()], BASE)
+    const [card] = mergeBooks([], [libraryBook()])
 
     expect(card.libraryFolderId).toBeUndefined()
   })

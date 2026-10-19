@@ -66,13 +66,12 @@ function libraryToDisplay(lib: LibraryBook): DisplayBook {
  */
 export function mergeBooks(
   deviceBooks: KindleBook[],
-  libraryBooks: LibraryBook[],
-  documentsBase: string
+  libraryBooks: LibraryBook[]
 ): DisplayBook[] {
   const usedLibraryIds = new Set<string>()
 
   const deviceCards: DisplayBook[] = deviceBooks.map((device) => {
-    const relpath = canonical(toBookRelpath(device.path, documentsBase))
+    const relpath = canonical(toBookRelpath(device))
     const idKey = bookIdentityKey(device.title, device.author)
     // Reconcile to at most one still-unused library entry (skipping ids already
     // claimed by an earlier device card keeps two identical device books from

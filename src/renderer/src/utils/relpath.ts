@@ -1,10 +1,11 @@
+import type { KindleBook } from '../../../preload/api'
+
 /**
- * Strips the device's `documents/` mountpoint prefix from a full book path,
- * yielding the relpath the main process / Calibre use as a stable key.
- * Falls back to the original path when the prefix isn't present.
+ * A book's key for collections and title/author edits: its path under the
+ * device's `documents/`, computed by the main process (`KindleBook.relpath`).
+ * Empty for a book that is not on the device, which therefore can join no
+ * collection.
  */
-export function toBookRelpath(fullPath: string, documentsBase: string): string {
-  return documentsBase && fullPath.startsWith(documentsBase)
-    ? fullPath.slice(documentsBase.length)
-    : fullPath
+export function toBookRelpath(book: Pick<KindleBook, 'relpath'>): string {
+  return book.relpath ?? ''
 }

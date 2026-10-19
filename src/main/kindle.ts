@@ -3,6 +3,7 @@ import si from 'systeminformation'
 import * as fs from 'fs-extra'
 import path from 'path'
 import { AppError } from './appErrors'
+import { toBookKey } from './paths'
 
 // Dev-only verbose logging. Silent in packaged builds.
 const debug = (...args: unknown[]): void => {
@@ -24,6 +25,12 @@ export interface KindleBook {
   extension: string
   size: number
   path: string
+  /**
+   * The book's key: its path under `documents/`, POSIX and composed (see
+   * `paths.ts`). Collections, overrides and `metadata.calibre` all use it.
+   * Absent for a book that is not on the device.
+   */
+  relpath?: string
   /** ISBN from Calibre metadata, when available — used for reliable cover lookup. */
   isbn?: string
   /** Epoch ms the book arrived: on the device, its file's creation time; for a staged book, when it was staged. */
@@ -221,7 +228,7 @@ function sanitizeTitle(filename: string, author?: string): string {
   return t
 }
 
-async function scanBooks(dirPath: string, author?: string): Promise<KindleBook[]> {
+async function scanBooks(mountpoint: string, dirPath: string, author?: string): Promise<KindleBook[]> {
   const entries = await fs.readdir(dirPath, { withFileTypes: true })
   const books: KindleBook[] = []
 
@@ -230,7 +237,7 @@ async function scanBooks(dirPath: string, author?: string): Promise<KindleBook[]
 
     if (entry.isDirectory()) {
       if (JUNK_EXTENSIONS.includes(path.extname(entry.name).toLowerCase())) continue
-      const subBooks = await scanBooks(path.join(dirPath, entry.name), composed(entry.name))
+      const subBooks = await scanBooks(mountpoint, path.join(dirPath, entry.name), composed(entry.name))
       books.push(...subBooks)
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name).toLowerCase()
@@ -246,6 +253,7 @@ async function scanBooks(dirPath: string, author?: string): Promise<KindleBook[]
         extension: ext.replace('.', '').toUpperCase(),
         size: stats.size,
         path: filePath,
+        relpath: toBookKey(filePath, mountpoint),
         // Creation time is when the copy landed on the device; a copy keeps the
         // source's mtime. Some file systems report no birth time (0).
         addedAt: stats.birthtimeMs > 0 ? stats.birthtimeMs : stats.mtimeMs
@@ -264,6 +272,6 @@ export async function readDocuments(kindleMountpoint: string): Promise<KindleBoo
     return []
   }
 
-  const books = await scanBooks(documentsPath)
+  const books = await scanBooks(kindleMountpoint, documentsPath)
   return books.sort((a, b) => a.title.localeCompare(b.title))
 }

@@ -1,7 +1,7 @@
 import * as fs from 'fs-extra'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { stripDocumentsPrefix } from './paths'
+import { canonicalBookKey, stripDocumentsPrefix } from './paths'
 import { backupCalibreMetadata, hasRecentCalibreBackup, listCalibreBackups } from './calibreBackup'
 
 export { CALIBRE_BACKUP_LIMIT, describeCalibreBackups, type CalibreBackupSummary } from './calibreBackup'
@@ -282,7 +282,7 @@ export function readCalibreIsbnMap(mountpoint: string): Map<string, string> {
     const isbn = extractIsbn(rec)
     if (!isbn) continue
 
-    result.set(stripDocumentsPrefix(lpath), isbn)
+    result.set(canonicalBookKey(stripDocumentsPrefix(lpath)), isbn)
   }
 
   return result

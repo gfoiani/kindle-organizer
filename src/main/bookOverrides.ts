@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import * as path from 'path'
 import { app } from 'electron'
 import type { KindleBook } from './kindle'
-import { stripDocumentsBase } from './paths'
+import { migrateBookKeys } from './bookKeyMigration'
 import { createCachedDb } from './sqlite'
 
 interface OverrideRow {
@@ -23,6 +23,7 @@ function initSchema(db: Database.Database): void {
       author    TEXT
     )
   `)
+  migrateBookKeys(db, { table: 'book_override', column: 'book_path' })
 }
 
 const store = createCachedDb(getDbPath, initSchema)
@@ -45,7 +46,8 @@ export function setOverride(
     .run(bookRelpath, title, author ?? null)
 }
 
-export function applyOverrides(books: KindleBook[], documentsBase: string): KindleBook[] {
+/** The books with the title/author the user edited, matched by book key (`KindleBook.relpath`). */
+export function applyOverrides(books: KindleBook[]): KindleBook[] {
   const rows = store
     .get()
     .prepare<[], OverrideRow>('SELECT book_path, title, author FROM book_override')
@@ -56,8 +58,7 @@ export function applyOverrides(books: KindleBook[], documentsBase: string): Kind
   const overrides = new Map(rows.map((r) => [r.book_path, r]))
 
   return books.map((book) => {
-    const relpath = stripDocumentsBase(book.path, documentsBase)
-    const ov = overrides.get(relpath)
+    const ov = book.relpath === undefined ? undefined : overrides.get(book.relpath)
     if (!ov) return book
     return { ...book, title: ov.title, author: ov.author ?? undefined }
   })
