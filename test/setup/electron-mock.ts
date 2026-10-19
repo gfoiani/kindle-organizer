@@ -29,6 +29,20 @@ export function cleanupUserDataDirs(): void {
   }
 }
 
+/** Every `ipcMain.handle` registration, by channel — see `invokeIpc`. */
+const ipcHandlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
+
+/**
+ * Calls the handler `registerIpcHandlers` registered for `channel`, the way
+ * the renderer's `ipcRenderer.invoke` would (with a minimal sender).
+ */
+export async function invokeIpc(channel: string, ...args: unknown[]): Promise<unknown> {
+  const handler = ipcHandlers.get(channel)
+  if (!handler) throw new Error(`No IPC handler registered for "${channel}"`)
+  const event = { sender: { isDestroyed: () => false, send: vi.fn() } }
+  return handler(event, ...args)
+}
+
 vi.mock('electron', () => ({
   app: {
     name: 'Kindle Organizer',
@@ -40,6 +54,14 @@ vi.mock('electron', () => ({
       return path.join(currentUserData, name)
     }
   },
+  ipcMain: {
+    handle: (channel: string, handler: (event: unknown, ...args: unknown[]) => unknown) => {
+      ipcHandlers.set(channel, handler)
+    }
+  },
+  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] })) },
+  shell: { openPath: vi.fn(async () => ''), showItemInFolder: vi.fn(), openExternal: vi.fn(async () => undefined) },
+  BrowserWindow: { fromWebContents: () => null, getAllWindows: () => [] },
   // `Menu` records what it is given, so menu.ts can be exercised: a built menu
   // is just its template, and the application menu is whatever was set last.
   Menu: (() => {
