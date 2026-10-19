@@ -59,7 +59,8 @@ export async function openArchive(filePath: string, limits: ArchiveLimits): Prom
 
   const byLowerCase = new Map(Object.keys(entries).map((n) => [n.toLowerCase(), n]))
   const resolve = (entryPath: string): string | undefined =>
-    entries[entryPath] ? entryPath : byLowerCase.get(entryPath.toLowerCase())
+    // Own keys only: a manifest href such as "constructor" must not hit Object.prototype.
+    Object.prototype.hasOwnProperty.call(entries, entryPath) ? entryPath : byLowerCase.get(entryPath.toLowerCase())
   let totalRead = 0
 
   const readCapped = async (name: string, maxBytes: number): Promise<Buffer> => {

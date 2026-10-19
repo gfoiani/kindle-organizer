@@ -409,8 +409,10 @@ export function App() {
   async function handleLibraryChanged() {
     await loadLibrary()
     if (kindle) {
-      const requestId = ++loadRequestId.current
-      await loadBooks(kindle.mountpoint, requestId)
+      // Reuse the current request id. Taking a new one would orphan a device
+      // load still in flight: its loading flags are cleared only by the newest
+      // request, so Refresh and the collections would spin forever.
+      await loadBooks(kindle.mountpoint, loadRequestId.current)
     }
   }
 

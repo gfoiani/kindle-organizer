@@ -1,8 +1,8 @@
 import { app } from 'electron'
 import path from 'path'
-import StreamZip from 'node-stream-zip'
 import { XMLParser } from 'fast-xml-parser'
 import { titleFromFilename } from './titleFromFilename'
+import { openArchive, type ArchiveLimits, type EpubArchive } from './epubConvert/archive'
 
 // Dev-only verbose logging. Silent in packaged builds.
 const debug = (...args: unknown[]): void => {
@@ -17,6 +17,19 @@ export interface EpubMetadata {
 }
 
 const CONTAINER_PATH = 'META-INF/container.xml'
+
+/**
+ * Only container.xml, the OPF and the cover are read, and a real book keeps all
+ * three far below these sizes. The archive is untrusted — a file merely
+ * dropped into a library folder is parsed — so the caps are enforced on the
+ * bytes actually inflated (see epubConvert/archive.ts), not on declared sizes.
+ */
+export const EPUB_METADATA_LIMITS: ArchiveLimits = {
+  maxEntryBytes: 16 * 1024 * 1024,
+  maxDocumentBytes: 4 * 1024 * 1024,
+  maxTotalBytes: 24 * 1024 * 1024
+}
+
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' })
 
 /**
@@ -29,27 +42,24 @@ const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_
  * to a usable result (title from the filename, no cover) rather than throwing, so
  * a quirky-but-openable EPUB can still be added to the library.
  */
-export async function parseEpub(filePath: string): Promise<EpubMetadata> {
+export async function parseEpub(filePath: string, limits: ArchiveLimits = EPUB_METADATA_LIMITS): Promise<EpubMetadata> {
   const fallbackTitle = titleFromFilename(filePath)
-  const zip = new StreamZip.async({ file: filePath })
 
-  // Force the central directory to load; a non-ZIP / corrupt archive throws here.
+  // A non-ZIP / corrupt archive throws here.
+  let archive: EpubArchive
   try {
-    await zip.entries()
+    archive = await openArchive(filePath, limits)
   } catch (err) {
-    await closeQuietly(zip)
-    throw new Error(
-      `Cannot read EPUB archive "${filePath}": ${err instanceof Error ? err.message : String(err)}`
-    )
+    throw new Error(`Cannot read EPUB archive "${filePath}": ${errorText(err)}`)
   }
 
   try {
-    const opfPath = await readOpfPath(zip)
+    const opfPath = await readOpfPath(archive, limits)
     if (!opfPath) return { title: fallbackTitle }
 
-    const opfXml = (await zip.entryData(opfPath)).toString('utf-8')
+    const opfXml = (await archive.read(opfPath, limits.maxDocumentBytes)).toString('utf-8')
     const opf = parseOpf(opfXml)
-    const coverImage = await readCoverImage(zip, opfPath, opf.coverHref)
+    const coverImage = await readCoverImage(archive, opfPath, opf.coverHref)
 
     return {
       title: opf.title ?? fallbackTitle,
@@ -57,17 +67,21 @@ export async function parseEpub(filePath: string): Promise<EpubMetadata> {
       ...(coverImage ? { coverImage } : {})
     }
   } catch (err) {
-    // Openable archive but unreadable metadata — degrade instead of failing.
-    debug(`[epub] Degraded parse of "${filePath}":`, err instanceof Error ? err.message : String(err))
+    // Openable archive but unreadable (or oversized) metadata — degrade instead of failing.
+    debug(`[epub] Degraded parse of "${filePath}":`, errorText(err))
     return { title: fallbackTitle }
   } finally {
-    await closeQuietly(zip)
+    await archive.close()
   }
 }
 
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
 /** Reads the OPF path from META-INF/container.xml (first rootfile). */
-async function readOpfPath(zip: StreamZip.StreamZipAsync): Promise<string | undefined> {
-  const xml = (await zip.entryData(CONTAINER_PATH)).toString('utf-8')
+async function readOpfPath(archive: EpubArchive, limits: ArchiveLimits): Promise<string | undefined> {
+  const xml = (await archive.read(CONTAINER_PATH, limits.maxDocumentBytes)).toString('utf-8')
   const doc = parser.parse(xml)
   const rootfile = firstOf(doc?.container?.rootfiles?.rootfile)
   const fullPath = rootfile?.['@_full-path']
@@ -126,7 +140,7 @@ function findCoverHref(metadata: unknown, manifest: unknown): string | undefined
 
 /** Reads the cover entry, resolving its href relative to the OPF's directory. */
 async function readCoverImage(
-  zip: StreamZip.StreamZipAsync,
+  archive: EpubArchive,
   opfPath: string,
   coverHref: string | undefined
 ): Promise<Buffer | undefined> {
@@ -137,10 +151,11 @@ async function readCoverImage(
   const entryPath = opfDir === '.' ? decoded : path.posix.join(opfDir, decoded)
 
   try {
-    const data = await zip.entryData(entryPath)
+    const data = await archive.read(entryPath)
     return data.length > 0 ? data : undefined
   } catch (err) {
-    debug(`[epub] Cover entry "${entryPath}" not readable:`, err instanceof Error ? err.message : String(err))
+    // Missing or past the size cap: the book simply has no embedded cover.
+    debug(`[epub] Cover entry "${entryPath}" not readable:`, errorText(err))
     return undefined
   }
 }
@@ -168,12 +183,4 @@ function firstText(node: unknown): string | undefined {
     if (typeof text === 'number') return String(text)
   }
   return undefined
-}
-
-async function closeQuietly(zip: StreamZip.StreamZipAsync): Promise<void> {
-  try {
-    await zip.close()
-  } catch (err) {
-    debug('[epub] Failed to close archive:', err instanceof Error ? err.message : String(err))
-  }
 }

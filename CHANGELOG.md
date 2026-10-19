@@ -26,6 +26,17 @@ All notable changes to this project will be documented in this file.
 - The MOBI conversion option: books are always converted to AZW3 (KF8), which every Kindle reads from the Kindle Keyboard (with its 2012 firmware update) onwards. Kindle 1, 2 and DX are not supported for converted books.
 - Embedded fonts are not carried over into converted books; the Kindle's own fonts are used.
 
+### Fixed
+
+- A damaged or half-written `metadata.calibre` no longer deletes every collection imported from calibre on the next sync.
+- Books with accented titles no longer get a second `metadata.calibre` record on macOS (decomposed vs composed file names).
+- Old EPUBs written in uppercase HTML (`<P>`, `<LI>` never closed) convert instead of being rejected as damaged.
+- A hostile EPUB can no longer exhaust memory when it is added to the library or appears in a library folder, and a cover declaring an enormous size is not decoded for the Kindle thumbnail.
+- A library folder on a disk or network share that stops answering no longer freezes the library; it shows as not reachable.
+- The book panel follows a book after it is sent or deleted from the Kindle, instead of showing its old state.
+- Refresh no longer spins forever when a book is sent or deleted while the Kindle is still being read.
+- Removing a library book checks that the id belongs to the library before touching the disk.
+
 ## [0.4.0] - 2026-08-03
 
 ### Added

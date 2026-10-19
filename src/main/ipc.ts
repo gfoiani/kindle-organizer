@@ -188,6 +188,12 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
     withErrorLogging('kindle:sync-calibre', async (_, mountpoint: unknown) => {
       assertString(mountpoint, 'mountpoint')
       const calibreBooks = readCalibreMetadata(mountpoint)
+      // An unreadable file is not "no collections": importing nothing would
+      // delete every collection that came from calibre.
+      if (calibreBooks === null) {
+        console.warn('[calibre] metadata.calibre cannot be read; keeping the imported collections')
+        return
+      }
       importFromCalibre(calibreBooks)
     })
   )

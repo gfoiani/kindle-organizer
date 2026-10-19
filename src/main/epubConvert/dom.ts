@@ -4,17 +4,54 @@ import type { Document, Element } from 'domhandler'
 /**
  * Content documents are parsed as HTML, not XML: HTML mode decodes the named
  * entities (`&nbsp;`, `&eacute;`) XHTML files use without declaring a DTD, and
- * recovers from the malformed markup real-world EPUBs contain. Case is kept so
- * SVG (`viewBox`, `foreignObject`) survives, and `<a id="x"/>` still closes.
+ * recovers from the malformed markup real-world EPUBs contain; `<a id="x"/>`
+ * still closes.
+ *
+ * Tag names are lowercased while parsing: htmlparser2 applies HTML's
+ * implied-close rules (an unclosed `<P>` or `<LI>`) to lowercase names only, so
+ * uppercase legacy markup would otherwise nest one level per tag. SVG's
+ * camelCase element names are put back afterwards (`restoreSvgElementNames`),
+ * and attribute case is kept (`viewBox`).
  */
 export function parseHtml(source: string): Document {
-  return parseDocument(source, {
+  const doc = parseDocument(source, {
     xmlMode: false,
     decodeEntities: true,
     recognizeSelfClosing: true,
-    lowerCaseTags: false,
+    lowerCaseTags: true,
     lowerCaseAttributeNames: false
   })
+  restoreSvgElementNames(doc)
+  return doc
+}
+
+/** The camelCase SVG elements — the table an HTML5 parser uses to "adjust SVG tag names". */
+const SVG_ELEMENT_NAMES: ReadonlyMap<string, string> = new Map(
+  [
+    'altGlyph', 'altGlyphDef', 'altGlyphItem', 'animateColor', 'animateMotion', 'animateTransform',
+    'clipPath', 'feBlend', 'feColorMatrix', 'feComponentTransfer', 'feComposite', 'feConvolveMatrix',
+    'feDiffuseLighting', 'feDisplacementMap', 'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA',
+    'feFuncB', 'feFuncG', 'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode',
+    'feMorphology', 'feOffset', 'fePointLight', 'feSpecularLighting', 'feSpotLight', 'feTile',
+    'feTurbulence', 'foreignObject', 'glyphRef', 'linearGradient', 'radialGradient', 'textPath'
+  ].map((name) => [name.toLowerCase(), name])
+)
+
+/**
+ * Renames the lowercased camelCase elements found inside `<svg>`. The document
+ * was just built by the parser and is not shared yet, so it is fixed in place;
+ * the walk is iterative because the tree's depth is not checked until later.
+ */
+function restoreSvgElementNames(doc: Document): void {
+  const pending: Array<{ children: Document['children']; inSvg: boolean }> = [{ children: doc.children, inSvg: false }]
+  for (let next = pending.pop(); next; next = pending.pop()) {
+    for (const child of next.children) {
+      if (child.type !== 'tag' && child.type !== 'script' && child.type !== 'style') continue
+      const el = child as Element
+      if (next.inSvg) el.name = SVG_ELEMENT_NAMES.get(el.name) ?? el.name
+      pending.push({ children: el.children, inSvg: next.inSvg || el.name === 'svg' })
+    }
+  }
 }
 
 /** Package-level XML (NCX, encryption.xml): strict XML entities only. */

@@ -117,7 +117,8 @@ function isDocumentsRelpath(relpath: string): boolean {
  * ignores case, so calibre's `Dune.AZW3` and a scanned `Dune.azw3` are one file.
  */
 function foldRelpath(relpath: string): string {
-  return relpath.toLowerCase()
+  // macOS hands back decomposed names (NFD) for a book calibre recorded composed (NFC).
+  return relpath.normalize('NFC').toLowerCase()
 }
 
 function entryRelpath(entry: unknown): string | undefined {
@@ -212,9 +213,16 @@ export function removeCalibreEntries(mountpoint: string, relpaths: readonly stri
   return kept.length === entries.length || writeEntryArray(metadataPath, kept)
 }
 
-export function readCalibreMetadata(mountpoint: string): CalibreBook[] {
-  const entries = readEntryArray(getMetadataPath(mountpoint))
-  if (!entries) return []
+/**
+ * The tagged books in `metadata.calibre`: [] when the Kindle has no file, null
+ * when it has one that cannot be read. The difference matters — importing []
+ * deletes every collection that came from calibre.
+ */
+export function readCalibreMetadata(mountpoint: string): CalibreBook[] | null {
+  const metadataPath = getMetadataPath(mountpoint)
+  if (!fs.existsSync(metadataPath)) return []
+  const entries = readEntryArray(metadataPath)
+  if (!entries) return null
 
   const books: CalibreBook[] = []
 

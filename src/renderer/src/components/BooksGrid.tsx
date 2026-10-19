@@ -6,6 +6,7 @@ import type { DisplayBook } from '../utils/mergeBooks'
 import { BookCard } from './BookCard'
 import { BookDetailSidebar } from './BookDetailSidebar'
 import { toBookRelpath } from '../utils/relpath'
+import { refreshSelectedBook } from '../utils/bookSelection'
 import { countPresence, filterByPresence, type PresenceFilter } from '../utils/presenceFilter'
 import type { LoadingPhase } from '../utils/loadingPhase'
 import {
@@ -291,13 +292,17 @@ export function BooksGrid({
     }
   }, [])
 
-  // Clear the detail sidebar only when the selected book is actually gone
-  // (e.g. a genuine reload), not on every edit that replaces the books array.
+  // Keep the detail sidebar on the book as the grid now shows it (sent, deleted
+  // from the Kindle, edited), and close it only when the book is actually gone.
   useEffect(() => {
-    setSelectedBook((prev) =>
-      prev && books.some((b) => b.path === prev.book.path) ? prev : null
-    )
-  }, [books])
+    setSelectedBook((prev) => {
+      if (!prev) return null
+      const current = refreshSelectedBook(books, prev.book)
+      if (!current) return null
+      if (current === prev.book) return prev
+      return { ...prev, book: current, bookRelpath: toBookRelpath(current.path, documentsBase) }
+    })
+  }, [books, documentsBase])
 
   // The scroll container only renders once there are books to show, so it is
   // absent at mount. A one-shot effect keyed on `[]` would run against a null

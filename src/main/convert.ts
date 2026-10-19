@@ -92,7 +92,8 @@ export async function convert(inputPath: string, options: ConvertOptions): Promi
       title: metadata.title,
       author: metadata.author,
       cover: await readCover(metadata.coverPath),
-      thumbnail: toKindleJpeg,
+      // null: a cover too large to decode gets no embedded thumbnail.
+      thumbnail: (cover) => toKindleJpeg(cover) ?? undefined,
       signal: options.signal,
       // 100% is reported once the file is actually on disk, not when parsing ends.
       onProgress: (percent) => options.onProgress?.(Math.min(percent, 99))

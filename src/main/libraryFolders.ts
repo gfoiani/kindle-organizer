@@ -63,6 +63,62 @@ function emptyResult(folderId: string, status: FolderSyncStatus): FolderSyncResu
   return { folderId, status, added: 0, updated: 0, removed: 0, errors: 0 }
 }
 
+// ─── Deadlines ────────────────────────────────────────────────────────────────
+
+export interface SyncDeadlines {
+  /** Scanning one folder (a stat per book). */
+  scanMs: number
+  /** Reading one file (hash, metadata) or probing one folder. */
+  readMs: number
+}
+
+/**
+ * A folder on a dead network share or a hung USB disk may never answer. Every
+ * operation runs one at a time, so a single read that hangs would freeze the
+ * library for good; past a deadline the folder counts as unavailable (nothing
+ * is removed) or the file as unreadable (retried on the next sync).
+ */
+let deadlines: SyncDeadlines = { scanMs: 120_000, readMs: 60_000 }
+
+/** Tests shorten the deadlines; the app keeps the defaults. */
+export function configureSyncDeadlines(next: Partial<SyncDeadlines>): void {
+  deadlines = { ...deadlines, ...next }
+}
+
+/**
+ * Rejects when `work` has not settled within `ms`. The abandoned work keeps
+ * running in the background; it only ever reads, so it can do no harm.
+ */
+function withDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} did not answer within ${ms} ms`)), ms)
+  })
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer))
+}
+
+async function scanWithDeadline(folder: LibraryFolder): Promise<FolderScan | null> {
+  try {
+    return await withDeadline(scanLibraryFolder(folder.path), deadlines.scanMs, `Scanning "${folder.path}"`)
+  } catch (err) {
+    console.warn('[library-folders]', errorText(err))
+    return null
+  }
+}
+
+async function isReachable(folder: LibraryFolder): Promise<boolean> {
+  try {
+    return await withDeadline(isReadableDirectory(folder.path), deadlines.readMs, `Probing "${folder.path}"`)
+  } catch (err) {
+    console.warn('[library-folders]', errorText(err))
+    return false
+  }
+}
+
+function metadataOf(file: ScannedFile): ReturnType<typeof readBookMetadata> {
+  return withDeadline(readBookMetadata(file.path), deadlines.readMs, `Reading "${file.path}"`)
+}
+
 // ─── One operation at a time ──────────────────────────────────────────────────
 
 /**
@@ -127,7 +183,7 @@ export async function describeLibraryFolders(): Promise<LibraryFolderSummary[]> 
     listLibraryFolders().map(async (folder) => ({
       ...folder,
       bookCount: listFolderBooks(folder.id).length,
-      available: await isReadableDirectory(folder.path)
+      available: await isReachable(folder)
     }))
   )
 }
@@ -178,7 +234,7 @@ interface FolderPass {
 async function runSync(): Promise<FolderSyncResult[]> {
   const folders = listLibraryFolders()
   const scans: Array<FolderScan | null> = []
-  for (const folder of folders) scans.push(await scanLibraryFolder(folder.path))
+  for (const folder of folders) scans.push(await scanWithDeadline(folder))
 
   const context: SyncContext = {
     scannedPaths: new Set(scans.flatMap((scan) => scan?.files.map((file) => file.path) ?? [])),
@@ -252,13 +308,17 @@ async function hashOf(folder: LibraryFolder, file: ScannedFile): Promise<string>
   const cached = hashCache.get(file.path)
   if (cached && cached.size === file.size && cached.mtimeMs === file.mtimeMs) return cached.hash
 
-  // The scan saw a regular file; it may have been swapped for a link since.
+  const hash = await withDeadline(checkedHash(folder, file), deadlines.readMs, `Reading "${file.path}"`)
+  hashCache.set(file.path, { size: file.size, mtimeMs: file.mtimeMs, hash })
+  return hash
+}
+
+/** The scan saw a regular file; it may have been swapped for a link since. */
+async function checkedHash(folder: LibraryFolder, file: ScannedFile): Promise<string> {
   if (!(await isRegularFileInside(folder.path, file.path))) {
     throw new Error('no longer a regular file inside the library folder')
   }
-  const hash = await hashFile(file.path)
-  hashCache.set(file.path, { size: file.size, mtimeMs: file.mtimeMs, hash })
-  return hash
+  return hashFile(file.path)
 }
 
 function locationOf(folderId: string, file: ScannedFile): FolderBookLocation {
@@ -291,7 +351,7 @@ async function syncFile(
   const twin = findByContentHash(contentHash)
   if (twin) return (await adoptTwin(folder.id, file, twin, context)) ? 'updated' : 'unchanged'
 
-  const metadata = await readBookMetadata(file.path)
+  const metadata = await metadataOf(file)
   insertLibraryBook({
     id: crypto.randomUUID(),
     contentHash,
@@ -328,7 +388,7 @@ async function refreshKnownBook(
     return 'unchanged'
   }
 
-  const metadata = await readBookMetadata(file.path)
+  const metadata = await metadataOf(file)
   updateFolderBookContent(known.id, {
     contentHash,
     ...metadata,

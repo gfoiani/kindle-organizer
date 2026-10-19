@@ -40,7 +40,11 @@ function getLibraryRoot(): string {
   return path.join(app.getPath('userData'), 'library')
 }
 
+/** Library ids are crypto.randomUUID()s. Ids come back from the renderer, so nothing else becomes a path. */
+const LIBRARY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function itemDir(id: string): string {
+  if (!LIBRARY_ID.test(id)) throw new Error('Not a library id')
   return path.join(getLibraryRoot(), id)
 }
 
@@ -146,7 +150,9 @@ export async function removeLibraryItemCache(id: string): Promise<void> {
  * and it leaves the library when it leaves its folder.
  */
 export async function removeLibraryBook(id: string): Promise<void> {
-  if (getLibraryBook(id)?.folderId) throw new AppError('LIBRARY_FOLDER_BOOK')
+  const book = getLibraryBook(id)
+  if (!book) throw new Error('Library book not found')
+  if (book.folderId) throw new AppError('LIBRARY_FOLDER_BOOK')
   deleteLibraryBook(id)
   await removeLibraryItemCache(id)
 }

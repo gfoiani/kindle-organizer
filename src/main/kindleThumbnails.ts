@@ -2,6 +2,7 @@ import * as fs from 'fs-extra'
 import path from 'path'
 import { app, nativeImage } from 'electron'
 import { readMobiIdentifiers, type MobiIdentifiers } from './mobiHeader'
+import { readImageSize } from './epubConvert/images'
 
 /**
  * Writes the Kindle's home-screen cover for a sideloaded book.
@@ -25,6 +26,12 @@ const debug = (...args: unknown[]): void => {
 /** Calibre's KINDLE2 `THUMBNAIL_HEIGHT` — the height the device's grid renders. */
 const THUMBNAIL_HEIGHT = 330
 const JPEG_QUALITY = 90
+/**
+ * Covers are decoded in the main process. A header declaring more pixels than
+ * this (a large print scan is ~25 MP) is refused rather than decoded: a small,
+ * well-compressed PNG can declare a size whose decode needs gigabytes.
+ */
+export const MAX_COVER_PIXELS = 40_000_000
 
 /** `<mountpoint>/system/thumbnails` — where the firmware looks for the cover. */
 export function getThumbnailDir(mountpoint: string): string {
@@ -37,14 +44,20 @@ export function thumbnailFilename(identifiers: MobiIdentifiers): string {
 }
 
 /**
- * Normalizes a cached cover into a device-sized JPEG.
+ * Normalizes a cached cover into a device-sized JPEG, or null for a cover too
+ * large to decode safely.
  *
  * The cover cache stores whatever a provider (or an EPUB) handed us — often a
  * PNG, sometimes a 1600px scan — while the device wants a modest JPEG. Chromium's
- * decoder does both jobs. If it cannot decode the buffer we ship the original
- * bytes: a possibly-oversized cover still beats no cover.
+ * decoder does both jobs. A cover whose size cannot be read from its header is
+ * not decoded at all, and like one the decoder rejects, it is shipped as-is: a
+ * possibly-oversized cover still beats no cover.
  */
-export function toKindleJpeg(image: Buffer): Buffer {
+export function toKindleJpeg(image: Buffer): Buffer | null {
+  const size = readImageSize(image)
+  if (!size) return image
+  if (size.width * size.height > MAX_COVER_PIXELS) return null
+
   try {
     const decoded = nativeImage.createFromBuffer(image)
     if (decoded.isEmpty()) return image
@@ -88,6 +101,12 @@ export async function writeKindleThumbnail(
     return null
   }
 
+  const jpeg = toKindleJpeg(cover)
+  if (!jpeg) {
+    console.warn(`[thumbnails] Cover for ${bookPath} declares too many pixels to decode — skipping thumbnail`)
+    return null
+  }
+
   const filename = thumbnailFilename(identifiers)
   const dir = getThumbnailDir(mountpoint)
   const finalPath = path.join(dir, filename)
@@ -97,7 +116,7 @@ export async function writeKindleThumbnail(
     await fs.ensureDir(dir)
     // Atomic device write (temp then rename), like calibre.ts: an unplug mid-write
     // must never leave a half-written JPEG the firmware would cache as the cover.
-    await fs.writeFile(tempPath, toKindleJpeg(cover))
+    await fs.writeFile(tempPath, jpeg)
     await fs.rename(tempPath, finalPath)
     debug(`[thumbnails] Wrote ${filename}`)
     return filename
