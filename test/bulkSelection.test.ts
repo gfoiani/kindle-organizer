@@ -5,6 +5,7 @@ import {
   deletableBooks,
   removableBooks,
   selectedBooks,
+  selectionAfterFailures,
   sendableBooks
 } from '../src/renderer/src/utils/bulkSelection'
 import type { DisplayBook } from '../src/renderer/src/utils/mergeBooks'
@@ -111,5 +112,26 @@ describe('removableBooks — library folders', () => {
     const fromFolder: DisplayBook = { ...STAGED, libraryId: 'lib-9', libraryFolderId: 'folder-1' }
 
     expect(removableBooks([fromFolder, SENT]).map((b) => b.title)).toEqual(['Dune'])
+  })
+})
+
+describe('selectionAfterFailures', () => {
+  test('keeps selected only the books whose deletion failed, so the user can retry them', () => {
+    // Arrange
+    const books = [make('A', { onDevice: true }), make('B', { onDevice: true }), make('C', { onDevice: true })]
+
+    // Act
+    const next = selectionAfterFailures(books, ['/Volumes/Kindle/documents/B.azw3'])
+
+    // Assert
+    expect([...next]).toEqual(['/Volumes/Kindle/documents/B.azw3'])
+  })
+
+  test('is empty when nothing failed', () => {
+    expect(selectionAfterFailures(ALL, []).size).toBe(0)
+  })
+
+  test('keys a failed book that is also in the library by its library id, as the grid does', () => {
+    expect([...selectionAfterFailures(ALL, [SENT.path])]).toEqual(['lib-2'])
   })
 })
