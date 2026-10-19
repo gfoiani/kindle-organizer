@@ -7,6 +7,7 @@ import { epubToKf8 } from '../src/main/epubConvert'
 import { sanitizeCss } from '../src/main/epubConvert/css'
 import { EpubInvalidError } from '../src/main/epubConvert/errors'
 import { writeEpubBook, xhtml, type EpubBookSpec } from './setup/epubBookFixture'
+import { fakeJpeg } from './setup/epubFixture'
 
 /**
  * Hostile-input cases from the security review: zip bombs that lie about their
@@ -255,5 +256,86 @@ describe('HTML is normalized to XHTML', () => {
     })
 
     expect(body).not.toContain('e.example')
+  })
+})
+
+describe('size and count limits', () => {
+  const MiB = 1024 * 1024
+
+  async function book(spec: EpubBookSpec): Promise<Awaited<ReturnType<typeof epubToKf8>>> {
+    return epubToKf8(writeEpubBook(path.join(dir, 'b.epub'), spec), { asin: ASIN })
+  }
+
+  test('refuses a content document over 8 MiB: parsing it would freeze the app for seconds', async () => {
+    const body = `<p>${'x'.repeat(8.5 * MiB)}</p>`
+
+    await expect(book({ docs: [{ path: 'a.xhtml', body }] })).rejects.toBeInstanceOf(EpubInvalidError)
+  })
+
+  test('refuses a package document (OPF) over 4 MiB', async () => {
+    await expect(
+      book({ title: 'x'.repeat(5 * MiB), docs: [{ path: 'a.xhtml', body: '<p>a</p>' }] })
+    ).rejects.toBeInstanceOf(EpubInvalidError)
+  })
+
+  test('cuts an enormous title and author down to a sane length', async () => {
+    const input = await book({
+      title: 'T'.repeat(100_000),
+      author: 'A'.repeat(100_000),
+      docs: [{ path: 'a.xhtml', body: '<p>a</p>' }]
+    })
+
+    expect(input.title.length).toBeLessThanOrEqual(512)
+    expect(input.authors.every((author) => author.length <= 512)).toBe(true)
+  })
+
+  test('keeps at most 10,000 table-of-contents entries', async () => {
+    const links = Array.from({ length: 10_050 }, (_, i) => `<li><a href="a.xhtml">Chapter ${i}</a></li>`).join('')
+
+    const input = await book({ docs: [{ path: 'a.xhtml', body: '<p>a</p>' }], nav: `<ol>${links}</ol>` })
+
+    expect(input.toc).toHaveLength(10_000)
+  })
+
+  test('ignores a navigation document over 4 MiB, as it would any unreadable TOC', async () => {
+    const padding = `<!-- ${'x'.repeat(5 * MiB)} -->`
+
+    const input = await book({
+      docs: [{ path: 'a.xhtml', body: '<p>a</p>' }],
+      nav: `<ol><li><a href="a.xhtml">One</a></li></ol>${padding}`
+    })
+
+    expect(input.toc).toEqual([])
+  })
+})
+
+describe('namespaces the output does not declare', () => {
+  test("unwraps prefixed elements such as Word's <o:p>, keeping their text", async () => {
+    const body = await convert({ docs: [{ path: 'a.xhtml', body: '<p>Uno<o:p>due</o:p></p>' }] })
+
+    expect(body).not.toContain('o:p')
+    expect(body).toContain('Unodue')
+  })
+
+  test('drops xlink attributes outside SVG', async () => {
+    const body = await convert({
+      docs: [{ path: 'a.xhtml', body: '<p><a id="x" xlink:href="http://example.com/">link</a></p>' }]
+    })
+
+    expect(body).not.toContain('xlink:')
+  })
+
+  test('declares the SVG and xlink namespaces on an SVG whose image it points at the book', async () => {
+    const svg =
+      '<svg viewBox="0 0 10 10"><rect width="1" height="1"/><image width="10" height="10" href="img/c.jpg"/></svg>'
+
+    const body = await convert({
+      docs: [{ path: 'a.xhtml', body: svg }],
+      images: [{ path: 'img/c.jpg', data: fakeJpeg() }]
+    })
+
+    expect(body).toContain('xmlns="http://www.w3.org/2000/svg"')
+    expect(body).toContain('xmlns:xlink="http://www.w3.org/1999/xlink"')
+    expect(body).toContain('xlink:href="kindle:embed:')
   })
 })
