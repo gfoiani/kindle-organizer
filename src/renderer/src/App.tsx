@@ -17,6 +17,7 @@ import { useKindleDevice } from './hooks/useKindleDevice'
 import { useLibraryBooks } from './hooks/useLibraryBooks'
 import { useFileDrop } from './hooks/useFileDrop'
 import { useCollectionActions } from './hooks/useCollectionActions'
+import { useDeviceActions } from './hooks/useDeviceActions'
 import { useLibraryFolderSync } from './hooks/useLibraryFolderSync'
 import { toBookRelpath } from './utils/relpath'
 import { mergeBooks } from './utils/mergeBooks'
@@ -58,6 +59,7 @@ export function App() {
     run,
     reportError
   })
+  const deviceActions = useDeviceActions(kindle, showInfo, showError)
   const isDraggingFiles = useFileDrop(addDroppedFiles)
 
   useEffect(() => {
@@ -205,8 +207,7 @@ export function App() {
                 kindle={kindle}
                 isRefreshing={device.isLoadingDrive || device.isLoadingBooks}
                 onRefresh={loadKindle}
-                showInfo={showInfo}
-                showError={showError}
+                actions={deviceActions}
               />
 
               <BooksGrid

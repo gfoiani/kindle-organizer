@@ -1,8 +1,6 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { KindleDrive } from '../../../preload/api'
-import { STATUS_RESET_MS } from '../utils/constants'
-import { errorMessageKey } from '../utils/appError'
+import type { DeviceActions } from '../hooks/useDeviceActions'
 
 interface AppHeaderProps {
   /** The collection shown, or "All books". */
@@ -11,8 +9,8 @@ interface AppHeaderProps {
   /** Any device reload in flight: the Refresh spinner is its only progress cue. */
   isRefreshing: boolean
   onRefresh: () => void
-  showInfo: (message: string) => void
-  showError: (message: string) => void
+  /** Write and eject, owned by App so their state outlives this header. */
+  actions: DeviceActions
 }
 
 const SPIN_PATH =
@@ -30,46 +28,9 @@ const PLAIN_BUTTON =
   'flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-md text-sm text-gray-300 transition-colors disabled:opacity-50'
 
 /** The grid's header: what is shown, and the device actions (write collections, eject, refresh). */
-export function AppHeader({ title, kindle, isRefreshing, onRefresh, showInfo, showError }: AppHeaderProps) {
+export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions }: AppHeaderProps) {
   const { t } = useTranslation()
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [isEjecting, setIsEjecting] = useState(false)
-  const [syncResult, setSyncResult] = useState<'success' | 'error' | null>(null)
-
-  async function handleWriteToKindle() {
-    if (!kindle) return
-    setIsSyncing(true)
-    setSyncResult(null)
-    try {
-      const success = await window.kindleAPI.writeToKindle(kindle.mountpoint)
-      setSyncResult(success ? 'success' : 'error')
-    } catch (err) {
-      console.error('Failed to write collections to Kindle:', err)
-      setSyncResult('error')
-    } finally {
-      setIsSyncing(false)
-      setTimeout(() => setSyncResult(null), STATUS_RESET_MS)
-    }
-  }
-
-  /**
-   * Ejects the device. No optimistic clearing of the drive: the watcher's
-   * disconnect push is what removes it, so a failed eject leaves the UI honest
-   * about the device still being mounted.
-   */
-  async function handleEject() {
-    if (!kindle) return
-    setIsEjecting(true)
-    try {
-      await window.kindleAPI.ejectKindle(kindle.mountpoint)
-      showInfo(t('header.ejected'))
-    } catch (err) {
-      console.error('Failed to eject the Kindle:', err)
-      showError(t(errorMessageKey(err, 'errors.ejectFailed')))
-    } finally {
-      setIsEjecting(false)
-    }
-  }
+  const { isSyncing, isEjecting, syncResult } = actions
 
   const syncLabel =
     syncResult === 'success' ? t('header.saved') : syncResult === 'error' ? t('header.error') : t('header.writeKindle')
@@ -89,7 +50,7 @@ export function AppHeader({ title, kindle, isRefreshing, onRefresh, showInfo, sh
         <div className="flex items-center gap-2">
           {kindle && (
             <button
-              onClick={handleWriteToKindle}
+              onClick={actions.writeToKindle}
               disabled={isSyncing}
               title={t('header.writeToKindle')}
               aria-label={t('header.writeToKindle')}
@@ -116,7 +77,7 @@ export function AppHeader({ title, kindle, isRefreshing, onRefresh, showInfo, sh
 
           {kindle && (
             <button
-              onClick={handleEject}
+              onClick={actions.eject}
               disabled={isEjecting || isSyncing}
               title={t('header.ejectHint')}
               aria-label={t('header.eject')}
