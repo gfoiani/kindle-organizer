@@ -282,6 +282,21 @@ describe('clearCoverCache — async cache clearing', () => {
     expect(readdirSync(coversDir)).toHaveLength(0)
   })
 
+  test('keeps the covers it is told to keep: those taken from the books themselves', async () => {
+    // Arrange
+    const coversDir = path.join(userData, 'covers')
+    mkdirSync(coversDir, { recursive: true })
+    const embedded = 'c'.repeat(64)
+    writeFileSync(path.join(coversDir, `${embedded}.jpg`), fakeJpeg())
+    writeFileSync(path.join(coversDir, 'd'.repeat(64) + '.jpg'), fakeJpeg())
+
+    // Act
+    await clearCoverCache([embedded])
+
+    // Assert
+    expect(readdirSync(coversDir)).toEqual([`${embedded}.jpg`])
+  })
+
   test('resolves without throwing when the cache dir does not exist', async () => {
     expect(existsSync(path.join(userData, 'covers'))).toBe(false)
     await expect(clearCoverCache()).resolves.toBeUndefined()

@@ -31,13 +31,27 @@ export function cleanupUserDataDirs(): void {
 
 vi.mock('electron', () => ({
   app: {
+    name: 'Kindle Organizer',
     isPackaged: false,
+    showAboutPanel: vi.fn(),
     getVersion: () => '0.0.0',
     getPath: (name: string) => {
       if (name === 'userData') return currentUserData
       return path.join(currentUserData, name)
     }
   },
+  // `Menu` records what it is given, so menu.ts can be exercised: a built menu
+  // is just its template, and the application menu is whatever was set last.
+  Menu: (() => {
+    let applicationMenu: unknown = null
+    return {
+      buildFromTemplate: (template: unknown[]) => ({ template, popup: vi.fn() }),
+      setApplicationMenu: (menu: unknown) => {
+        applicationMenu = menu
+      },
+      getApplicationMenu: () => applicationMenu
+    }
+  })(),
   // Minimal `protocol` stub so coverProtocol.ts can be imported under Vitest.
   // The pure request handler (handleCoverRequest) is what tests exercise; the
   // register* helpers just need to not throw when referenced.

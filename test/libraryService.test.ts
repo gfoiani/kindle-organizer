@@ -14,6 +14,7 @@ import { cleanupUserDataDirs, freshUserData } from './setup/electron-mock'
 import { fakeJpeg, writeEpub } from './setup/epubFixture'
 import { writeMobi } from './setup/mobiFixture'
 import { addDroppedFiles, removeLibraryBook, sendToKindle } from '../src/main/libraryService'
+import { readdirSync } from 'fs'
 import { getConversion, getLibraryBook, listLibraryBooks } from '../src/main/library'
 
 let userData: string
@@ -271,6 +272,55 @@ describe('sendToKindle', () => {
 
     expect(result.targetRelpath).toBe('Dune.azw3')
     expect(getLibraryBook(book!.id)?.uploadedAt).toEqual(expect.any(Number))
+    // The book is on the device, but the UI must not call the send complete.
+    expect(result.unwrittenSidecars).toEqual(['thumbnail', 'calibreRecord'])
+  })
+
+  test('reports no unwritten sidecar when the cover and the metadata.calibre record were written', async () => {
+    const file = writeEpub(path.join(src, 'novel.epub'), {
+      title: 'Dune',
+      author: 'Frank Herbert',
+      cover: fakeJpeg(),
+      coverStyle: 'epub3'
+    })
+    const [{ book }] = await addDroppedFiles([file])
+
+    const result = await sendToKindle(book!.id, mountpoint, 'azw3', vi.fn(), {
+      convert: fakeConverter(),
+      uploadFile: fakeUploader()
+    })
+
+    expect(result.unwrittenSidecars).toEqual([])
+  })
+
+  test('does not overwrite a different book that already has the same file name', async () => {
+    // Arrange: another "Dune" already on the device.
+    writeFileSync(path.join(mountpoint, 'documents', 'Dune.azw3'), 'someone else')
+    const file = writeEpub(path.join(src, 'novel.epub'), { title: 'Dune', author: 'Frank Herbert' })
+    const [{ book }] = await addDroppedFiles([file])
+
+    // Act
+    const result = await sendToKindle(book!.id, mountpoint, 'azw3', vi.fn(), {
+      convert: fakeConverter(),
+      uploadFile: fakeUploader()
+    })
+
+    // Assert
+    expect(result.targetRelpath).toBe('Dune (2).azw3')
+    expect(readFileSync(path.join(mountpoint, 'documents', 'Dune.azw3'), 'utf-8')).toBe('someone else')
+    expect(getLibraryBook(book!.id)?.targetRelpath).toBe('Dune (2).azw3')
+  })
+
+  test('a book sent again replaces its own copy instead of adding another', async () => {
+    const file = writeEpub(path.join(src, 'novel.epub'), { title: 'Dune', author: 'Frank Herbert' })
+    const [{ book }] = await addDroppedFiles([file])
+    const deps = { convert: fakeConverter(), uploadFile: fakeUploader() }
+    await sendToKindle(book!.id, mountpoint, 'azw3', vi.fn(), deps)
+
+    const again = await sendToKindle(book!.id, mountpoint, 'azw3', vi.fn(), deps)
+
+    expect(again.targetRelpath).toBe('Dune.azw3')
+    expect(readdirSync(path.join(mountpoint, 'documents'))).toEqual(['Dune.azw3'])
   })
 
   test('uploads an already-Kindle format as-is (no conversion)', async () => {
@@ -313,6 +363,21 @@ describe('sendToKindle', () => {
     expect(uploadMock).not.toHaveBeenCalled()
     expect(getConversion(book!.id, 'azw3')?.status).toBe('error')
     expect(getLibraryBook(book!.id)?.uploadedAt).toBeUndefined()
+  })
+})
+
+describe('addDroppedFiles — concurrent adds', () => {
+  test('the same book dropped twice at once is stored once, leaving no orphan copy', async () => {
+    // Arrange
+    const file = writeEpub(path.join(src, 'novel.epub'), { title: 'Dune', author: 'Frank Herbert' })
+
+    // Act: both adds pass the duplicate check before either is stored.
+    const [[first], [second]] = await Promise.all([addDroppedFiles([file]), addDroppedFiles([file])])
+
+    // Assert
+    expect([first.status, second.status].sort()).toEqual(['added', 'duplicate'])
+    expect(listLibraryBooks()).toHaveLength(1)
+    expect(readdirSync(path.join(userData, 'library'))).toHaveLength(1)
   })
 })
 

@@ -48,6 +48,28 @@ describe('deleteDeviceBooks', () => {
     expect(records).toEqual([{ lpath: 'documents/Other.azw3' }])
   })
 
+  test('keeps the thumbnail while another copy of the book on the device still shows it', async () => {
+    // Arrange: two copies of one book (same identifier), both registered in metadata.calibre.
+    const copy = writeMobi(documents('Book.azw3'), { uuid: UUID, cdetype: 'EBOK' })
+    writeMobi(documents('Book (2).azw3'), { uuid: UUID, cdetype: 'EBOK' })
+    const thumbnail = path.join(getThumbnailDir(mountpoint), thumbnailFilename({ asin: UUID, cdetype: 'EBOK' }))
+    mkdirSync(getThumbnailDir(mountpoint), { recursive: true })
+    writeFileSync(thumbnail, 'jpg')
+    writeFileSync(
+      path.join(mountpoint, 'metadata.calibre'),
+      JSON.stringify([
+        { lpath: 'documents/Book.azw3', uuid: UUID },
+        { lpath: 'documents/Book (2).azw3', uuid: UUID }
+      ])
+    )
+
+    // Act
+    await deleteDeviceBooks(mountpoint, [copy])
+
+    // Assert
+    expect(existsSync(thumbnail)).toBe(true)
+  })
+
   test('refuses anything outside documents/ or that is not a book, deleting nothing', async () => {
     const outside = path.join(mountpoint, 'system', 'Book.azw3')
     mkdirSync(path.dirname(outside), { recursive: true })
