@@ -14,13 +14,19 @@ interface DeleteFromKindleOptions {
   onCollectionsChanged: (collections: Collection[]) => void
 }
 
+/** How a delete went: whether it ran at all, and the book paths left on the device. */
+export interface DeleteOutcome {
+  attempted: boolean
+  failedPaths: string[]
+}
+
 export interface DeleteFromKindle {
   /**
    * Asks for confirmation, deletes, reports the outcome. Resolves once
-   * everything is refreshed: false when nothing was attempted (no device, no
-   * book, or the user cancelled), so the caller can keep its selection.
+   * everything is refreshed: not attempted when there was no device, no book,
+   * or the user cancelled, so the caller can keep its selection.
    */
-  deleteBooks: (books: readonly DisplayBook[]) => Promise<boolean>
+  deleteBooks: (books: readonly DisplayBook[]) => Promise<DeleteOutcome>
   /** Re-reads the collection list after books left the device. */
   refreshCollections: () => Promise<void>
 }
@@ -44,8 +50,11 @@ export function useDeleteFromKindle({
 
   const deleteBooks = useCallback(
     async (books: readonly DisplayBook[]) => {
-      if (!mountpoint || books.length === 0) return false
-      if (!window.confirm(t('selection.confirmDeleteFromKindle', { count: books.length }))) return false
+      const notAttempted: DeleteOutcome = { attempted: false, failedPaths: [] }
+      if (!mountpoint || books.length === 0) return notAttempted
+      if (!window.confirm(t('selection.confirmDeleteFromKindle', { count: books.length }))) return notAttempted
+      // A call that failed as a whole leaves every book where it was.
+      let failedPaths = books.map((book) => book.path)
       try {
         const { deleted, failed } = await window.kindleAPI.deleteDeviceBooks(
           mountpoint,
@@ -58,13 +67,14 @@ export function useDeleteFromKindle({
           .filter(Boolean)
           .join(' · ')
         if (summary) onNotify(failed.length > 0 ? 'error' : 'info', summary)
+        failedPaths = failed
       } catch (err) {
         console.error('[bulk-delete] failed:', err)
         onNotify('error', t(errorMessageKey(err, 'library.deleteError')))
       }
       onLibraryChanged()
       await refreshCollections()
-      return true
+      return { attempted: true, failedPaths }
     },
     [mountpoint, t, onNotify, onLibraryChanged, refreshCollections]
   )

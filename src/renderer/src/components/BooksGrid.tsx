@@ -15,6 +15,7 @@ import {
   deletableBooks,
   removableBooks,
   selectedBooks,
+  selectionAfterFailures,
   sendableBooks
 } from '../utils/bulkSelection'
 import { sortBooks } from '../utils/sortBooks'
@@ -474,7 +475,7 @@ export function BooksGrid({
 
     setIsRunning(true)
     let removed = 0
-    let failed = 0
+    const failedKeys = new Set<string>()
     for (const book of removable) {
       if (book.libraryId === undefined) continue
       try {
@@ -482,10 +483,11 @@ export function BooksGrid({
         removed++
       } catch (err) {
         console.error(`[bulk-remove] "${book.title}" failed:`, err)
-        failed++
+        failedKeys.add(bookKey(book))
       }
     }
     setIsRunning(false)
+    const failed = failedKeys.size
 
     const summary = [
       removed > 0 ? t('selection.removedCount', { count: removed }) : null,
@@ -496,7 +498,9 @@ export function BooksGrid({
     if (summary) onNotify(failed > 0 ? 'error' : 'info', summary)
 
     onLibraryChanged()
-    exitSelection()
+    // Books that could not be removed stay selected so they can be retried.
+    if (failed > 0) setSelectedKeys(failedKeys)
+    else exitSelection()
   }, [removable, t, onNotify, onLibraryChanged, exitSelection])
 
   /**
@@ -512,10 +516,13 @@ export function BooksGrid({
 
   const runBulkDeleteFromKindle = useCallback(async () => {
     setIsRunning(true)
-    const attempted = await deleteBooks(deletable)
+    const { attempted, failedPaths } = await deleteBooks(deletable)
     setIsRunning(false)
-    // Cancelling the confirmation keeps the selection the user built.
-    if (attempted) exitSelection()
+    // Cancelling the confirmation keeps the selection the user built; books
+    // that could not be deleted stay selected so they can be retried.
+    if (!attempted) return
+    if (failedPaths.length > 0) setSelectedKeys(selectionAfterFailures(deletable, failedPaths))
+    else exitSelection()
   }, [deleteBooks, deletable, exitSelection])
 
   const runBulkAddToCollection = useCallback(

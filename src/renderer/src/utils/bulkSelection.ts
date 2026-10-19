@@ -11,6 +11,15 @@ export function bookKey(book: DisplayBook): string {
   return book.libraryId ?? book.path
 }
 
+/**
+ * What stays selected after an action failed for some books: exactly those,
+ * keyed as the grid keys them, so the user can see and retry them.
+ */
+export function selectionAfterFailures(books: DisplayBook[], failedPaths: readonly string[]): Set<string> {
+  const failed = new Set(failedPaths)
+  return new Set(books.filter((book) => failed.has(book.path)).map(bookKey))
+}
+
 /** The selected books, in the order they appear in `books`. */
 export function selectedBooks(books: DisplayBook[], selected: ReadonlySet<string>): DisplayBook[] {
   return books.filter((book) => selected.has(bookKey(book)))

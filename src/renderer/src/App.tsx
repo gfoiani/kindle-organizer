@@ -16,6 +16,7 @@ import { selectLoadingPhase } from './utils/loadingPhase'
 import { isPresenceFiltered, type PresenceFilter } from './utils/presenceFilter'
 import { errorMessageKey } from './utils/appError'
 import { useLibraryFolderSync } from './hooks/useLibraryFolderSync'
+import { createLatestGate } from './utils/latestGate'
 import {
   buildAuthorSubcollections,
   isSubCollection,
@@ -189,13 +190,17 @@ export function App() {
     }
   }, [loadBooks, loadCollections, reportError])
 
+  // A folder push, a window focus and a send can all reload the library at once.
+  const [libraryLoads] = useState(createLatestGate)
   const loadLibrary = useCallback(async () => {
+    const isLatest = libraryLoads.begin()
     try {
-      setLibraryBooks(await window.kindleAPI.getLibrary())
+      const result = await window.kindleAPI.getLibrary()
+      if (isLatest()) setLibraryBooks(result)
     } catch (err) {
-      reportError(err, 'errors.loadLibrary')
+      if (isLatest()) reportError(err, 'errors.loadLibrary')
     }
-  }, [reportError])
+  }, [libraryLoads, reportError])
 
   useEffect(() => {
     loadKindle()
@@ -372,33 +377,41 @@ export function App() {
     setCollections(result.value)
   }
 
-  async function handleAddBookToCollection(collectionId: string, bookRelpath: string) {
-    const result = await run('errors.addToCollection', () =>
-      window.kindleAPI.addBookToCollection(collectionId, bookRelpath)
-    )
-    // Only reflect the membership once it actually landed — the optimistic
-    // update used to stick even when the write had failed.
-    if (!result.ok) return
-    if (collectionId === selectedCollectionId) {
-      setCollectionBookPaths((prev) => new Set([...prev, bookRelpath]))
-    }
-    await reloadCollections()
-  }
+  // Stable: every memoized BookCard receives these two, and a new identity on
+  // each App render (every keystroke in the search box) re-rendered them all.
+  const handleAddBookToCollection = useCallback(
+    async (collectionId: string, bookRelpath: string) => {
+      const result = await run('errors.addToCollection', () =>
+        window.kindleAPI.addBookToCollection(collectionId, bookRelpath)
+      )
+      // Only reflect the membership once it actually landed — the optimistic
+      // update used to stick even when the write had failed.
+      if (!result.ok) return
+      if (collectionId === selectedCollectionId) {
+        setCollectionBookPaths((prev) => new Set([...prev, bookRelpath]))
+      }
+      await reloadCollections()
+    },
+    [run, selectedCollectionId, reloadCollections]
+  )
 
-  async function handleRemoveBookFromCollection(collectionId: string, bookRelpath: string) {
-    const result = await run('errors.removeFromCollection', () =>
-      window.kindleAPI.removeBookFromCollection(collectionId, bookRelpath)
-    )
-    if (!result.ok) return
-    if (collectionId === selectedCollectionId) {
-      setCollectionBookPaths((prev) => {
-        const next = new Set(prev)
-        next.delete(bookRelpath)
-        return next
-      })
-    }
-    await reloadCollections()
-  }
+  const handleRemoveBookFromCollection = useCallback(
+    async (collectionId: string, bookRelpath: string) => {
+      const result = await run('errors.removeFromCollection', () =>
+        window.kindleAPI.removeBookFromCollection(collectionId, bookRelpath)
+      )
+      if (!result.ok) return
+      if (collectionId === selectedCollectionId) {
+        setCollectionBookPaths((prev) => {
+          const next = new Set(prev)
+          next.delete(bookRelpath)
+          return next
+        })
+      }
+      await reloadCollections()
+    },
+    [run, selectedCollectionId, reloadCollections]
+  )
 
   function handleBookUpdated(updatedBook: KindleBook) {
     setBooks((prev) => prev.map((b) => b.path === updatedBook.path ? updatedBook : b))
