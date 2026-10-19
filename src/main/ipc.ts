@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { detectKindleDrives, readDocuments, requireKindleDrive, type KindleBook } from './kindle'
+import { detectKindleDrives, readDocuments, rememberDetectedKindles, requireKindleDrive, type KindleBook } from './kindle'
 import { ejectDrive } from './eject'
 import { AppError } from './appErrors'
 import {
@@ -142,13 +142,20 @@ function withErrorLogging<Args extends unknown[], Result>(
 export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void {
   ipcMain.handle(
     'kindle:detect-drives',
-    withErrorLogging('kindle:detect-drives', async () => detectKindleDrives())
+    withErrorLogging('kindle:detect-drives', async () => {
+      const drives = await detectKindleDrives()
+      // The refresh that follows reads and syncs this drive: no second detection.
+      rememberDetectedKindles(drives)
+      return drives
+    })
   )
 
   ipcMain.handle(
     'kindle:read-documents',
     withErrorLogging('kindle:read-documents', async (_, kindleMountpoint: unknown) => {
       assertString(kindleMountpoint, 'kindleMountpoint')
+      // A renderer-supplied path: only a connected Kindle's books are listed.
+      await requireKindleDrive(kindleMountpoint)
       const books = await readDocuments(kindleMountpoint)
       const withOverrides = applyOverrides(books)
 
@@ -180,6 +187,7 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
     'kindle:sync-calibre',
     withErrorLogging('kindle:sync-calibre', async (_, mountpoint: unknown) => {
       assertString(mountpoint, 'mountpoint')
+      await requireKindleDrive(mountpoint)
       const calibreBooks = readCalibreMetadata(mountpoint)
       // An unreadable file is not "no collections": importing nothing would
       // delete every collection that came from calibre.

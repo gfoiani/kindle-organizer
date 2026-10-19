@@ -95,6 +95,14 @@ export async function requireKindleDrive(mountpoint: string, now = Date.now()): 
 }
 
 /**
+ * Records what a detection the renderer asked for found, so the reads and
+ * writes of the refresh that follows reuse it instead of detecting again.
+ */
+export function rememberDetectedKindles(drives: readonly KindleDrive[], now = Date.now()): void {
+  lastVerified = drives.length > 0 ? { drive: drives[0], at: now } : undefined
+}
+
+/**
  * Polls for Kindle drives every `intervalMs` ms and fires callbacks when
  * a drive is connected or disconnected. Returns a stop function.
  */
