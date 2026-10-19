@@ -44,6 +44,8 @@ All notable changes to this project will be documented in this file.
 - *Clear cover cache* keeps the covers taken from the books' own files, which could not be downloaded again.
 - Dropping the same book twice at once no longer leaves an orphan copy in the library folder.
 - On macOS, *About* in the menu bar works after the window has been closed.
+- Converted books no longer carry undeclared namespaces (Word's `<o:p>`, `xlink:href` outside images), which a strict Kindle could refuse.
+- A hostile EPUB can no longer freeze the app during a send: content documents over 8 MiB, oversized package files, runaway tables of contents and titles are refused or cut.
 - **macOS:** the collections and edits of a book with an accented file name no longer depend on whether macOS spells the name composed or decomposed.
 
 ## [0.4.0] - 2026-08-03

@@ -39,8 +39,22 @@ const ALLOWED_PREFIX = /^(xml|xmlns|xlink):[A-Za-z_][-A-Za-z0-9_.]*$/
 const IMG_SOURCE_ATTRIBUTES: ReadonlySet<string> = new Set(['src', 'srcset', 'sizes'])
 /** Outside <img> these point at media the book does not carry (<source>, <input>, <video>). */
 const URL_ATTRIBUTES: ReadonlySet<string> = new Set(['src', 'srcset', 'poster'])
-/** htmlparser2 accepts `"`, `<`, `=` in tag names; writing them out would corrupt the XHTML. */
-const VALID_ELEMENT_NAME = /^[A-Za-z_][-A-Za-z0-9_.:]*$/
+/**
+ * htmlparser2 accepts `"`, `<`, `=` in tag names; writing them out would corrupt
+ * the XHTML. A prefix (Word's `<o:p>`) is refused too: the output declares no
+ * namespace for it, so the element is unwrapped and its content kept.
+ */
+const VALID_ELEMENT_NAME = /^[A-Za-z_][-A-Za-z0-9_.]*$/
+/** Prefixed attributes that only mean something inside SVG/MathML, where the root declares them. */
+const FOREIGN_ONLY_PREFIX = /^(xlink|xmlns):/i
+/** What the root of embedded SVG or MathML declares, so its content parses as XML on the device. */
+const FOREIGN_NAMESPACES: Readonly<Record<string, readonly Attribute[]>> = {
+  svg: [
+    ['xmlns', 'http://www.w3.org/2000/svg'],
+    ['xmlns:xlink', 'http://www.w3.org/1999/xlink']
+  ],
+  math: [['xmlns', 'http://www.w3.org/1998/Math/MathML']]
+}
 /**
  * Real books nest a few dozen levels at most. The cap keeps the recursive
  * transform/serialize (and DomUtils helpers) far from the stack limit.
@@ -126,6 +140,13 @@ function foreignImageAttributes(el: Element, attrs: Attribute[], ctx: DocumentCo
   return uri ? [...attrs.filter(([n]) => n !== 'href' && n !== 'xlink:href'), ['xlink:href', uri]] : undefined
 }
 
+/** `attrs` with the root of SVG/MathML declaring its namespaces, whatever the source declared. */
+function declareNamespaces(lower: string, attrs: Attribute[]): Attribute[] {
+  const declarations = FOREIGN_NAMESPACES[lower] ?? []
+  const declared = new Set(declarations.map(([name]) => name))
+  return [...declarations, ...attrs.filter(([name]) => !declared.has(name))]
+}
+
 function convertElement(el: Element, ctx: DocumentContext, foreign: boolean): XNode[] {
   const lower = el.name.toLowerCase()
   if (DROPPED.has(lower)) return []
@@ -139,7 +160,7 @@ function convertElement(el: Element, ctx: DocumentContext, foreign: boolean): XN
   const isForeignImage = inForeign && localName(lower) === 'image'
   const cleaned = inForeign
     ? cleanAttributes(el.attribs, ctx)
-    : cleanAttributes(lowerCaseKeys(el.attribs), ctx, URL_ATTRIBUTES)
+    : cleanAttributes(lowerCaseKeys(el.attribs), ctx, URL_ATTRIBUTES).filter(([n]) => !FOREIGN_ONLY_PREFIX.test(n))
   // Inside SVG only <image> keeps a reference (rewritten below); SVG links have
   // no Kindle target and would otherwise pass arbitrary URLs through.
   const linked = inForeign
@@ -147,8 +168,9 @@ function convertElement(el: Element, ctx: DocumentContext, foreign: boolean): XN
     : lower === 'a' || lower === 'area'
       ? rewriteHref(cleaned, ctx)
       : cleaned
-  const attrs = isForeignImage ? foreignImageAttributes(el, linked, ctx) : linked
-  if (!attrs) return []
+  const withImage = isForeignImage ? foreignImageAttributes(el, linked, ctx) : linked
+  if (!withImage) return []
+  const attrs = inForeign && !foreign ? declareNamespaces(lower, withImage) : withImage
   const children = el.children.flatMap((c) => convertNode(c, ctx, inForeign))
   // The parser only knows lowercase void names, so an unclosed <BR> swallows
   // what follows it: hand that content back to the parent.

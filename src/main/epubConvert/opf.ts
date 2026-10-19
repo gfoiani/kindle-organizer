@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser'
-import type { EpubArchive } from './archive'
+import { MAX_PACKAGE_DOCUMENT_BYTES, type EpubArchive } from './archive'
+import { capLength, MAX_METADATA_TEXT } from '../textLimits'
 import { EpubInvalidError } from './errors'
 import { resolveHref } from './paths'
 
@@ -70,7 +71,7 @@ function dcValues(value: unknown): DcValue[] {
 
 async function readOpfPath(archive: EpubArchive): Promise<string> {
   if (!archive.has(CONTAINER_PATH)) throw new EpubInvalidError('The EPUB has no META-INF/container.xml')
-  const container = parser.parse((await archive.read(CONTAINER_PATH)).toString('utf-8'))
+  const container = parser.parse((await archive.read(CONTAINER_PATH, MAX_PACKAGE_DOCUMENT_BYTES)).toString('utf-8'))
   const rootfiles = asNode(asNode(container?.container)?.rootfiles)
   const fullPath = attr(nodes(rootfiles?.rootfile)[0], 'full-path')
   if (!fullPath || !archive.has(fullPath)) throw new EpubInvalidError('The EPUB has no package document')
@@ -97,7 +98,7 @@ function readManifest(manifestNode: XmlNode | undefined, opfPath: string): Manif
 function readAuthors(metadata: XmlNode | undefined): string[] {
   const creators = dcValues(metadata?.creator)
   const authors = creators.filter((c) => (c.role ?? 'aut') === 'aut')
-  return (authors.length > 0 ? authors : creators).map((c) => c.text)
+  return (authors.length > 0 ? authors : creators).map((c) => capLength(c.text, MAX_METADATA_TEXT))
 }
 
 /** EPUB3 cover-image property, then the EPUB2 <meta name="cover">, then an id that says "cover". */
@@ -110,10 +111,14 @@ function findCover(manifest: ManifestItem[], metadata: XmlNode | undefined): str
   return manifest.find((i) => i.mediaType.startsWith('image/') && i.id.toLowerCase().includes('cover'))?.path
 }
 
+function metadataText(text: string | undefined): string | undefined {
+  return text === undefined ? undefined : capLength(text, MAX_METADATA_TEXT)
+}
+
 /** Reads container.xml and the OPF: metadata, manifest, spine, cover and navigation documents. */
 export async function readPackage(archive: EpubArchive): Promise<EpubPackage> {
   const opfPath = await readOpfPath(archive)
-  const opf = parser.parse((await archive.read(opfPath)).toString('utf-8'))
+  const opf = parser.parse((await archive.read(opfPath, MAX_PACKAGE_DOCUMENT_BYTES)).toString('utf-8'))
   const pkg = asNode(opf?.package)
   if (!pkg) throw new EpubInvalidError('The EPUB package document is not readable')
 
@@ -134,7 +139,7 @@ export async function readPackage(archive: EpubArchive): Promise<EpubPackage> {
   const ncx = (ncxId ? byId.get(ncxId) : undefined) ?? manifest.find((i) => i.mediaType === NCX_TYPE)
 
   return {
-    title: dcValues(metadata?.title)[0]?.text,
+    title: metadataText(dcValues(metadata?.title)[0]?.text),
     authors: readAuthors(metadata),
     language: dcValues(metadata?.language)[0]?.text,
     manifest,

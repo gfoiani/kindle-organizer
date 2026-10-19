@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { isTag, type Element } from 'domhandler'
-import type { EpubArchive } from './archive'
+import { MAX_PACKAGE_DOCUMENT_BYTES, type EpubArchive } from './archive'
 import { decodeDocument, findAllByName, findFirstByName, localName, normalizedText, parseHtml, parseXml } from './dom'
 import type { EpubPackage } from './opf'
 import { resolveHref } from './paths'
@@ -9,6 +9,12 @@ import { resolveHref } from './paths'
 const debug = (...args: unknown[]): void => {
   if (!app.isPackaged) console.log(...args)
 }
+
+/**
+ * Entries kept from a book's table of contents. Real books list a few hundred
+ * at most; every entry costs an index record and a navigation lookup.
+ */
+const MAX_TOC_ENTRIES = 10_000
 
 /** A flattened TOC entry pointing into the archive. */
 export interface RawTocEntry {
@@ -48,13 +54,21 @@ function fromNcx(source: string, ncxPath: string): RawTocEntry[] {
  * fatal: the writer derives one from the parts instead.
  */
 export async function readToc(archive: EpubArchive, pkg: EpubPackage): Promise<RawTocEntry[]> {
+  const entries = await readFullToc(archive, pkg)
+  if (entries.length > MAX_TOC_ENTRIES) {
+    debug(`[epubConvert] TOC has ${entries.length} entries; keeping the first ${MAX_TOC_ENTRIES}`)
+  }
+  return entries.slice(0, MAX_TOC_ENTRIES)
+}
+
+async function readFullToc(archive: EpubArchive, pkg: EpubPackage): Promise<RawTocEntry[]> {
   try {
     if (pkg.navPath && archive.has(pkg.navPath)) {
-      const nav = fromNav(decodeDocument(await archive.read(pkg.navPath)), pkg.navPath)
+      const nav = fromNav(decodeDocument(await archive.read(pkg.navPath, MAX_PACKAGE_DOCUMENT_BYTES)), pkg.navPath)
       if (nav.length > 0) return nav
     }
     if (pkg.ncxPath && archive.has(pkg.ncxPath)) {
-      return fromNcx(decodeDocument(await archive.read(pkg.ncxPath)), pkg.ncxPath)
+      return fromNcx(decodeDocument(await archive.read(pkg.ncxPath, MAX_PACKAGE_DOCUMENT_BYTES)), pkg.ncxPath)
     }
   } catch (err) {
     debug('[epubConvert] TOC not readable, deriving one:', err instanceof Error ? err.message : String(err))

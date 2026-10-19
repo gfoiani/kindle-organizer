@@ -20,6 +20,7 @@ import { buildRecord0 } from './record0'
 import { buildFcis, buildFdst, buildFlis, EOF_RECORD } from './records'
 import { buildSkeleton } from './skeleton'
 import { buildTextRecords } from './text'
+import { capLength } from '../textLimits'
 
 export { flowUri as kindleFlowUri } from './skeleton'
 
@@ -74,12 +75,8 @@ export function kindlePosUri(part: number, offset: number): string {
  */
 const MAX_TITLE_LENGTH = 256
 
-/** `title` cut to MAX_TITLE_LENGTH code units, never inside a surrogate pair. */
 function capTitle(title: string): string {
-  if (title.length <= MAX_TITLE_LENGTH) return title
-  const cut = title.slice(0, MAX_TITLE_LENGTH)
-  const last = cut.charCodeAt(cut.length - 1)
-  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut
+  return capLength(title, MAX_TITLE_LENGTH)
 }
 
 const SKELETON_TAGS: TagDef[] = [

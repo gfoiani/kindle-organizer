@@ -20,11 +20,19 @@ export interface ArchiveLimits {
   maxTotalBytes: number
 }
 
+/**
+ * Content documents are parsed synchronously on the main process: 8 MiB takes
+ * about 2 s (16 MiB took 3.6 s), against ~430 KB for the largest chapter seen
+ * in a real library.
+ */
 export const DEFAULT_ARCHIVE_LIMITS: ArchiveLimits = {
   maxEntryBytes: 64 * 1024 * 1024,
-  maxDocumentBytes: 16 * 1024 * 1024,
+  maxDocumentBytes: 8 * 1024 * 1024,
   maxTotalBytes: 512 * 1024 * 1024
 }
+
+/** container.xml, the OPF, the NCX and the nav document: parsed whole, and small in any real book. */
+export const MAX_PACKAGE_DOCUMENT_BYTES = 4 * 1024 * 1024
 
 export interface EpubArchive {
   has(entryPath: string): boolean

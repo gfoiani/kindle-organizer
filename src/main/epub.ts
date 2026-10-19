@@ -2,6 +2,7 @@ import { app } from 'electron'
 import path from 'path'
 import { XMLParser } from 'fast-xml-parser'
 import { titleFromFilename } from './titleFromFilename'
+import { capLength, MAX_METADATA_TEXT } from './textLimits'
 import { openArchive, type ArchiveLimits, type EpubArchive } from './epubConvert/archive'
 
 // Dev-only verbose logging. Silent in packaged builds.
@@ -171,8 +172,14 @@ function firstOf(value: unknown): Record<string, unknown> | undefined {
   return toArray(value)[0]
 }
 
-/** Extracts trimmed text from a dc:* node (string, number, array, or {#text}). */
+/** Extracts trimmed text from a dc:* node, cut to MAX_METADATA_TEXT. */
 function firstText(node: unknown): string | undefined {
+  const text = rawFirstText(node)
+  return text === undefined ? undefined : capLength(text, MAX_METADATA_TEXT)
+}
+
+/** Extracts trimmed text from a dc:* node (string, number, array, or {#text}). */
+function rawFirstText(node: unknown): string | undefined {
   if (node === undefined || node === null) return undefined
   const first = Array.isArray(node) ? node[0] : node
   if (typeof first === 'string') return first.trim() || undefined
