@@ -321,6 +321,23 @@ export function setUploaded(id: string, targetRelpath: string): void {
     .run(Date.now(), targetRelpath, id)
 }
 
+/** Fills in an author the metadata reader of an older version missed (see libraryRepair.ts). */
+export function setLibraryBookAuthor(id: string, author: string): void {
+  store.get().prepare('UPDATE library_books SET author = ? WHERE id = ?').run(author, id)
+}
+
+/** Which metadata reader last went over the rows, kept in the DB's user_version (0 on a new or old DB). */
+export function getMetadataReaderVersion(): number {
+  const version = store.get().pragma('user_version', { simple: true })
+  return typeof version === 'number' ? version : 0
+}
+
+export function setMetadataReaderVersion(version: number): void {
+  // PRAGMA takes no bound parameters: only a plain integer is ever interpolated.
+  if (!Number.isInteger(version) || version < 0) throw new Error(`Invalid metadata reader version: ${version}`)
+  store.get().pragma(`user_version = ${version}`)
+}
+
 // ─── Library folders ──────────────────────────────────────────────────────────
 
 interface LibraryFolderRow {

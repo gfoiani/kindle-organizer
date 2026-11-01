@@ -11,6 +11,7 @@ import { closeCollectionsDb } from './localCollections'
 import { closeLibraryDb } from './library'
 import { installFileLog } from './logger'
 import { startLibraryFolderWatching } from './libraryWatcher'
+import { repairLibraryMetadata } from './libraryRepair'
 
 const WINDOW_WIDTH = 1200
 const WINDOW_HEIGHT = 780
@@ -167,11 +168,20 @@ app.whenReady().then(() => {
   registerCoverProtocol()
   createWindow()
 
-  // Catch up on whatever changed in the library folders while the app was closed;
-  // this also starts their watchers.
-  folderWatching.syncAll().catch((err: unknown) => {
-    console.error('[library-folders] Initial sync failed:', err instanceof Error ? err.message : String(err))
-  })
+  // Fill in what an older metadata reader missed, then catch up on whatever
+  // changed in the library folders while the app was closed (this also starts
+  // their watchers).
+  repairLibraryMetadata()
+    .then((repaired) => {
+      if (repaired > 0) safeSend(BrowserWindow.getAllWindows()[0] ?? null, 'library:changed')
+    })
+    .catch((err: unknown) => {
+      console.error('[library] Metadata repair failed:', err instanceof Error ? err.message : String(err))
+    })
+    .then(() => folderWatching.syncAll())
+    .catch((err: unknown) => {
+      console.error('[library-folders] Initial sync failed:', err instanceof Error ? err.message : String(err))
+    })
 
   const stopRetryLoop = startCoverRetryLoop(() => BrowserWindow.getAllWindows()[0] ?? null)
 
