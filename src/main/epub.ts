@@ -31,7 +31,9 @@ export const EPUB_METADATA_LIMITS: ArchiveLimits = {
   maxTotalBytes: 24 * 1024 * 1024
 }
 
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' })
+// Namespace prefixes are dropped (as in epubConvert/opf.ts): Dublin Core is
+// just as often a default namespace (`<creator xmlns="…dc…">`) as `dc:creator`.
+const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', removeNSPrefix: true })
 
 /**
  * Reads title/author and (when present) the embedded cover from an EPUB without
@@ -102,8 +104,8 @@ function parseOpf(opfXml: string): OpfData {
   const manifest = pkg?.manifest
 
   return {
-    title: firstText(metadata?.['dc:title']),
-    author: firstText(metadata?.['dc:creator']),
+    title: firstText(metadata?.title),
+    author: firstText(metadata?.creator),
     coverHref: findCoverHref(metadata, manifest)
   }
 }

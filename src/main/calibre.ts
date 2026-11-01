@@ -62,8 +62,9 @@ export function readCalibreUuids(mountpoint: string): Set<string> | null {
  * cleans up its temp file rather than leaving a stale `.tmp` on the device.
  * The file being replaced is backed up first (see calibreBackup.ts); when that
  * copy cannot be made, nothing is written. A `routine` write (registering a
- * just-sent book) skips the copy when a recent one exists, so a bulk send
- * keeps the pre-send file rather than ten copies of its own progress.
+ * just-sent book, dropping a deleted one) skips the copy when a recent one
+ * exists, so a bulk send or delete keeps the file from before it rather than
+ * ten copies of its own progress.
  */
 function writeEntryArray(metadataPath: string, entries: unknown[], routine = false): boolean {
   const tempPath = `${metadataPath}.tmp`
@@ -216,6 +217,10 @@ export function restoreCalibreBackup(mountpoint: string, id: string): { takenAt:
  * Drops the records of books deleted from the device (relpaths under
  * `documents/`, compared case-insensitively). A device without the file has
  * nothing to drop; a file that will not parse is left untouched (false).
+ *
+ * A routine write: restoring a copy cannot bring a deleted book back, so books
+ * deleted one at a time must not push older copies (the ones taken before a
+ * collections write) out of the backup window.
  */
 export function removeCalibreEntries(mountpoint: string, relpaths: readonly string[]): boolean {
   const metadataPath = getMetadataPath(mountpoint)
@@ -228,7 +233,7 @@ export function removeCalibreEntries(mountpoint: string, relpaths: readonly stri
     const relpath = entryRelpath(entry)
     return relpath === undefined || !removed.has(foldRelpath(relpath))
   })
-  return kept.length === entries.length || writeEntryArray(metadataPath, kept)
+  return kept.length === entries.length || writeEntryArray(metadataPath, kept, true)
 }
 
 /**

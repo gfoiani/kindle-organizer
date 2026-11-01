@@ -81,6 +81,9 @@ export function isAllowedHost(hostname: string): boolean {
     h === 'itunes.apple.com' ||
     h === 'openlibrary.org' ||
     h === 'covers.openlibrary.org' ||
+    // Open Library cover images are served from archive.org's storage nodes.
+    h === 'archive.org' ||
+    /^ia\d+\.us\.archive\.org$/.test(h) ||
     h === 'www.googleapis.com' ||
     h === 'books.google.com' ||
     h.endsWith('.googleusercontent.com') ||
