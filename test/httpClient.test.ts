@@ -38,6 +38,15 @@ describe('isAllowedHost', () => {
     expect(isAllowedHost('evil.internal')).toBe(false)
     expect(isAllowedHost('openlibrary.org.evil.com')).toBe(false)
   })
+
+  test('allows the archive.org hops an Open Library cover redirects through', () => {
+    // covers.openlibrary.org → archive.org/download/… → iaNNNNNN.us.archive.org/view_archive.php…
+    expect(isAllowedHost('archive.org')).toBe(true)
+    expect(isAllowedHost('ia800100.us.archive.org')).toBe(true)
+    expect(isAllowedHost('archive.org.evil.com')).toBe(false)
+    expect(isAllowedHost('evilarchive.org')).toBe(false)
+    expect(isAllowedHost('internal.archive.org')).toBe(false)
+  })
 })
 
 describe('fetchJson', () => {

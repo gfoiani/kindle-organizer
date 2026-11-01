@@ -93,6 +93,15 @@ export interface EpubFixtureOptions {
   omitContainer?: boolean
   /** Write a non-XML OPF body (parser should degrade to filename). */
   malformedOpf?: boolean
+  /** Declare Dublin Core as each element's default namespace (`<creator xmlns="…dc…">`) instead of the `dc:` prefix. */
+  unprefixedDublinCore?: boolean
+}
+
+const DC_NS = 'http://purl.org/dc/elements/1.1/'
+
+/** A Dublin Core element, written the way most EPUBs do (`dc:` prefix) or with its own default namespace. */
+function dcElement(name: string, text: string, unprefixed: boolean | undefined): string {
+  return unprefixed ? `<${name} xmlns="${DC_NS}">${text}</${name}>` : `<dc:${name}>${text}</dc:${name}>`
 }
 
 const OPF_PATH = 'OEBPS/content.opf'
@@ -105,8 +114,8 @@ function buildOpf(opts: EpubFixtureOptions): string {
   const style = opts.coverStyle ?? 'epub3'
 
   const meta = [
-    `    <dc:title>${title}</dc:title>`,
-    author ? `    <dc:creator>${author}</dc:creator>` : '',
+    `    ${dcElement('title', title, opts.unprefixedDublinCore)}`,
+    author ? `    ${dcElement('creator', author, opts.unprefixedDublinCore)}` : '',
     hasCover && style === 'epub2' ? `    <meta name="cover" content="cover-img"/>` : ''
   ]
     .filter(Boolean)
@@ -125,7 +134,7 @@ function buildOpf(opts: EpubFixtureOptions): string {
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata xmlns:dc="${DC_NS}">
 ${meta}
   </metadata>
   <manifest>

@@ -83,6 +83,22 @@ describe('metadata.calibre backups', () => {
     expect(readFileSync(path.join(backupDir(), backups()[0]), 'utf-8')).toBe(before)
   })
 
+  test('deleting books one at a time keeps the copy from before the first delete', () => {
+    // Arrange: the collections the user wrote, then more single deletes than the window holds.
+    const before = writeMetadata(
+      Array.from({ length: CALIBRE_BACKUP_LIMIT + 5 }, (_, i) => ({ lpath: `documents/Book${i}.azw3`, tags: ['Keep'] }))
+    )
+
+    // Act
+    for (let i = 0; i < CALIBRE_BACKUP_LIMIT + 5; i++) {
+      removeCalibreEntries(mountpoint, [`Book${i}.azw3`])
+    }
+
+    // Assert
+    expect(backups()).toHaveLength(1)
+    expect(readFileSync(path.join(backupDir(), backups()[0]), 'utf-8')).toBe(before)
+  })
+
   test('does not write when the backup cannot be made', () => {
     // Arrange: a file where the backup folder should go.
     const before = writeMetadata([{ lpath: 'documents/A.azw3', tags: ['Old'] }])

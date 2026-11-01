@@ -32,6 +32,22 @@ describe('parseEpub — metadata', () => {
     expect(meta.author).toBe('Ursula K. Le Guin')
   })
 
+  test('reads title and author declared in the Dublin Core namespace without the dc: prefix', async () => {
+    // Arrange — InDesign/Sigil output seen on a real book: <creator xmlns="http://purl.org/dc/elements/1.1/">
+    const file = writeEpub(path.join(dir, 'book.epub'), {
+      title: 'Dungeon Crawler Carl',
+      author: 'Matt Dinniman',
+      unprefixedDublinCore: true
+    })
+
+    // Act
+    const meta = await parseEpub(file)
+
+    // Assert
+    expect(meta.title).toBe('Dungeon Crawler Carl')
+    expect(meta.author).toBe('Matt Dinniman')
+  })
+
   test('omits author when the OPF has no dc:creator', async () => {
     const file = writeEpub(path.join(dir, 'book.epub'), { title: 'Anonymous Work' })
 
