@@ -1,7 +1,7 @@
 # Real Kindle collections, synced automatically
 
 **Date:** 2026-11-01
-**Status:** draft — builder-checked, awaiting the user's approval
+**Status:** approved (2026-11-01)
 
 ## Why
 
