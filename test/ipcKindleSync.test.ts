@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
+import { createHash } from 'crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
@@ -30,7 +31,8 @@ const STATUS = {
   created: 0,
   updated: 0,
   deleted: 0,
-  pendingBooks: []
+  pendingBooks: [],
+  appliedDesired: null
 }
 
 let mountpoint: string
@@ -153,7 +155,7 @@ describe('kindle-sync:answer-first-sync', () => {
     const state = await invokeIpc('kindle-sync:answer-first-sync', mountpoint, 'import')
 
     // Assert
-    expect(state).toEqual({ kind: 'active', status: STATUS })
+    expect(state).toEqual({ kind: 'active', status: STATUS, upToDate: false })
     expect((await appCollections()).map((c) => [c.name, c.bookCount])).toEqual([
       ['Acquisti', 0],
       ['Letti', 1]
@@ -181,7 +183,7 @@ describe('kindle-sync:answer-first-sync', () => {
     installComponent()
     await invokeIpc('kindle-sync:answer-first-sync', mountpoint, 'discard')
 
-    expect(await invokeIpc('kindle-sync:refresh', mountpoint)).toEqual({ kind: 'active', status: STATUS })
+    expect(await invokeIpc('kindle-sync:refresh', mountpoint)).toEqual({ kind: 'active', status: STATUS, upToDate: false })
     expect(readDesired().mode).toBe('mirror')
   })
 
@@ -235,4 +237,35 @@ describe('calibre tags are imported on connect until the first-sync answer', () 
 
 test('the old "write collections to metadata.calibre" channel is gone', async () => {
   await expect(invokeIpc('kindle:write-to-kindle', mountpoint)).rejects.toThrow('No IPC handler registered')
+})
+
+describe('whether the Kindle holds the current collections', () => {
+  function desiredHash(): string {
+    return createHash('sha256').update(readFileSync(syncFile('desired.json'), 'utf8'), 'utf8').digest('hex')
+  }
+
+  /** The device applied the desired.json now on it, as its next status reports. */
+  function deviceAppliedCurrentDesired(): void {
+    writeSyncFile('status.json', { ...STATUS, result: 'ok', appliedDesired: desiredHash() })
+  }
+
+  test('up to date when the last run applied exactly the collections the app wants now', async () => {
+    addBook('A/One.azw3')
+    installComponent()
+    await invokeIpc('kindle-sync:answer-first-sync', mountpoint, 'discard')
+    deviceAppliedCurrentDesired()
+
+    expect(await invokeIpc('kindle-sync:refresh', mountpoint)).toMatchObject({ kind: 'active', upToDate: true })
+  })
+
+  test('not up to date once the app collections change after that run', async () => {
+    addBook('A/One.azw3')
+    installComponent()
+    await invokeIpc('kindle-sync:answer-first-sync', mountpoint, 'discard')
+    deviceAppliedCurrentDesired()
+
+    await invokeIpc('kindle:create-collection', 'Letti')
+
+    expect(await invokeIpc('kindle-sync:refresh', mountpoint)).toMatchObject({ kind: 'active', upToDate: false })
+  })
 })

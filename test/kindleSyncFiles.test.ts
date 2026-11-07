@@ -95,11 +95,16 @@ describe('parseDeviceStatus', () => {
     created: 1,
     updated: 2,
     deleted: 0,
-    pendingBooks: ['A/New.azw3']
+    pendingBooks: ['A/New.azw3'],
+    appliedDesired: 'ab'.repeat(32)
   }
 
   test('accepts a well-formed status', () => {
     expect(parseDeviceStatus(valid)).toEqual(valid)
+  })
+
+  test('accepts a status that has applied no desired state yet', () => {
+    expect(parseDeviceStatus({ ...valid, appliedDesired: null })).toEqual({ ...valid, appliedDesired: null })
   })
 
   test('keeps an error message, cut to a sane length', () => {
@@ -116,7 +121,9 @@ describe('parseDeviceStatus', () => {
     ['a date that does not parse', { ...valid, finishedAt: 'yesterday' }],
     ['a negative count', { ...valid, created: -1 }],
     ['a pending book outside documents/', { ...valid, pendingBooks: ['../x.azw3'] }],
-    ['a non-string error', { ...valid, error: 42 }]
+    ['a non-string error', { ...valid, error: 42 }],
+    ['no applied desired hash', { ...valid, appliedDesired: undefined }],
+    ['an applied desired hash that is not sha256 hex', { ...valid, appliedDesired: 'xyz' }]
   ])('rejects %s', (_label, raw) => {
     expect(parseDeviceStatus(raw)).toBeNull()
   })
