@@ -9,6 +9,7 @@ import { startKindleWatcher } from './kindle'
 import { closeOverridesDb } from './bookOverrides'
 import { closeCollectionsDb } from './localCollections'
 import { closeLibraryDb } from './library'
+import { closeKindleSyncDb } from './kindleSync/firstSyncAnswers'
 import { installFileLog } from './logger'
 import { startLibraryFolderWatching } from './libraryWatcher'
 import { repairLibraryMetadata } from './libraryRepair'
@@ -191,7 +192,7 @@ app.whenReady().then(() => {
   )
 
   // Single teardown point for every long-lived resource: the retry interval,
-  // the hot-plug poll, the folder watchers, and the three cached SQLite handles.
+  // the hot-plug poll, the folder watchers, and the four cached SQLite handles.
   app.on('will-quit', () => {
     stopRetryLoop()
     stopWatcher()
@@ -199,6 +200,7 @@ app.whenReady().then(() => {
     closeOverridesDb()
     closeCollectionsDb()
     closeLibraryDb()
+    closeKindleSyncDb()
     cancelAllCovers()
     stopFileLog()
   })
