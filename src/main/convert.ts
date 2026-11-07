@@ -2,6 +2,7 @@ import { app } from 'electron'
 import * as fs from 'fs-extra'
 import { randomUUID } from 'crypto'
 import { AppError } from './appErrors'
+import { writeFileAtomically } from './atomicWrite'
 import { epubToKf8 } from './epubConvert'
 import { ConversionAbortError, EpubDrmError, EpubInvalidError, throwIfAborted } from './epubConvert/errors'
 import { writeKf8 } from './kf8'
@@ -54,19 +55,6 @@ async function readCover(coverPath: string | undefined): Promise<Buffer | undefi
   }
 }
 
-/** Temp file then rename, so a crash or cancellation never leaves a truncated book behind. */
-async function writeAtomically(target: string, data: Buffer): Promise<void> {
-  const temp = `${target}.tmp`
-  try {
-    await fs.writeFile(temp, data)
-    await fs.rename(temp, target)
-  } catch (err) {
-    await fs.remove(temp).catch((cleanupErr: unknown) =>
-      console.error(`[convert] Failed to clean up ${temp}:`, errorText(cleanupErr))
-    )
-    throw err
-  }
-}
 
 /** Maps a conversion failure onto a code the renderer can explain; cancellation passes through. */
 function toReportableError(err: unknown, inputPath: string): Error {
@@ -99,7 +87,7 @@ export async function convert(inputPath: string, options: ConvertOptions): Promi
       onProgress: (percent) => options.onProgress?.(Math.min(percent, 99))
     })
     throwIfAborted(options.signal)
-    await writeAtomically(options.outputPath, writeKf8(book))
+    await writeFileAtomically(options.outputPath, writeKf8(book))
     options.onProgress?.(100)
     return options.outputPath
   } catch (err) {
