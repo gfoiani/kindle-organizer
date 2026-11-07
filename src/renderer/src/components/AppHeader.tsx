@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import type { KindleDrive } from '../../../preload/api'
 import type { DeviceActions } from '../hooks/useDeviceActions'
+import type { KindleSyncView } from '../utils/kindleSyncView'
+import { KindleSyncStatus } from './KindleSyncStatus'
 
 interface AppHeaderProps {
   /** The collection shown, or "All books". */
@@ -11,6 +13,9 @@ interface AppHeaderProps {
   onRefresh: () => void
   /** Eject, owned by App so its state outlives this header. */
   actions: DeviceActions
+  /** The connected Kindle's collection-sync status; null hides it. */
+  syncView: KindleSyncView | null
+  onOpenFirstSync: () => void
 }
 
 const SPIN_PATH =
@@ -27,8 +32,8 @@ function Icon({ path, spin = false }: { path: string; spin?: boolean }) {
 const PLAIN_BUTTON =
   'flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-md text-sm text-gray-300 transition-colors disabled:opacity-50'
 
-/** The grid's header: what is shown, and the device actions (eject, refresh). */
-export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions }: AppHeaderProps) {
+/** The grid's header: what is shown, the collection-sync status and the device actions (eject, refresh). */
+export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions, syncView, onOpenFirstSync }: AppHeaderProps) {
   const { t } = useTranslation()
   const { isEjecting } = actions
 
@@ -44,7 +49,9 @@ export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions }: A
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {kindle && syncView && <KindleSyncStatus view={syncView} onOpenFirstSync={onOpenFirstSync} />}
+
           {kindle && (
             <button
               onClick={actions.eject}

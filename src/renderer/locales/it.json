@@ -311,6 +311,46 @@
     "addBooks": "Impossibile aggiungere i file trascinati.",
     "deviceNotFound": "Kindle non trovato: potrebbe essere già stato scollegato.",
     "ejectBusy": "Il Kindle è ancora in uso: chiudi eventuali file aperti dal dispositivo e riprova.",
-    "ejectFailed": "Impossibile espellere il Kindle. Riprova; se persiste, espellilo dal Finder."
+    "ejectFailed": "Impossibile espellere il Kindle. Riprova; se persiste, espellilo dal Finder.",
+    "kindleSyncRefresh": "Impossibile preparare le collezioni per il Kindle.",
+    "kindleSyncAnswer": "Impossibile salvare la scelta sulle collezioni del Kindle."
+  },
+  "kindleSync": {
+    "experimental": "sperimentale",
+    "needsJailbreak": "Collezioni Kindle: serve un jailbreak",
+    "needsJailbreakHint": "Per tenere le collezioni del Kindle uguali a quelle dell'app serve un Kindle con il jailbreak di jb.sh / KindleModding.",
+    "unsupportedJailbreak": "Collezioni Kindle: jailbreak non supportato",
+    "unsupportedJailbreakHint": "Questo Kindle ha un jailbreak diverso da jb.sh / KindleModding: la sincronizzazione delle collezioni funziona solo con quello.",
+    "notInstalled": "Collezioni Kindle: sincronizzazione non installata",
+    "notInstalledHint": "Il Kindle ha il jailbreak giusto, ma la sincronizzazione delle collezioni non è ancora installata.",
+    "firstSync": "Collezioni Kindle: scegli come iniziare",
+    "firstSyncHint": "Prima della prima sincronizzazione, scegli se importare nell'app le collezioni che sono già sul Kindle.",
+    "upToDate": "Collezioni Kindle aggiornate",
+    "upToDateHint": "Il Kindle ha le stesse collezioni dell'app.",
+    "pending": "Collezioni Kindle: si aggiorneranno quando lo stacchi",
+    "pendingHint": "Le collezioni dell'app sono cambiate: il Kindle le applicherà quando lo scolleghi.",
+    "booksPending": "Collezioni Kindle: alcuni libri in attesa",
+    "booksPendingHint_one": "{{count}} libro non era ancora pronto sul Kindle: entrerà nelle sue collezioni quando lo stacchi di nuovo.",
+    "booksPendingHint_other": "{{count}} libri non erano ancora pronti sul Kindle: entreranno nelle loro collezioni quando lo stacchi di nuovo.",
+    "failed": "Collezioni Kindle: ultimo aggiornamento non riuscito",
+    "failedHint": "Il Kindle non è riuscito ad applicare le collezioni ({{detail}}). Riproverà quando lo stacchi.",
+    "failedNoDetailHint": "Il Kindle non è riuscito ad applicare le collezioni. Riproverà quando lo stacchi.",
+    "dialog": {
+      "title": "Prima sincronizzazione delle collezioni",
+      "intro": "Da ora, ogni volta che stacchi il Kindle, le sue collezioni diventeranno uguali a quelle principali dell'app: le sottocollezioni confluiscono nella collezione che le contiene.",
+      "kindleHas": "Sul Kindle ci sono già queste collezioni:",
+      "kindleHasNone": "Sul Kindle non ci sono collezioni.",
+      "unreadable": "Non riesco a leggere le collezioni del Kindle, quindi non posso importarle. Stacca il Kindle, aspetta che finisca e ricollegalo.",
+      "books_one": "{{count}} libro",
+      "books_other": "{{count}} libri",
+      "import": "Importale nell'app",
+      "importHint": "Diventano collezioni dell'app con i loro libri, e il Kindle le terrà aggiornate.",
+      "discard": "Cancellale dal Kindle",
+      "confirmDiscard": "Conferma: cancellale al prossimo distacco",
+      "discardHint": "Quando stacchi il Kindle, terrà solo le collezioni dell'app.",
+      "start": "Inizia la sincronizzazione",
+      "later": "Più tardi",
+      "working": "Attendi..."
+    }
   }
 }

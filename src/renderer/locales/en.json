@@ -311,6 +311,46 @@
     "addBooks": "Could not add the dropped files.",
     "deviceNotFound": "Kindle not found — it may already be disconnected.",
     "ejectBusy": "The Kindle is still in use — close any files still open from the device and try again.",
-    "ejectFailed": "Could not eject the Kindle. Try again; if it persists, eject it from the Finder."
+    "ejectFailed": "Could not eject the Kindle. Try again; if it persists, eject it from the Finder.",
+    "kindleSyncRefresh": "Could not prepare the collections for the Kindle.",
+    "kindleSyncAnswer": "Could not save your choice about the Kindle's collections."
+  },
+  "kindleSync": {
+    "experimental": "experimental",
+    "needsJailbreak": "Kindle collections: needs a jailbreak",
+    "needsJailbreakHint": "Keeping the Kindle's collections equal to the app's needs a Kindle jailbroken with jb.sh / KindleModding.",
+    "unsupportedJailbreak": "Kindle collections: unsupported jailbreak",
+    "unsupportedJailbreakHint": "This Kindle has a jailbreak other than jb.sh / KindleModding: collection sync only works with that one.",
+    "notInstalled": "Kindle collections: sync not installed",
+    "notInstalledHint": "This Kindle has the right jailbreak, but collection sync is not installed on it yet.",
+    "firstSync": "Kindle collections: choose how to start",
+    "firstSyncHint": "Before the first sync, choose whether to import the collections already on the Kindle into the app.",
+    "upToDate": "Kindle collections up to date",
+    "upToDateHint": "The Kindle has the same collections as the app.",
+    "pending": "Kindle collections: will update when you unplug it",
+    "pendingHint": "The app's collections changed: the Kindle will apply them when you disconnect it.",
+    "booksPending": "Kindle collections: some books pending",
+    "booksPendingHint_one": "{{count}} book was not ready on the Kindle yet: it will join its collections next time you unplug it.",
+    "booksPendingHint_other": "{{count}} books were not ready on the Kindle yet: they will join their collections next time you unplug it.",
+    "failed": "Kindle collections: last update failed",
+    "failedHint": "The Kindle could not apply the collections ({{detail}}). It will retry when you unplug it.",
+    "failedNoDetailHint": "The Kindle could not apply the collections. It will retry when you unplug it.",
+    "dialog": {
+      "title": "First collection sync",
+      "intro": "From now on, every time you unplug the Kindle its collections will become equal to the app's top-level collections: sub-collections are merged into the collection that contains them.",
+      "kindleHas": "The Kindle already has these collections:",
+      "kindleHasNone": "The Kindle has no collections.",
+      "unreadable": "Could not read the Kindle's collections, so they cannot be imported. Unplug the Kindle, let it finish, then connect it again.",
+      "books_one": "{{count}} book",
+      "books_other": "{{count}} books",
+      "import": "Import them into the app",
+      "importHint": "They become app collections with their books, and the Kindle keeps them up to date.",
+      "discard": "Delete them from the Kindle",
+      "confirmDiscard": "Confirm: delete them at the next unplug",
+      "discardHint": "When you unplug the Kindle, it will keep only the app's collections.",
+      "start": "Start syncing",
+      "later": "Later",
+      "working": "Please wait..."
+    }
   }
 }

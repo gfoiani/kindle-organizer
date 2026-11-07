@@ -18,6 +18,9 @@ import { useLibraryBooks } from './hooks/useLibraryBooks'
 import { useFileDrop } from './hooks/useFileDrop'
 import { useCollectionActions } from './hooks/useCollectionActions'
 import { useDeviceActions } from './hooks/useDeviceActions'
+import { useKindleSync } from './hooks/useKindleSync'
+import { FirstSyncDialog } from './components/FirstSyncDialog'
+import { describeKindleSync } from './utils/kindleSyncView'
 import { useLibraryFolderSync } from './hooks/useLibraryFolderSync'
 import { toBookRelpath } from './utils/relpath'
 import { mergeBooks } from './utils/mergeBooks'
@@ -60,6 +63,14 @@ export function App() {
     reportError
   })
   const deviceActions = useDeviceActions(kindle, showInfo, showError)
+  const kindleSync = useKindleSync({
+    kindle,
+    collections,
+    books,
+    reportError,
+    run,
+    onCollectionsImported: device.reloadCollections
+  })
   const isDraggingFiles = useFileDrop(addDroppedFiles)
 
   useEffect(() => {
@@ -208,6 +219,8 @@ export function App() {
                 isRefreshing={device.isLoadingDrive || device.isLoadingBooks}
                 onRefresh={loadKindle}
                 actions={deviceActions}
+                syncView={describeKindleSync(kindleSync.state)}
+                onOpenFirstSync={kindleSync.openFirstSync}
               />
 
               <BooksGrid
@@ -238,6 +251,15 @@ export function App() {
           classifier={classifier}
           onApply={handleApplySuggestions}
           onClose={() => setIsAIModalOpen(false)}
+        />
+      )}
+
+      {kindleSync.isFirstSyncOpen && kindleSync.state?.kind === 'first-sync' && (
+        <FirstSyncDialog
+          kindleCollections={kindleSync.state.kindleCollections}
+          isAnswering={kindleSync.isAnswering}
+          onAnswer={kindleSync.answerFirstSync}
+          onPostpone={kindleSync.postponeFirstSync}
         />
       )}
 
