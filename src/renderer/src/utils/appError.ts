@@ -19,7 +19,9 @@ const CODE_MESSAGE_KEYS: Record<AppErrorCode, string> = {
   LIBRARY_FOLDER_INVALID: 'errors.libraryFolderInvalid',
   LIBRARY_FOLDER_OVERLAP: 'errors.libraryFolderOverlap',
   LIBRARY_FILE_MISSING: 'errors.libraryFileMissing',
-  LIBRARY_FOLDER_BOOK: 'errors.libraryFolderBook'
+  LIBRARY_FOLDER_BOOK: 'errors.libraryFolderBook',
+  KINDLE_SYNC_NOT_INSTALLED: 'errors.kindleSyncNotInstalled',
+  KINDLE_SYNC_EXPORT_UNREADABLE: 'errors.kindleSyncExportUnreadable'
 }
 
 /**

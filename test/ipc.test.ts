@@ -89,7 +89,8 @@ describe('only a connected Kindle is read or written', () => {
   })
 
   test.each([
-    ['kindle:write-to-kindle', []],
+    ['kindle-sync:refresh', []],
+    ['kindle-sync:answer-first-sync', ['discard']],
     ['kindle:upload-book', ['3f6d9a1e-1c4b-4a2d-8f77-0b9c2e5d1a33']],
     ['kindle:delete-device-books', [[]]],
     ['kindle:list-collections-backups', []],
@@ -176,16 +177,6 @@ describe('collections', () => {
     expect(await invokeIpc('kindle:get-local-collections')).toEqual([expect.objectContaining({ name: 'Classici' })])
   })
 
-  test('are written to the Kindle, registering books calibre never saw', async () => {
-    writeFileSync(documents('Dune.azw3'), '')
-    await invokeIpc('kindle:ensure-collections-contain', [{ name: 'Sci-Fi', relpaths: ['Dune.azw3'] }])
-
-    const written = await invokeIpc('kindle:write-to-kindle', mountpoint)
-
-    expect(written).toBe(true)
-    expect(readMetadata()).toEqual([expect.objectContaining({ lpath: 'documents/Dune.azw3', tags: ['Sci-Fi'] })])
-  })
-
   test('lose the books deleted from the Kindle', async () => {
     const book = writeMobi(documents('Dune.azw3'), { uuid: 'u1', cdetype: 'EBOK' })
     const collection = await createCollection('Sci-Fi')
@@ -198,15 +189,23 @@ describe('collections', () => {
   })
 
   test('list and restore the metadata.calibre backups of the connected Kindle', async () => {
-    writeMetadata([{ lpath: 'documents/a.azw3', tags: ['Old'] }])
+    // Arrange: deleting a book rewrites metadata.calibre, which takes a backup first.
+    const before = [
+      { lpath: 'documents/a.azw3', tags: ['Old'] },
+      { lpath: 'documents/b.azw3', tags: [] }
+    ]
+    writeMetadata(before)
     writeFileSync(documents('a.azw3'), '')
-    await invokeIpc('kindle:write-to-kindle', mountpoint)
+    writeFileSync(documents('b.azw3'), '')
+    await invokeIpc('kindle:delete-device-books', mountpoint, [documents('b.azw3')])
 
+    // Act
     const [backup] = (await invokeIpc('kindle:list-collections-backups', mountpoint)) as Array<{ id: string }>
     const restored = await invokeIpc('kindle:restore-collections-backup', mountpoint, backup.id)
 
+    // Assert
     expect(restored).toMatchObject({ takenAt: expect.any(String) })
-    expect(readMetadata()).toEqual([{ lpath: 'documents/a.azw3', tags: ['Old'] }])
+    expect(readMetadata()).toEqual(before)
   })
 })
 

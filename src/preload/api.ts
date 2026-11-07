@@ -12,6 +12,9 @@ import type { AvailableUpdate } from '../main/updateCheck'
 import type { CalibreBackupSummary } from '../main/calibreBackup'
 import type { FolderSyncResult, LibraryFolderSummary } from '../main/libraryFolders'
 import type { LinkedFolder } from '../main/libraryWatcher'
+import type { KindleCollectionSummary, KindleSyncState } from '../main/kindleSync/service'
+import type { FirstSyncAnswer } from '../main/kindleSync/firstSyncAnswers'
+import type { DeviceStatus } from '../main/kindleSync/syncFiles'
 
 export type {
   FolderSyncResult,
@@ -33,7 +36,11 @@ export type {
   SendResult,
   SendSidecar,
   RenameTarget,
-  AppErrorCode
+  AppErrorCode,
+  KindleSyncState,
+  KindleCollectionSummary,
+  FirstSyncAnswer,
+  DeviceStatus
 }
 
 export interface KindleAPI {
@@ -46,7 +53,10 @@ export interface KindleAPI {
   detectKindleDrives: () => Promise<KindleDrive[]>
   readDocuments: (kindleMountpoint: string) => Promise<KindleBook[]>
   syncCalibre: (mountpoint: string) => Promise<void>
-  writeToKindle: (mountpoint: string) => Promise<boolean>
+  /** The collection-sync state of a connected Kindle; writes the app's collections for the next unplug when the sync is installed. */
+  refreshKindleSync: (mountpoint: string) => Promise<KindleSyncState>
+  /** Answers the first-sync question (import the Kindle's collections, or discard them), then mirrors. */
+  answerFirstSync: (mountpoint: string, answer: FirstSyncAnswer) => Promise<KindleSyncState>
   /** Unmounts and powers down the connected Kindle so it can be safely unplugged. */
   ejectKindle: (mountpoint: string) => Promise<void>
   getLocalCollections: () => Promise<Collection[]>
@@ -172,7 +182,9 @@ export const kindleAPI: KindleAPI = {
 
   syncCalibre: (mountpoint: string) => ipcRenderer.invoke('kindle:sync-calibre', mountpoint),
 
-  writeToKindle: (mountpoint: string) => ipcRenderer.invoke('kindle:write-to-kindle', mountpoint),
+  refreshKindleSync: (mountpoint: string) => ipcRenderer.invoke('kindle-sync:refresh', mountpoint),
+  answerFirstSync: (mountpoint: string, answer: FirstSyncAnswer) =>
+    ipcRenderer.invoke('kindle-sync:answer-first-sync', mountpoint, answer),
   ejectKindle: (mountpoint: string) => ipcRenderer.invoke('kindle:eject', mountpoint),
 
   getLocalCollections: () => ipcRenderer.invoke('kindle:get-local-collections'),

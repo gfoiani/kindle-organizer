@@ -1,15 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { detectKindleDrives, readDocuments, rememberDetectedKindles, requireKindleDrive, type KindleBook } from './kindle'
+import { detectKindleDrives, readDocuments, rememberDetectedKindles, requireKindleDrive } from './kindle'
 import { ejectDrive } from './eject'
 import { AppError } from './appErrors'
-import {
-  readCalibreMetadata,
-  writeCalibreMetadata,
-  readCalibreIsbnMap,
-  restoreCalibreBackup,
-  describeCalibreBackups,
-  type DeviceBookInfo
-} from './calibre'
+import { readCalibreMetadata, readCalibreIsbnMap, restoreCalibreBackup, describeCalibreBackups } from './calibre'
+import { answerFirstSync, isCalibreImportRetired, refreshKindleSync } from './kindleSync/service'
+import type { FirstSyncAnswer } from './kindleSync/firstSyncAnswers'
 import { deleteDeviceBooks } from './deviceDelete'
 import { checkForUpdate } from './updateCheck'
 import { ensureCover, cancelCover, clearCoverCache } from './covers'
@@ -100,20 +95,9 @@ function assertRenameTargets(value: unknown, name: string): asserts value is Ren
   }
 }
 
-/**
- * What `writeCalibreMetadata` needs about the books on the device: each
- * book's tags by book key — the key metadata.calibre is matched by too. Every
- * book is seeded (an empty list for no collection) so leaving all collections
- * is written back too.
- */
-function calibreSyncInput(books: readonly KindleBook[]): {
-  bookTagMap: Map<string, string[]>
-  deviceBooks: DeviceBookInfo[]
-} {
-  const located = books.flatMap((book) => (book.relpath === undefined ? [] : [{ book, relpath: book.relpath }]))
-  return {
-    bookTagMap: getAllBookTags(located.map((entry) => entry.relpath)),
-    deviceBooks: located.map(({ book, relpath }) => ({ relpath, title: book.title, author: book.author, size: book.size }))
+function assertFirstSyncAnswer(value: unknown, name: string): asserts value is FirstSyncAnswer {
+  if (value !== 'import' && value !== 'discard') {
+    throw new TypeError(`Expected "${name}" to be "import" or "discard", got ${String(value)}`)
   }
 }
 
@@ -188,6 +172,9 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
     withErrorLogging('kindle:sync-calibre', async (_, mountpoint: unknown) => {
       assertString(mountpoint, 'mountpoint')
       await requireKindleDrive(mountpoint)
+      // Once a jailbroken Kindle's first-sync question is answered the app is
+      // the source of truth: re-importing would bring back removed collections.
+      if (await isCalibreImportRetired(mountpoint)) return
       const calibreBooks = readCalibreMetadata(mountpoint)
       // An unreadable file is not "no collections": importing nothing would
       // delete every collection that came from calibre.
@@ -213,16 +200,25 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
     })
   )
 
+  // Collection sync with a jailbroken Kindle (kindleSync/). Both write the
+  // app's collections under <Kindle>/kindle-organizer/, so the path must be a
+  // connected Kindle.
   ipcMain.handle(
-    'kindle:write-to-kindle',
-    withErrorLogging('kindle:write-to-kindle', async (_, mountpoint: unknown) => {
+    'kindle-sync:refresh',
+    withErrorLogging('kindle-sync:refresh', async (_, mountpoint: unknown) => {
       assertString(mountpoint, 'mountpoint')
-      // This may create metadata.calibre, so the path must be a connected Kindle.
       await requireKindleDrive(mountpoint)
-      // Authoritative sync (H1 fix); deviceBooks lets books calibre never
-      // registered (or a device with no metadata.calibre at all) join their collections.
-      const { bookTagMap, deviceBooks } = calibreSyncInput(await readDocuments(mountpoint))
-      return writeCalibreMetadata(mountpoint, bookTagMap, deviceBooks)
+      return refreshKindleSync(mountpoint)
+    })
+  )
+
+  ipcMain.handle(
+    'kindle-sync:answer-first-sync',
+    withErrorLogging('kindle-sync:answer-first-sync', async (_, mountpoint: unknown, answer: unknown) => {
+      assertString(mountpoint, 'mountpoint')
+      assertFirstSyncAnswer(answer, 'answer')
+      await requireKindleDrive(mountpoint)
+      return answerFirstSync(mountpoint, answer)
     })
   )
 

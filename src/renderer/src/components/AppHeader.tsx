@@ -9,7 +9,7 @@ interface AppHeaderProps {
   /** Any device reload in flight: the Refresh spinner is its only progress cue. */
   isRefreshing: boolean
   onRefresh: () => void
-  /** Write and eject, owned by App so their state outlives this header. */
+  /** Eject, owned by App so its state outlives this header. */
   actions: DeviceActions
 }
 
@@ -27,13 +27,10 @@ function Icon({ path, spin = false }: { path: string; spin?: boolean }) {
 const PLAIN_BUTTON =
   'flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-md text-sm text-gray-300 transition-colors disabled:opacity-50'
 
-/** The grid's header: what is shown, and the device actions (write collections, eject, refresh). */
+/** The grid's header: what is shown, and the device actions (eject, refresh). */
 export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions }: AppHeaderProps) {
   const { t } = useTranslation()
-  const { isSyncing, isEjecting, syncResult } = actions
-
-  const syncLabel =
-    syncResult === 'success' ? t('header.saved') : syncResult === 'error' ? t('header.error') : t('header.writeKindle')
+  const { isEjecting } = actions
 
   return (
     <>
@@ -50,35 +47,8 @@ export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions }: A
         <div className="flex items-center gap-2">
           {kindle && (
             <button
-              onClick={actions.writeToKindle}
-              disabled={isSyncing}
-              title={t('header.writeToKindle')}
-              aria-label={t('header.writeToKindle')}
-              className={`flex items-center gap-2 px-3 py-1.5 border rounded-md text-sm transition-colors disabled:opacity-50 ${
-                syncResult === 'success'
-                  ? 'bg-green-800 border-green-600 text-green-200'
-                  : syncResult === 'error'
-                    ? 'bg-red-900 border-red-700 text-red-300'
-                    : 'bg-gray-800 hover:bg-gray-700 border-gray-600 text-gray-300'
-              }`}
-            >
-              {isSyncing ? (
-                <Icon path={SPIN_PATH} spin />
-              ) : syncResult === 'success' ? (
-                <Icon path="M5 13l4 4L19 7" />
-              ) : syncResult === 'error' ? (
-                <Icon path="M6 18L18 6M6 6l12 12" />
-              ) : (
-                <Icon path="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              )}
-              {syncLabel}
-            </button>
-          )}
-
-          {kindle && (
-            <button
               onClick={actions.eject}
-              disabled={isEjecting || isSyncing}
+              disabled={isEjecting}
               title={t('header.ejectHint')}
               aria-label={t('header.eject')}
               className={PLAIN_BUTTON}
@@ -95,11 +65,6 @@ export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions }: A
           </button>
         </div>
       </header>
-
-      {/* Visually-hidden live region announces the write-to-Kindle result. */}
-      <div role="status" aria-live="polite" className="sr-only">
-        {syncResult === 'success' ? t('header.saved') : syncResult === 'error' ? t('header.error') : ''}
-      </div>
     </>
   )
 }

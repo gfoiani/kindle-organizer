@@ -26,6 +26,8 @@ export type AppErrorCode =
   | 'LIBRARY_FOLDER_OVERLAP'
   | 'LIBRARY_FILE_MISSING'
   | 'LIBRARY_FOLDER_BOOK'
+  | 'KINDLE_SYNC_NOT_INSTALLED'
+  | 'KINDLE_SYNC_EXPORT_UNREADABLE'
 
 /** An error whose message is a stable code the renderer can translate. */
 export class AppError extends Error {
