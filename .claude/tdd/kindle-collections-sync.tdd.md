@@ -22,6 +22,15 @@
 - **Empty planned collections**, my call: an app collection with no books on the device is still listed in `desired.json`, empty.
   - Without it, a Kindle collection imported with only Amazon items would be deleted by the very next mirror.
   - Consequence for the component: it must **not create** an empty collection, but must **keep** an existing one.
+- **`appliedDesired` in `status.json`**, my call (third session):
+  - The design wants the header to tell "up to date" from "will update when you unplug it", which needs to know what the device last applied.
+  - The component reports the sha256 of the `desired.json` it applied, or `null`. The app compares it with the file it just wrote.
+  - Nothing is on the device yet, so the contract could still change.
+- **First-sync dialog**, my calls:
+  - It does not list the calibre tags separately, as the design proposed. With option A they are already imported on every connect until the answer.
+  - It opens by itself once per Kindle per session. "Later" closes it, and the header status reopens it.
+  - Deleting the Kindle's collections takes two clicks. A Kindle with no collections gets a single "Start syncing" button.
+- **No install button yet:** the install channel and the component are Phase 3. The status says "not installed" and does not offer an action that cannot work.
 - **Import names**, as stated in the design's "Calls I made":
   - " / " becomes " - " in imported names.
   - A name that matches an existing app collection, ignoring case, joins that collection.
@@ -38,6 +47,9 @@
 | 6 | Planner keeps empty collections | `25dd04a`: 1 failed, received `[]` | `6565510`: 50 passed |
 | 7 | First-sync import plan + answer store per Kindle | `0b9b880`: compile-time, `Cannot find module importPlan / firstSyncAnswers` | `b1fe192`: 10 passed; type-check clean |
 | 8 | IPC: `kindle-sync:refresh`, `kindle-sync:answer-first-sync`, calibre import retired after the answer, `kindle:write-to-kindle` removed | `62698fa`: 14 failed, 1 passed; handlers missing, old channel still registered | `211eee9`: 15 passed; suite 669 passed (58 files); type-check clean |
+| 9 | `status.json` gains `appliedDesired`; the `active` state reports `upToDate` | `52ba7b3`: 9 failed; field dropped / not required, no `upToDate` | `2250d82`: 59 passed; type-check clean |
+| 10 | Header status rules (`describeKindleSync`), auto-open of the first-sync question, Kindle collections sorted | `4ebfc58`: compile-time, `Cannot find module …/utils/kindleSyncView` | `a54901a`: 17 passed; type-check clean |
+| 11 | UI wiring: `useKindleSync`, `KindleSyncStatus`, `FirstSyncDialog`, IT/EN strings | — (no renderer component tests in this repo) | `d5c99d1`: type-check clean; suite 691 passed; `yarn dev` with the real Kindle shows "Collezioni Kindle: sincronizzazione non installata · SPERIMENTALE", and `/Volumes/Kindle/kindle-organizer` was not created |
 
 ## Test specification
 
@@ -55,12 +67,21 @@
 | 10 | Import or discard, then `mirror` mode; import is refused while the export is unreadable, and nothing is remembered; invalid answers raise `TypeError` | `ipcKindleSync.test.ts` | integration (IPC) | PASS |
 | 11 | Calibre tags are imported on connect until the answer, then no longer | `ipcKindleSync.test.ts` | integration (IPC) | PASS |
 | 12 | The new channels refuse a path that is not a connected Kindle | `test/ipc.test.ts`: "refuses a path that is not a Kindle" | integration (IPC) | PASS |
+| 13 | The Kindle is "up to date" only when its last run applied the `desired.json` the app wants now; any collection change makes it pending again | `ipcKindleSync.test.ts`: "whether the Kindle holds the current collections" | integration (IPC) | PASS |
+| 14 | `appliedDesired` must be `null` or sha256 hex | `kindleSyncFiles.test.ts` | unit | PASS |
+| 15 | Header status: muted explanation without the sync; action while the first sync is due; a failed run wins, with or without the device message; books not yet indexed are counted; otherwise pending or up to date | `test/kindleSyncView.test.ts` | unit | PASS (17) |
+| 16 | The first-sync question opens by itself once per Kindle, not after "Later", and never when it is not due | `kindleSyncView.test.ts`: `shouldOfferFirstSync` | unit | PASS |
 
 ## Coverage and known gaps
 
 Command: `yarn -s vitest run --coverage --coverage.include='src/main/kindleSync/**' --coverage.include='src/main/atomicWrite.ts'`.
 
-Result: all files at 97.05% statements, 93.52% branches, 94.91% functions, 97.64% lines.
+Result after the second session: all files at 97.05% statements, 93.52% branches, 94.91% functions, 97.64% lines.
+
+Third session:
+- `--coverage.include='src/main/kindleSync/**'` → 97.5% statements, 95% branches, 96.55% functions, 98.19% lines.
+- `src/renderer/src/utils/kindleSyncView.ts` → 100% on all four measures (`--coverage.include='**/kindleSyncView.ts'`).
+- Suite: 691 passed, 59 files.
 
 Uncovered:
 - `closeKindleSyncDb`, which only runs on `will-quit`;
@@ -68,10 +89,13 @@ Uncovered:
 - one branch in `jailbreak.ts`: the log for an unexpected error, other than missing.
 
 Not done yet:
-- **UI:** status pill, first-sync dialog, install button, "sperimentale" label. The header currently has no sync action.
+- **UI:** done except the install button, which waits for the install channel.
+  - The first-sync dialog was not seen running: it needs a `status.json` on the device, and nothing was written to the real Kindle.
+  - Likewise for the "up to date", "pending" and "failed" states.
+- **Landing page (`../site`):** the old claim "Sincronizzazione Kindle — scrivi le tue collezioni direttamente sul dispositivo" has not been replaced yet.
 - **Install channel and on-device component:** Phase 3. The runtime choice (shell or Go) is still open.
 - **Dead code:** `writeCalibreMetadata` has no callers in the app any more.
   - Removing it means reworking the backup tests in `calibreBackup.test.ts`. They use it as a non-routine writer: the 10-copy limit and restore order.
   - That is a separate refactor.
-- **Not tested:** nothing in the renderer. The removal of the "Scrivi su Kindle" button is covered by type-check only.
+- **Not tested:** the React components and `useKindleSync`. Vitest runs in node here, with no jsdom or Testing Library. Their rules live in `kindleSyncView.ts`, which is tested; the wiring is covered by type-check and one `yarn dev` run.
 - **On the real Kindle:** only jailbreak detection, read-only. Nothing has been written to the device yet.
