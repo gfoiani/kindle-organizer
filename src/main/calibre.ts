@@ -1,7 +1,7 @@
 import * as fs from 'fs-extra'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { canonicalBookKey, stripDocumentsPrefix } from './paths'
+import { canonicalBookKey, foldRelpath, isDocumentsRelpath, stripDocumentsPrefix } from './paths'
 import { backupCalibreMetadata, hasRecentCalibreBackup, listCalibreBackups } from './calibreBackup'
 
 export { CALIBRE_BACKUP_LIMIT, describeCalibreBackups, type CalibreBackupSummary } from './calibreBackup'
@@ -121,23 +121,6 @@ export function calibreMimeType(relpath: string): string | undefined {
 /** `lpath` is always posix-separated, whatever the host platform uses. */
 function toPosixRelpath(relpath: string): string {
   return relpath.split(path.sep).join('/')
-}
-
-/**
- * Whether a POSIX relpath really lies under `documents/`: an absolute path, a
- * drive letter or a `..` would become a bogus `lpath` next to the real record.
- */
-function isDocumentsRelpath(relpath: string): boolean {
-  return relpath !== '' && !relpath.startsWith('/') && !/^[A-Za-z]:/.test(relpath) && !relpath.split('/').includes('..')
-}
-
-/**
- * The comparison key for a relpath. A Kindle's volume is FAT/exFAT, which
- * ignores case, so calibre's `Dune.AZW3` and a scanned `Dune.azw3` are one file.
- */
-function foldRelpath(relpath: string): string {
-  // macOS hands back decomposed names (NFD) for a book calibre recorded composed (NFC).
-  return relpath.normalize('NFC').toLowerCase()
 }
 
 function entryRelpath(entry: unknown): string | undefined {

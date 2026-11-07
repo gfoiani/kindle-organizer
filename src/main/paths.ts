@@ -60,3 +60,20 @@ export function canonicalBookKey(key: string): string {
   const relpath = windows ? windows[1].split(/[\\/]+/).join('/') : key
   return relpath.normalize('NFC')
 }
+
+/**
+ * Whether a POSIX relpath really lies under `documents/`: an absolute path, a
+ * drive letter or a `..` would become a bogus path next to the real books.
+ */
+export function isDocumentsRelpath(relpath: string): boolean {
+  return relpath !== '' && !relpath.startsWith('/') && !/^[A-Za-z]:/.test(relpath) && !relpath.split('/').includes('..')
+}
+
+/**
+ * The comparison key for a relpath. A Kindle's volume is FAT/exFAT, which
+ * ignores case, so calibre's `Dune.AZW3` and a scanned `Dune.azw3` are one file.
+ */
+export function foldRelpath(relpath: string): string {
+  // macOS hands back decomposed names (NFD) for a book recorded composed (NFC).
+  return relpath.normalize('NFC').toLowerCase()
+}
