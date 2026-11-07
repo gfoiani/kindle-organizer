@@ -40,7 +40,11 @@ describe('planKindleCollections', () => {
     expect(plan).toEqual([{ name: 'Letti', relpaths: ['A/Here.azw3'] }])
   })
 
-  test('a collection with no books on this device is not planned', () => {
+  test('a collection with no books on this device is still planned, empty', () => {
+    // The device must know it is wanted: a Kindle collection imported into the
+    // app that holds only books the app cannot see (Amazon purchases) is empty
+    // here, and leaving it out would make the mirror delete it. The component
+    // does not CREATE an empty collection; it only keeps an existing one.
     const plan = planKindleCollections(
       [
         { name: 'Vuota', relpaths: [] },
@@ -49,7 +53,10 @@ describe('planKindleCollections', () => {
       ['A/Here.azw3']
     )
 
-    expect(plan).toEqual([])
+    expect(plan).toEqual([
+      { name: 'Altrove', relpaths: [] },
+      { name: 'Vuota', relpaths: [] }
+    ])
   })
 
   test('relpaths match case-insensitively and across Unicode forms, keeping the device spelling', () => {
