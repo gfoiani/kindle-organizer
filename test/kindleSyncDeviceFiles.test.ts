@@ -25,7 +25,8 @@ const status = {
   created: 0,
   updated: 1,
   deleted: 0,
-  pendingBooks: []
+  pendingBooks: [],
+  appliedDesired: null
 }
 
 describe('writeDesiredState', () => {

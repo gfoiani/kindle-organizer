@@ -55,6 +55,12 @@ export interface DeviceStatus {
   deleted: number
   /** Desired books the firmware had not indexed yet (retried next unplug). */
   pendingBooks: string[]
+  /**
+   * sha256 (hex) of the desired.json the last run applied, or null when none
+   * was applied yet (right after install, or while the mode is `hold`). Equal
+   * to the hash of the desired.json now on the device ⇒ the Kindle holds it.
+   */
+  appliedDesired: string | null
   error?: string
 }
 
@@ -69,8 +75,13 @@ export function serializeDesired(plan: readonly PlannedKindleCollection[], mode:
   return `${JSON.stringify(body)}\n`
 }
 
+/** sha256 (hex) of a desired.json, as the device reports it back in `appliedDesired`. */
+export function desiredHash(desiredText: string): string {
+  return createHash('sha256').update(desiredText, 'utf8').digest('hex')
+}
+
 export function desiredReadyMarker(desiredText: string): string {
-  return `${createHash('sha256').update(desiredText, 'utf8').digest('hex')}\n`
+  return `${desiredHash(desiredText)}\n`
 }
 
 // ─── Device → app ───────────────────────────────────────────────────────────
@@ -78,6 +89,7 @@ export function desiredReadyMarker(desiredText: string): string {
 const RUN_RESULTS: readonly DeviceRunResult[] = ['installed', 'ok', 'partial', 'error']
 const DEVICE_ID = /^[A-Za-z0-9-]{1,64}$/
 const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/
+const SHA256_HEX = /^[0-9a-f]{64}$/
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
@@ -129,6 +141,7 @@ function hasValidOutcome(rec: Record<string, unknown>): boolean {
     isCount(rec.updated) &&
     isCount(rec.deleted) &&
     isRelpathList(rec.pendingBooks) &&
+    (rec.appliedDesired === null || (typeof rec.appliedDesired === 'string' && SHA256_HEX.test(rec.appliedDesired))) &&
     (rec.error === undefined || typeof rec.error === 'string')
   )
 }
@@ -146,7 +159,8 @@ export function parseDeviceStatus(raw: unknown): DeviceStatus | null {
     created: rec.created as number,
     updated: rec.updated as number,
     deleted: rec.deleted as number,
-    pendingBooks: [...(rec.pendingBooks as string[])]
+    pendingBooks: [...(rec.pendingBooks as string[])],
+    appliedDesired: rec.appliedDesired as string | null
   }
   return typeof rec.error === 'string' ? { ...status, error: capLength(rec.error, MAX_ERROR_TEXT) } : status
 }

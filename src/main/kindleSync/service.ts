@@ -6,7 +6,7 @@ import { getFirstSyncAnswer, recordFirstSyncAnswer, type FirstSyncAnswer } from 
 import { planKindleImport } from './importPlan'
 import { detectJailbreak } from './jailbreak'
 import { planKindleCollections, type AppCollectionMembers } from './plan'
-import type { DeviceExport, DeviceStatus, SyncMode } from './syncFiles'
+import { desiredHash, serializeDesired, type DeviceExport, type DeviceStatus, type SyncMode } from './syncFiles'
 
 /**
  * The app side of the collection sync with a jailbroken Kindle: what the UI
@@ -27,7 +27,8 @@ export type KindleSyncState =
   | { kind: 'not-installed' }
   /** `kindleCollections` is null when the device's export cannot be read. */
   | { kind: 'first-sync'; status: DeviceStatus; kindleCollections: KindleCollectionSummary[] | null }
-  | { kind: 'active'; status: DeviceStatus }
+  /** `upToDate`: the last run applied exactly the collections the app wants now. */
+  | { kind: 'active'; status: DeviceStatus; upToDate: boolean }
 
 type Probe = { kind: 'blocked'; state: KindleSyncState } | { kind: 'installed'; status: DeviceStatus }
 
@@ -49,9 +50,11 @@ function appCollectionMembers(): AppCollectionMembers[] {
   return getCollections().map((collection) => ({ name: collection.name, relpaths: getCollectionBooks(collection.id) }))
 }
 
-async function writeDesired(mountpoint: string, mode: SyncMode): Promise<void> {
+/** Writes the desired state and returns its hash, to compare with what the device applied. */
+async function writeDesired(mountpoint: string, mode: SyncMode): Promise<string> {
   const plan = planKindleCollections(appCollectionMembers(), await deviceRelpaths(mountpoint))
   await writeDesiredState(mountpoint, plan, mode)
+  return desiredHash(serializeDesired(plan, mode))
 }
 
 function summarize(exported: DeviceExport | null): KindleCollectionSummary[] | null {
@@ -73,8 +76,8 @@ export async function refreshKindleSync(mountpoint: string): Promise<KindleSyncS
   const { status } = probed
 
   const answered = getFirstSyncAnswer(status.deviceId) !== null
-  await writeDesired(mountpoint, answered ? 'mirror' : 'hold')
-  if (answered) return { kind: 'active', status }
+  const hash = await writeDesired(mountpoint, answered ? 'mirror' : 'hold')
+  if (answered) return { kind: 'active', status, upToDate: status.appliedDesired === hash }
   return { kind: 'first-sync', status, kindleCollections: summarize(await readDeviceExportFile(mountpoint)) }
 }
 
