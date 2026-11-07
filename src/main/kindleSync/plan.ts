@@ -7,8 +7,10 @@ import { foldRelpath } from '../paths'
  * name ("Giallo / Cooper, Glenn", see the renderer's `collectionHierarchy`), so
  * every app collection is filed under the part before the first separator: the
  * Kindle gets "Giallo" holding the books of "Giallo" and of all its
- * sub-collections. Only books on this device are kept, and a collection left
- * with none is not planned at all (the design skips empty collections).
+ * sub-collections. Only books on this device are kept. A collection left with
+ * none is still planned, empty: the device must not create it, but must keep an
+ * existing one (e.g. imported from the Kindle, holding only Amazon purchases the
+ * app cannot see) instead of deleting it as unwanted.
  *
  * The output is sorted and duplicate-free, so the same state always gives the
  * same plan — the device compares a hash of it to decide whether to run.
@@ -73,7 +75,6 @@ export function planKindleCollections(
   }, new Map())
 
   return [...groups.values()]
-    .filter((group) => group.relpaths.size > 0)
     .map((group) => ({ name: group.name, relpaths: [...group.relpaths].sort() }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
