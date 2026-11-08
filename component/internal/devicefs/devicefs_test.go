@@ -116,6 +116,42 @@ func TestDeviceIDReplacesAnUnusableStoredValue(t *testing.T) {
 	}
 }
 
+func TestWriteFailsWhenTheFolderCannotBeMade(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "kindle-organizer")
+	mustWrite(t, blocker, "a file where the folder should be")
+
+	if err := (Dir{Root: blocker}).WriteStatus(contract.NewStatus("kt5", "1.0.0")); err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestAFailedWriteLeavesThePreviousFileUntouched(t *testing.T) {
+	dir := Dir{Root: t.TempDir()}
+	mustWrite(t, filepath.Join(dir.Root, "status.json"), "previous")
+	// A folder where the temp file goes makes the write fail before the rename.
+	if err := os.Mkdir(filepath.Join(dir.Root, "status.json.tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := dir.WriteStatus(contract.NewStatus("kt5", "1.0.0"))
+
+	raw, readErr := os.ReadFile(filepath.Join(dir.Root, "status.json"))
+	if err == nil || readErr != nil || string(raw) != "previous" {
+		t.Errorf("err = %v; status.json = %q (%v)", err, raw, readErr)
+	}
+}
+
+func TestDeviceIDReportsAnUnreadableStore(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "device-id")
+	if err := os.Mkdir(file, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadOrCreateDeviceID(file, func() string { return "x" }); err == nil {
+		t.Error("a store that cannot be read must be an error, not a new id")
+	}
+}
+
 func mustWrite(t *testing.T, file, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {

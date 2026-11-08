@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -97,7 +98,8 @@ func fakeService(t *testing.T, codes []int, replyBody string) (*httptest.Server,
 		raw, _ := io.ReadAll(r.Body)
 		var body map[string]any
 		_ = json.Unmarshal(raw, &body)
-		requests = append(requests, recorded{path: r.URL.Path, authToken: r.Header["AuthToken"], contentType: r.Header.Get("Content-Type"), body: body})
+		// The server canonicalizes header names; the exact spelling is checked on the client side (headerSpy).
+		requests = append(requests, recorded{path: r.URL.Path, authToken: r.Header.Values("AuthToken"), contentType: r.Header.Get("Content-Type"), body: body})
 		code := http.StatusOK
 		if len(requests) <= len(codes) {
 			code = codes[len(requests)-1]
@@ -123,14 +125,33 @@ func client(server *httptest.Server, sleeps *[]time.Duration) Client {
 
 var twoBatches = plan.Plan{Deletes: []string{"k1", "k2", "k3"}}
 
+// headerSpy records the header names exactly as the client hands them to the transport.
+type headerSpy struct {
+	base http.RoundTripper
+	keys *[]string
+}
+
+func (s headerSpy) RoundTrip(r *http.Request) (*http.Response, error) {
+	for key := range r.Header {
+		*s.keys = append(*s.keys, key)
+	}
+	return s.base.RoundTrip(r)
+}
+
 func TestApplyPostsEachBatchAsAChangeRequestWithTheSessionToken(t *testing.T) {
 	server, requests := fakeService(t, nil, `{"ok":true}`)
 	var sleeps []time.Duration
+	var keys []string
+	c := client(server, &sleeps)
+	c.HTTP = &http.Client{Transport: headerSpy{base: server.Client().Transport, keys: &keys}}
 
-	err := client(server, &sleeps).Apply(context.Background(), twoBatches)
+	err := c.Apply(context.Background(), twoBatches)
 
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Contains(keys, "AuthToken") {
+		t.Errorf("the token header must be sent spelled exactly AuthToken, got %v", keys)
 	}
 	if len(*requests) != 2 {
 		t.Fatalf("%d requests, want 2", len(*requests))
