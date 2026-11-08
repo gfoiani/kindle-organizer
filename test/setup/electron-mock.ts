@@ -22,6 +22,13 @@ export function freshUserData(): string {
   return currentUserData
 }
 
+/** What `app.getAppPath()` returns (where the dev build looks for bundled files); the repo by default. */
+let currentAppPath = process.cwd()
+
+export function setAppPath(dir: string): void {
+  currentAppPath = dir
+}
+
 /** Best-effort cleanup of every temp userData dir created during the run. */
 export function cleanupUserDataDirs(): void {
   for (const dir of createdDirs) {
@@ -49,6 +56,7 @@ vi.mock('electron', () => ({
     isPackaged: false,
     showAboutPanel: vi.fn(),
     getVersion: () => '0.0.0',
+    getAppPath: () => currentAppPath,
     getPath: (name: string) => {
       if (name === 'userData') return currentUserData
       return path.join(currentUserData, name)

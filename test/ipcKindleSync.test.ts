@@ -3,7 +3,7 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { cleanupUserDataDirs, freshUserData, invokeIpc } from './setup/electron-mock'
+import { cleanupUserDataDirs, freshUserData, invokeIpc, setAppPath } from './setup/electron-mock'
 
 vi.mock('systeminformation', () => ({ default: { blockDevices: vi.fn() } }))
 
@@ -94,7 +94,62 @@ afterAll(() => {
   cleanupUserDataDirs()
 })
 
+/** A dev checkout whose component build is there (`yarn build:component`). */
+function bundleComponent(): Buffer {
+  const appPath = mkdtempSync(path.join(tmpdir(), 'ipc-sync-app-'))
+  const binary = Buffer.from('fake kosync')
+  mkdirSync(path.join(appPath, 'component', 'dist'), { recursive: true })
+  writeFileSync(path.join(appPath, 'component', 'dist', 'kosync-linux-armv7'), binary)
+  setAppPath(appPath)
+  return binary
+}
+
+describe('kindle-sync:install', () => {
+  test('stages the component and its installer on a jb.sh Kindle, then reports the restart it needs', async () => {
+    const binary = bundleComponent()
+    jailbreak()
+
+    const state = await invokeIpc('kindle-sync:install', mountpoint)
+
+    expect(state).toEqual({ kind: 'install-pending' })
+    expect(readFileSync(path.join(mountpoint, 'kindle-organizer', 'component', 'kosync'))).toEqual(binary)
+    expect(readFileSync(path.join(mountpoint, 'emergency.sh'), 'utf8')).toContain('kindle-organizer installer')
+  })
+
+  test('refuses a Kindle without the jb.sh jailbreak and writes nothing to it', async () => {
+    bundleComponent()
+    jailbreak('You are jailbroken!\n')
+
+    await expect(invokeIpc('kindle-sync:install', mountpoint)).rejects.toThrow('KINDLE_SYNC_NOT_SUPPORTED')
+    expect(existsSync(path.join(mountpoint, 'emergency.sh'))).toBe(false)
+  })
+
+  test('refuses a path detection does not report as a Kindle', async () => {
+    bundleComponent()
+    const elsewhere = mkdtempSync(path.join(tmpdir(), 'ipc-sync-elsewhere-'))
+
+    await expect(invokeIpc('kindle-sync:install', elsewhere)).rejects.toThrow()
+    expect(existsSync(path.join(elsewhere, 'emergency.sh'))).toBe(false)
+  })
+})
+
 describe('kindle-sync:refresh', () => {
+  test('a staged install waits for the restart', async () => {
+    bundleComponent()
+    jailbreak()
+    await invokeIpc('kindle-sync:install', mountpoint)
+
+    expect(await invokeIpc('kindle-sync:refresh', mountpoint)).toEqual({ kind: 'install-pending' })
+  })
+
+  test('a failed install shows the installer’s reason', async () => {
+    jailbreak()
+    mkdirSync(path.join(mountpoint, 'kindle-organizer'), { recursive: true })
+    writeFileSync(path.join(mountpoint, 'kindle-organizer', 'install.log'), 'FAILED: cannot start the sync\n')
+
+    expect(await invokeIpc('kindle-sync:refresh', mountpoint)).toEqual({ kind: 'install-failed', detail: 'cannot start the sync' })
+  })
+
   test('a Kindle without a jailbreak is reported as such and nothing is written to it', async () => {
     expect(await invokeIpc('kindle-sync:refresh', mountpoint)).toEqual({ kind: 'not-jailbroken' })
     expect(existsSync(path.join(mountpoint, 'kindle-organizer'))).toBe(false)

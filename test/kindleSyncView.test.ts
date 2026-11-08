@@ -29,17 +29,45 @@ describe('describeKindleSync', () => {
   })
 
   test.each([
-    ['not-jailbroken', 'kindleSync.needsJailbreak', 'https://kindlemodding.org/'],
-    ['unsupported-jailbreak', 'kindleSync.unsupportedJailbreak', 'https://kindlemodding.org/'],
-    ['not-installed', 'kindleSync.notInstalled', null]
-  ] as const)('a %s Kindle gets an honest, muted explanation', (kind, labelKey, guideUrl) => {
+    ['not-jailbroken', 'kindleSync.needsJailbreak'],
+    ['unsupported-jailbreak', 'kindleSync.unsupportedJailbreak']
+  ] as const)('a %s Kindle gets an honest, muted explanation', (kind, labelKey) => {
     expect(describeKindleSync({ kind })).toEqual({
       tone: 'muted',
       labelKey,
       hintKey: `${labelKey}Hint`,
       hintValues: {},
       opensFirstSync: false,
-      guideUrl
+      opensInstall: false,
+      guideUrl: 'https://kindlemodding.org/'
+    })
+  })
+
+  test('a jb.sh Kindle without the sync offers to install it', () => {
+    expect(describeKindleSync({ kind: 'not-installed' })).toMatchObject({
+      tone: 'action',
+      labelKey: 'kindleSync.notInstalled',
+      opensInstall: true,
+      opensFirstSync: false,
+      guideUrl: null
+    })
+  })
+
+  test('a staged install asks for the restart, and offers nothing to click', () => {
+    expect(describeKindleSync({ kind: 'install-pending' })).toMatchObject({
+      tone: 'pending',
+      labelKey: 'kindleSync.installPending',
+      opensInstall: false,
+      opensFirstSync: false
+    })
+  })
+
+  test('a failed install says why and offers to try again', () => {
+    expect(describeKindleSync({ kind: 'install-failed', detail: 'cannot start the sync' })).toMatchObject({
+      tone: 'warning',
+      labelKey: 'kindleSync.installFailed',
+      hintValues: { detail: 'cannot start the sync' },
+      opensInstall: true
     })
   })
 
