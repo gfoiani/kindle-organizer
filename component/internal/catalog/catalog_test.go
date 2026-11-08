@@ -35,6 +35,7 @@ func TestCommandsUseTheShapesTheFirmwareAccepts(t *testing.T) {
 		Deletes: []string{"k9"},
 		Inserts: []plan.Insert{{UUID: "new-0", Name: "Fantascienza", Members: []string{"b1"}}},
 		Updates: []plan.MemberUpdate{{UUID: "k1", Members: []string{"b2", "c1"}}},
+		Merged:  []string{"k8"},
 		Counts:  []plan.CountUpdate{{UUID: "b1", Count: 2}},
 	}
 
@@ -48,6 +49,7 @@ func TestCommandsUseTheShapesTheFirmwareAccepts(t *testing.T) {
 		`{"insert":{"collectionCount":null,"collectionDataSetName":"new-0","collections":null,"isArchived":1,"isVisibleInHome":1,"lastAccess":1700000000,"mimeType":"application/x-kindle-collection","titles":[{"display":"Fantascienza"}],"type":"Collection","uuid":"new-0"}}`,
 		`{"update":{"members":["b1"],"type":"Collection","uuid":"new-0"}}`,
 		`{"update":{"members":["b2","c1"],"type":"Collection","uuid":"k1"}}`,
+		`{"delete":{"uuid":"k8"}}`,
 		`{"update":{"collectionCount":2,"type":"Entry:Item","uuid":"b1"}}`,
 	}
 	if len(batches[0]) != len(want) {

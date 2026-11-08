@@ -148,8 +148,10 @@ func TestMergesSameNamedKindleCollectionsIntoOne(t *testing.T) {
 
 	p := Compute([]contract.DesiredCollection{want("Giallo", "Dune.azw3")}, lib, sequentialUUIDs())
 
-	if !reflect.DeepEqual(p.Deletes, []string{"k1"}) {
-		t.Errorf("the exact-name collection is kept, the other deleted: deletes = %v", p.Deletes)
+	// The duplicate goes only after the kept one holds its Amazon items: a
+	// separate list, sent after the member updates.
+	if len(p.Deletes) != 0 || !reflect.DeepEqual(p.Merged, []string{"k1"}) {
+		t.Errorf("the exact-name collection is kept, the other merged into it: deletes %v, merged %v", p.Deletes, p.Merged)
 	}
 	if len(p.Updates) != 1 || p.Updates[0].UUID != "k2" || !reflect.DeepEqual(sorted(p.Updates[0].Members), []string{"b1", "c1", "c2"}) {
 		t.Errorf("the kept one gathers the other's Amazon items: %+v", p.Updates)

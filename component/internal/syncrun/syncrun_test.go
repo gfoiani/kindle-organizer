@@ -29,6 +29,9 @@ type harness struct {
 	libraries      []library.Library // one per read; the last repeats
 	readErr        error
 	applyErr       error
+	// readyErrs answers DeviceReady in turn; nil once they run out.
+	readyErrs      []error
+	readyCalls     int
 	reads          int
 	applied        []plan.Plan
 	exports        []contract.Export
@@ -38,6 +41,15 @@ type harness struct {
 
 func (h *harness) deps() Deps {
 	return Deps{
+		DeviceReady: func(context.Context) error {
+			h.readyCalls++
+			if len(h.readyErrs) == 0 {
+				return nil
+			}
+			err := h.readyErrs[0]
+			h.readyErrs = h.readyErrs[1:]
+			return err
+		},
 		ReadDesired: func() ([]byte, []byte, error) { return h.desired, h.ready, h.desiredErr },
 		ReadLibrary: func(context.Context) (library.Library, error) {
 			if h.readErr != nil {
@@ -60,6 +72,54 @@ func (h *harness) deps() Deps {
 		Version:       "1.0.0",
 		IndexWaits:    3,
 		IndexInterval: time.Second,
+		ReadyWaits:    2,
+		ReadyInterval: time.Second,
+	}
+}
+
+var notMounted = errors.New("/mnt/us is not mounted")
+
+func TestWaitsForTheUSBDriveToBeTheDevicesAgain(t *testing.T) {
+	h := &harness{libraries: []library.Library{{}}, desiredErr: devicefs.ErrNoDesired, readyErrs: []error{notMounted}}
+
+	status, err := Run(context.Background(), h.deps())
+
+	if err != nil || h.sleeps != 1 || status.Result != contract.ResultOK || len(h.statuses) != 1 {
+		t.Errorf("err %v, sleeps %d, status %+v", err, h.sleeps, status)
+	}
+}
+
+func TestTouchesNothingWhileTheUSBDriveIsNotTheDevices(t *testing.T) {
+	h := &harness{libraries: []library.Library{{}}, readyErrs: []error{notMounted, notMounted, notMounted}}
+	h.desired, h.ready = desiredFile("mirror", `[]`)
+
+	_, err := Run(context.Background(), h.deps())
+
+	if err == nil || !errors.Is(err, notMounted) {
+		t.Errorf("err = %v", err)
+	}
+	if h.reads+len(h.exports)+len(h.statuses)+len(h.applied) != 0 {
+		t.Errorf("reads %d, exports %d, statuses %d, applies %d: nothing may happen", h.reads, len(h.exports), len(h.statuses), len(h.applied))
+	}
+}
+
+func TestPluggingBackInDuringTheIndexWaitAbortsWithoutApplying(t *testing.T) {
+	h := &harness{libraries: []library.Library{{Items: []library.Item{book("b1", "Dune.azw3")}}}}
+	h.desired, h.ready = desiredFile("mirror", `[{"name":"SF","members":["Dune.azw3","Nuovo.azw3"]}]`)
+	deps := h.deps()
+	ready := 0
+	deps.DeviceReady = func(context.Context) error {
+		ready++
+		if ready > 1 {
+			return notMounted // the cable went back in
+		}
+		return nil
+	}
+
+	_, err := Run(context.Background(), deps)
+
+	if err == nil || len(h.applied) != 0 || len(h.statuses) != 0 {
+		t.Errorf("err %v, applied %d, statuses %d", err, len(h.applied), len(h.statuses))
 	}
 }
 

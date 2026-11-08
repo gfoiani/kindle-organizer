@@ -39,7 +39,8 @@ func (s *script) watcher(cancel context.CancelFunc) Watcher {
 			return s.syncErr
 		},
 		Sleep:  func(d time.Duration) { s.sleeps = append(s.sleeps, d) },
-		Settle: 5 * time.Second,
+		Settle:      5 * time.Second,
+		MinInterval: 3 * time.Second,
 		Log:    func(string, ...any) { s.logs++ },
 	}
 }
@@ -69,7 +70,7 @@ func TestSyncsWhenTheKindleLeavesUSBDriveMode(t *testing.T) {
 	if s.syncs != 2 {
 		t.Errorf("%d syncs, want start-up + one after the unplug", s.syncs)
 	}
-	if len(s.sleeps) != 1 || s.sleeps[0] != 5*time.Second {
+	if count(s.sleeps, 5*time.Second) != 1 {
 		t.Errorf("sleeps = %v: the unplug sync waits Settle first", s.sleeps)
 	}
 }
@@ -119,6 +120,26 @@ func TestAFailingEventWaitBacksOffInsteadOfSpinning(t *testing.T) {
 			t.Errorf("slept %v, want ErrorBackoff", d)
 		}
 	}
+}
+
+func TestAnEventWaitThatReturnsAtOnceNeverSpins(t *testing.T) {
+	s := &script{readings: []bool{false, false, false, false}}
+
+	_ = run(s)
+
+	if s.waits == 0 || count(s.sleeps, 3*time.Second) != s.waits {
+		t.Errorf("%d waits, sleeps %v: every wait is followed by at least MinInterval", s.waits, s.sleeps)
+	}
+}
+
+func count(values []time.Duration, want time.Duration) int {
+	n := 0
+	for _, v := range values {
+		if v == want {
+			n++
+		}
+	}
+	return n
 }
 
 func TestAnUnreadableDriveModeCountsAsNotPluggedIn(t *testing.T) {
