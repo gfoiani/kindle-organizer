@@ -85,13 +85,14 @@ func TestDoesNotSyncOnEventsThatAreNotAnUnplug(t *testing.T) {
 	}
 }
 
-func TestStartingWhilePluggedInSyncsAtTheFirstUnplug(t *testing.T) {
+func TestStartingWhilePluggedInWaitsForTheUnplug(t *testing.T) {
+	// /mnt/us is exported over USB at that moment: there is nothing to write to.
 	s := &script{readings: []bool{true, false}}
 
 	_ = run(s)
 
-	if s.syncs != 2 {
-		t.Errorf("%d syncs, want start-up + the unplug", s.syncs)
+	if s.syncs != 1 {
+		t.Errorf("%d syncs, want only the one after the unplug", s.syncs)
 	}
 }
 
@@ -110,8 +111,13 @@ func TestAFailingEventWaitBacksOffInsteadOfSpinning(t *testing.T) {
 
 	_ = run(s)
 
-	if len(s.sleeps) != 2 || s.sleeps[0] != ErrorBackoff {
-		t.Errorf("sleeps = %v: each failed wait sleeps ErrorBackoff", s.sleeps)
+	if s.waits == 0 || len(s.sleeps) != s.waits {
+		t.Fatalf("%d waits, sleeps %v: each failed wait sleeps once", s.waits, s.sleeps)
+	}
+	for _, d := range s.sleeps {
+		if d != ErrorBackoff {
+			t.Errorf("slept %v, want ErrorBackoff", d)
+		}
 	}
 }
 
@@ -120,6 +126,7 @@ func TestAnUnreadableDriveModeCountsAsNotPluggedIn(t *testing.T) {
 
 	_ = run(s)
 
+	// Read as "not plugged in": the start-up sync runs, and no unplug is ever seen.
 	if s.syncs != 1 || s.logs == 0 {
 		t.Errorf("syncs %d, logs %d", s.syncs, s.logs)
 	}

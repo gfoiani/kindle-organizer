@@ -116,6 +116,20 @@ func TestDeviceIDReplacesAnUnusableStoredValue(t *testing.T) {
 	}
 }
 
+func TestWriteLogKeepsOnlyTheNewestPart(t *testing.T) {
+	dir := Dir{Root: t.TempDir()}
+
+	err := dir.WriteLog([]byte(strings.Repeat("old\n", MaxLogBytes) + "newest line\n"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir.Root, "log.txt"))
+	if err != nil || len(raw) != MaxLogBytes || !strings.HasSuffix(string(raw), "newest line\n") {
+		t.Errorf("log.txt has %d bytes (%v), want the last %d", len(raw), err, MaxLogBytes)
+	}
+}
+
 func TestWriteFailsWhenTheFolderCannotBeMade(t *testing.T) {
 	blocker := filepath.Join(t.TempDir(), "kindle-organizer")
 	mustWrite(t, blocker, "a file where the folder should be")
