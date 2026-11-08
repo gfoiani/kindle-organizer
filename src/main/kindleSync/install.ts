@@ -10,8 +10,9 @@ import { SYNC_DIR } from './deviceFiles'
  * jb.sh Kindle. The app copies the binary to the USB partition and writes an
  * installer as `/mnt/us/emergency.sh`, which jb.sh runs once, as root, at the
  * next boot. The installer deletes itself first — a leftover emergency.sh would
- * run at every boot and make jb.sh skip its own repairs — then copies the
- * component to the device's flash and registers an upstart job for it.
+ * run at every boot and make jb.sh skip its own repairs — and carries on from a
+ * copy in /tmp, then copies the component to the device's flash and registers
+ * an upstart job for it.
  */
 
 /** Marks an emergency.sh as the app's own, the only kind it may replace. */
@@ -29,12 +30,23 @@ const MAX_DETAIL = 300
 
 const INSTALLER = `#!/bin/sh
 ${INSTALLER_MARKER}
-# Installs Kindle Organizer's collection sync, then deletes itself. The app
-# writes this file as /mnt/us/emergency.sh; jb.sh runs it once, as root, at the
-# next boot. What happened is logged to kindle-organizer/install.log.
-
 SELF=/mnt/us/emergency.sh
-rm -f "$SELF"
+RUN=/tmp/kindle-organizer-installer.sh
+if [ "$0" != "$RUN" ]; then
+  cp "$SELF" "$RUN"
+  rm -f "$SELF"
+  sync
+  [ -f "$RUN" ] || exit 1
+  exec /bin/sh "$RUN"
+fi
+
+# Installs Kindle Organizer's collection sync. The app writes this file as
+# /mnt/us/emergency.sh; jb.sh runs it once, as root, at the next boot. The
+# bootstrap above deletes it first, so it never runs again, and carries on from
+# a copy in /tmp: busybox sh reads a script while running it, and nothing after
+# deleting the file it is reading would run (seen on a KT5). An if-block is
+# parsed whole before it runs, so the bootstrap runs from memory. What happened
+# is logged to kindle-organizer/install.log.
 
 SOURCE=/mnt/us/kindle-organizer/component/kosync
 HOME_DIR=/var/local/kindle-organizer
@@ -74,7 +86,11 @@ install_sync() {
 }
 
 mkdir -p /mnt/us/kindle-organizer
-install_sync > "$LOG" 2>&1
+# A subshell, so fail()'s exit ends the install, not the cleanup below.
+( install_sync ) > "$LOG" 2>&1
+status=$?
+rm -f "$RUN"
+exit $status
 `
 
 export function installerScript(): string {

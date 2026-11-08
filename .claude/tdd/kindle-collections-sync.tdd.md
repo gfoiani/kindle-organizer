@@ -183,3 +183,17 @@ Not verified:
 - **The installer on a Kindle:** `mntroot`, `start` / `stop`, and whether `framework_ready` starts the job.
 - **Uninstall:** none yet.
 
+
+## Installer bootstrap (2026-11-08, after the diagnostic runs on the KT5)
+
+Diagnostic v1 deleted itself and left nothing; v2 left only its marker, written
+before `rm -f /mnt/us/emergency.sh`. Conclusion: on the Kindle nothing after
+deleting the script that is running executes (busybox sh reads it as it runs).
+The installer had the same flaw.
+
+| # | What is guaranteed | Test | Result |
+|---|--------------------|------|--------|
+| I2 | The installer opens with one `if` block that copies itself to /tmp, deletes the original and `exec`s the copy, before any other command | `test/kindleSyncInstall.test.ts: starts with one bootstrap block…` | RED on the old script, then PASS |
+| I3 | Run as jb.sh runs it (sandboxed paths), emergency.sh is deleted, the copy reaches the install, logs `FAILED: <step>` and removes itself | `…: run as jb.sh runs it…` | PASS (first run exposed `fail()` exiting before the cleanup; install now runs in a subshell) |
+
+`npx vitest run`: 61 files, 709 tests passed; `yarn type-check` clean; install.ts 92% statements.
