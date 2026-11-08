@@ -1,27 +1,44 @@
 #!/bin/sh
-# Kindle Organizer — one-off, read-only diagnostic for the collection sync (v2).
+# Kindle Organizer diagnostic v3 (read-only). Bootstrap first: busybox sh reads
+# a script while running it, and once /mnt/us/emergency.sh is deleted nothing
+# after the rm runs. So copy to /tmp, delete, and carry on from the copy.
+SELF=/mnt/us/emergency.sh
+RUN=/tmp/kindle-organizer-diagnostics.sh
+MARKER=/mnt/us/kindle-organizer-diagnostics-started.txt
+if [ "$0" != "$RUN" ]; then
+  echo "started $(date -u)" > "$MARKER"
+  cp "$SELF" "$RUN"
+  rm -f "$SELF"
+  sync
+  [ -f "$RUN" ] || exit 0
+  if command -v setsid >/dev/null 2>&1; then
+    setsid /bin/sh "$RUN" detached </dev/null >/dev/null 2>&1 &
+  else
+    /bin/sh "$RUN" detached </dev/null >/dev/null 2>&1 &
+  fi
+  exit 0
+fi
+
+# jb.sh runs /mnt/us/emergency.sh as root at boot (kmc.conf pre-start, which
+# waits for it). The bootstrap above leaves a marker, deletes the original so it
+# runs exactly once, and detaches a copy from /tmp, so boot is never held up.
+# The copy records what the sync component needs to know about this Kindle. It
+# changes nothing on the device: it writes only
+# /mnt/us/kindle-organizer-diagnostics.txt and its marker, plus scratch files in
+# /tmp. The report holds no collection names, book paths or tokens.
 #
-# jb.sh runs /mnt/us/emergency.sh as root at boot (kmc.conf pre-start). This
-# script leaves a marker, deletes itself so it runs exactly once, then records
-# what the sync component needs to know about this Kindle. It changes nothing
-# on the device: it writes only /mnt/us/kindle-organizer-diagnostics.txt (and
-# its marker), plus scratch files in /tmp. The report holds no collection
-# names, book paths or tokens.
-#
-# v1 deleted itself and left no report at all on a KT5 / FW 5.18.3. So v2:
-#   - writes a marker first, and syncs it, to prove it ran;
+# History on a KT5 / FW 5.18.3: v1 deleted itself and left nothing; v2 left
+# its marker (written before the rm) and nothing after it. v3 also:
 #   - appends every section separately (the file is never held open) and syncs;
 #   - runs every command under a time limit, so nothing can hang it;
 #   - does not wait on driveModeState (its format is one of the unknowns): the
-#     USB part records to /tmp and copies to /mnt/us only when /mnt/us is a
-#     mounted, writable filesystem again, with a fixed upper bound.
+#     USB part records to /tmp and copies to /mnt/us only once /mnt/us is
+#     mounted read-write on the device again, with a fixed upper bound.
 #
 # Use: copy this file to the root of the Kindle's USB drive as emergency.sh,
 # eject, restart the Kindle. Within 10 minutes of the restart, plug the cable in
 # and unplug it once. After 15 minutes, plug it in: the report is at the root.
 
-MARKER=/mnt/us/kindle-organizer-diagnostics-started.txt
-SELF=/mnt/us/emergency.sh
 REPORT=/mnt/us/kindle-organizer-diagnostics.txt
 WORK=/tmp/kindle-organizer-diagnostics
 WATCH_SECONDS=600
@@ -29,9 +46,8 @@ COMMAND_SECONDS=20
 # After the watch, how long to wait for /mnt/us to be the device's again.
 REMOUNT_WAIT_SECONDS=1800
 
-echo "started $(date -u 2>/dev/null)" > "$MARKER"
-sync
-rm -f "$SELF"
+# Detached copy in /tmp from here on.
+echo "running from $RUN ($*)" >> "$MARKER"
 sync
 mkdir -p "$WORK"
 
@@ -62,7 +78,7 @@ section() {
 sh_section() { section "$1" sh -c "$2"; }
 
 snapshot() {
-  echo "Kindle Organizer diagnostics v2" > "$REPORT"
+  echo "Kindle Organizer diagnostics v3" > "$REPORT"
   sync
   section "date (UTC)" date -u
   section "uname" uname -a
@@ -133,9 +149,7 @@ record_usb() {
   rm -rf "$WORK"
 }
 
-# Detach from kmc.conf's pre-start at once: nothing here should hold up boot.
-(
-  snapshot
-  record_usb
-) > /dev/null 2>&1 &
+snapshot
+record_usb
+rm -f "$RUN"
 exit 0
