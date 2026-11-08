@@ -29,17 +29,26 @@ describe('describeKindleSync', () => {
   })
 
   test.each([
-    ['not-jailbroken', 'kindleSync.needsJailbreak'],
-    ['unsupported-jailbreak', 'kindleSync.unsupportedJailbreak'],
-    ['not-installed', 'kindleSync.notInstalled']
-  ] as const)('a %s Kindle gets an honest, muted explanation', (kind, labelKey) => {
+    ['not-jailbroken', 'kindleSync.needsJailbreak', 'https://kindlemodding.org/'],
+    ['unsupported-jailbreak', 'kindleSync.unsupportedJailbreak', 'https://kindlemodding.org/'],
+    ['not-installed', 'kindleSync.notInstalled', null]
+  ] as const)('a %s Kindle gets an honest, muted explanation', (kind, labelKey, guideUrl) => {
     expect(describeKindleSync({ kind })).toEqual({
       tone: 'muted',
       labelKey,
       hintKey: `${labelKey}Hint`,
       hintValues: {},
-      opensFirstSync: false
+      opensFirstSync: false,
+      guideUrl
     })
+  })
+
+  test('the jailbreak guide is offered only while the jailbreak is what is missing', () => {
+    const firstSync = describeKindleSync({ kind: 'first-sync', status: STATUS, kindleCollections: [] })
+
+    expect(firstSync?.guideUrl).toBeNull()
+    expect(describeKindleSync(active({}, true))?.guideUrl).toBeNull()
+    expect(describeKindleSync(active({ result: 'error', error: 'x' }, false))?.guideUrl).toBeNull()
   })
 
   test('before the first-sync answer the status asks for it and opens the question', () => {
