@@ -6,7 +6,7 @@ A desktop application for managing and organizing your Kindle library — browse
 
 The Kindle's built-in library is awkward to organize: there's no fast visual overview, cover art is often missing for sideloaded books, and grouping titles into collections on the device is slow. [Calibre](https://calibre-ebook.com/) is powerful but heavyweight for the common case of "just let me see my books and tidy them up."
 
-**Kindle Organizer** fills that gap. Plug in your Kindle and it gives you an instant, visual grid of every book on the device, automatically fetches missing covers, lets you fix messy titles and authors, and builds collections that sync back to the Kindle through Calibre's metadata format. It can even sort your library into genre collections automatically using an on-device AI model — no data ever leaves your machine.
+**Kindle Organizer** fills that gap. Plug in your Kindle and it gives you an instant, visual grid of every book on the device, automatically fetches missing covers, lets you fix messy titles and authors, and builds collections — on a Kindle with the jb.sh jailbreak the device itself can pick them up (experimental, see below). It can even sort your library into genre collections automatically using an on-device AI model — no data ever leaves your machine.
 
 ## Features
 
@@ -19,8 +19,8 @@ The Kindle's built-in library is awkward to organize: there's no fast visual ove
 - **AI auto-classification** — sort your library into genre collections with an on-device, zero-shot ML model ([`@xenova/transformers`](https://github.com/xenova/transformers.js), running in a Web Worker). Define your own genre labels, set a confidence threshold, preview the suggestions, and apply them in one batch. **Everything runs locally — no book data is sent to any server.**
 - **Send to Kindle** — drop EPUBs (or Kindle formats, PDFs) into the app and send them to the device; EPUBs are converted to AZW3 by a built-in converter, with the app's title, author and cover stamped in and shown on the Kindle home screen. **No Calibre installation needed.**
 - **Library folders** — point the app at one or more folders on your computer (*Settings → Library folders*): their books join the library in place, without being copied, and the app follows additions, renames and deletions while it runs. The files themselves are never modified
-- **Collections on the device** — on connect, imports tag-based collections from the `metadata.calibre` file on the Kindle root (calibre's format; calibre itself is not required)
-- **Write to Kindle** — saves collection assignments back to `metadata.calibre` (via an atomic write), creating it when the Kindle has none, so calibre can read them on its next sync if you use it
+- **Calibre tag import** — on connect, imports tag-based collections from the `metadata.calibre` file on the Kindle root (calibre's format; calibre itself is not required)
+- **Collections on the Kindle (experimental)** — a Kindle with firmware 5.x keeps its collections in a system database that only code running on the device can change, so this needs a Kindle jailbroken with [jb.sh](https://kindlemodding.org/). The app writes the collections you want to the device and a small component on the Kindle applies them when you unplug the cable; the header shows whether the Kindle is up to date. The first time, you choose whether to import the collections already on the Kindle. The app never jailbreaks anything — it links the community guide and recognizes the result. *The on-device component is still in development.*
 - **Backups of `metadata.calibre`** — before every change the previous file is copied to `.kindle-organizer/backups/` on the Kindle itself (last 10 copies); *Settings → Collections on the Kindle* puts any of them back
 - **Delete from Kindle** — delete one book or a selection from the device, together with its reading data (`.sdr` folder), home-screen thumbnail and `metadata.calibre` record
 - **Sorting** — order the grid by title, author or recently added; the choice is remembered
@@ -39,7 +39,7 @@ The Kindle's built-in library is awkward to organize: there's no fast visual ove
 2. **Browse** your library. Covers load in the background; click a book to open the detail sidebar with its cover and metadata, plus an edit button for fixing the title/author.
 3. **Build collections.** Create a collection in the sidebar, then assign books to it from the grid (a book can belong to several collections).
 4. **Let AI organize it for you (optional).** Open **AI Organize**, adjust the genre labels and confidence threshold, run the classifier, review the suggestions, and apply them — the app creates the matching collections and assigns the books.
-5. **Write to Kindle.** Click **Write to Kindle** to save your collections back to `metadata.calibre` (created if the Kindle has none). If you also use calibre, it picks them up on its next sync.
+5. **Collections on the Kindle (experimental, jailbroken Kindles only).** The header shows the collection-sync status of the connected Kindle; once the sync is set up, unplugging the Kindle is enough for it to take the app's collections.
 6. **Send books (optional).** Drag EPUBs onto the window to add them to the library — or link the folders where you keep your ebooks in *Settings → Library folders* — then use **Send to Kindle**. Conversion to AZW3 happens inside the app — calibre is not needed. DRM-protected EPUBs cannot be converted.
 
 ## Screenshots
@@ -103,7 +103,7 @@ src/
 Collections are stored in a local SQLite database (`userData/collections.db`). Two sources coexist:
 
 - **calibre** — auto-imported from `metadata.calibre` on every Kindle connect; read-only in the UI
-- **local** — created manually in the app; fully editable; written back to `metadata.calibre` when you click *Write to Kindle*
+- **local** — created manually in the app; fully editable; on a jailbroken Kindle with the collection sync, applied to the device when it is unplugged
 
 ### Cover cache
 

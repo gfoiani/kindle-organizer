@@ -14,15 +14,16 @@ All notable changes to this project will be documented in this file.
 - **Sort the grid** by title, author or recently added.
 - **Logs** — errors and warnings are written to `main.log`; *Settings → Diagnostics* opens its folder.
 - **Update notice** — a link at the bottom of the sidebar when a newer release is out.
+- **Collections on the Kindle (experimental)** — for a Kindle jailbroken with jb.sh: the header shows whether the Kindle holds the app's collections, and the first time it asks whether to import the collections already on the Kindle or let them go. A Kindle without the jailbreak gets a plain explanation and a link to the community guide; the app never jailbreaks a device. The part that runs on the Kindle and applies the collections at unplug is not included yet.
 
 ### Changed
 
 - **Calibre is no longer needed.** EPUBs are converted to AZW3 by a converter built into the app, so *Send to Kindle* works the same whether or not calibre is installed. The converted book carries the app's title, author and cover, internal links and the table of contents.
-- **Collections work on any Kindle.** *Write to Kindle* now creates `metadata.calibre` when the device has none and registers books that calibre never saw, instead of failing.
 - Sending a book that cannot be converted now says why (DRM-protected, damaged EPUB) instead of only "failed".
 
 ### Removed
 
+- *Write to Kindle*. It wrote collections into `metadata.calibre` as calibre tags, which a Kindle with firmware 5.x does not read for its collections, so they never appeared on the device. Collections now reach a jailbroken Kindle through the collection sync above; `metadata.calibre` is still updated when books are sent or deleted.
 - The MOBI conversion option: books are always converted to AZW3 (KF8), which every Kindle reads from the Kindle Keyboard (with its 2012 firmware update) onwards. Kindle 1, 2 and DX are not supported for converted books.
 - Embedded fonts are not carried over into converted books; the Kindle's own fonts are used.
 
