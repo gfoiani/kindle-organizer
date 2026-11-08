@@ -37,8 +37,9 @@ type Command map[string]any
 
 // Batches turns a plan into ChangeRequest command lists of at most size
 // commands: deletes first (they free names), then each insert followed by its
-// member list — never split across requests — then member updates, then
-// collection counts.
+// member list — never split across requests — then member updates, then the
+// merged duplicates (only once the kept collection holds their items), then
+// collection counts. A failed batch stops the run, so nothing after it is sent.
 func Batches(p plan.Plan, lastAccess int64, size int) [][]Command {
 	var units [][]Command
 	for _, uuid := range p.Deletes {
@@ -49,6 +50,9 @@ func Batches(p plan.Plan, lastAccess int64, size int) [][]Command {
 	}
 	for _, update := range p.Updates {
 		units = append(units, []Command{membersCommand(update.UUID, update.Members)})
+	}
+	for _, uuid := range p.Merged {
+		units = append(units, []Command{{"delete": map[string]any{"uuid": uuid}}})
 	}
 	for _, count := range p.Counts {
 		units = append(units, []Command{{"update": map[string]any{"type": "Entry:Item", "uuid": count.UUID, "collectionCount": count.Count}}})

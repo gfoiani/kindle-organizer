@@ -30,13 +30,13 @@ type harness struct {
 	readErr        error
 	applyErr       error
 	// readyErrs answers DeviceReady in turn; nil once they run out.
-	readyErrs      []error
-	readyCalls     int
-	reads          int
-	applied        []plan.Plan
-	exports        []contract.Export
-	statuses       []contract.Status
-	sleeps         int
+	readyErrs  []error
+	readyCalls int
+	reads      int
+	applied    []plan.Plan
+	exports    []contract.Export
+	statuses   []contract.Status
+	sleeps     int
 }
 
 func (h *harness) deps() Deps {

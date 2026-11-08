@@ -39,15 +39,20 @@ type CountUpdate struct {
 type Plan struct {
 	Inserts []Insert
 	Updates []MemberUpdate
+	// Deletes are Kindle collections the app does not have.
 	Deletes []string
-	Counts  []CountUpdate
+	// Merged are same-named duplicates folded into a kept collection. They are
+	// deleted only after the member updates, so a failed update never loses
+	// the Amazon items they held.
+	Merged []string
+	Counts []CountUpdate
 	// Pending are desired books the firmware has not indexed yet.
 	Pending []string
 }
 
 // Empty reports whether there is nothing to send. Pending books are not an action.
 func (p Plan) Empty() bool {
-	return len(p.Inserts)+len(p.Updates)+len(p.Deletes)+len(p.Counts) == 0
+	return len(p.Inserts)+len(p.Updates)+len(p.Deletes)+len(p.Merged)+len(p.Counts) == 0
 }
 
 type group struct {
@@ -67,7 +72,7 @@ func Compute(desired []contract.DesiredCollection, lib library.Library, newUUID 
 	var p Plan
 	groups := mergeGroups(desired)
 	pending := newOrderedSet()
-	deleted := map[string]bool{}
+	merged := map[string]bool{}
 	updated := map[string][]string{}
 	wanted := map[string]bool{}
 	for _, g := range groups {
@@ -88,20 +93,26 @@ func Compute(desired []contract.DesiredCollection, lib library.Library, newUUID 
 		}
 		for _, other := range collections {
 			if other.UUID != kept.UUID {
-				deleted[other.UUID] = true
+				merged[other.UUID] = true
 			}
 		}
 	}
 
+	gone := map[string]bool{}
 	for _, collection := range lib.Collections {
-		if deleted[collection.UUID] || !wanted[nameKey(collection.Name)] {
+		switch {
+		case merged[collection.UUID]:
+			p.Merged = append(p.Merged, collection.UUID)
+		case !wanted[nameKey(collection.Name)]:
 			p.Deletes = append(p.Deletes, collection.UUID)
-			deleted[collection.UUID] = true
+		default:
+			continue
 		}
+		gone[collection.UUID] = true
 	}
 
 	p.Pending = pending.values
-	p.Counts = countChanges(lib, p.Inserts, updated, deleted)
+	p.Counts = countChanges(lib, p.Inserts, updated, gone)
 	return p
 }
 

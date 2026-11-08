@@ -17,8 +17,9 @@ import (
 // DefaultRoot is the exchange folder as the device sees it.
 const DefaultRoot = "/mnt/us/kindle-organizer"
 
-// MaxDesiredBytes bounds desired.json: far above any real library, far below the device's memory.
-const MaxDesiredBytes = 32 << 20
+// MaxDesiredBytes bounds desired.json: far above any real library (100,000
+// members is about 5 MiB), while parsing it stays well inside a Kindle's RAM.
+const MaxDesiredBytes = 8 << 20
 
 const maxReadyBytes = 1 << 10
 

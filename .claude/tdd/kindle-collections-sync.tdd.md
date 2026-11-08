@@ -109,3 +109,55 @@ Fourth session (2026-11-08) coverage, `npx vitest run … --coverage`:
 - `kindleSyncView.ts`: 100% statements, branches and lines.
 - `calibre.ts`: 84.6% statements, 79.8% branches. `calibreBackup.ts`: 91.9% / 87.5%. The uncovered lines are log-only error paths.
 - Full suite: 681 passed, 59 files. 691 − 13 `writeCalibreMetadata` tests + 2 moved to `upsertCalibreEntry` + 1 for the guide link.
+
+## On-device component (Go), fifth session (2026-11-08)
+
+Source: the design spec plus the user's choice of Go. Verified command shapes for `/change` come from ccsync (sandman7920/ccsync, MIT, `kindle/commander.go`). LibrarianSync could not be fetched. A forum report that the service replaces the whole member list on every update, and chokes on large requests, led to full member lists and batches of 100.
+
+| # | Behavior | RED commit, evidence | GREEN commit, evidence |
+|---|----------|----------------------|------------------------|
+| C1 | File contract, cc.db reader, change plan | `ea7b5f4`: compile-time, undefined `ParseDesired`, `parseHexRows`, `Compute`… | `1be0014`: contract 96.0%, library 85.7% (the sqlite3 fixture test ran), plan 100% |
+| C2 | `/change` client, device files, one sync run | `fd9fc91`: compile-time, undefined `Batches`, `Dir`, `Run`… | `5a46d15`: catalog 91.1%, devicefs 80.7%, syncrun 93.7%. The first AuthToken assertion could not pass (Go's test server canonicalizes header names) and was moved to the client side; a mutation to `Header.Set` is caught |
+| C3 | When to sync; log tail on the USB partition | `1e0722a`, then `8c2e157`: two expectations changed before implementation (no start-up sync while USB drive mode is on; one back-off per failed wait) | `5555274`: watch 96.0%, devicefs 80.6%; `yarn build:component` gives ELF 32-bit ARM EABI5, static, 6.3 MB |
+| C4 | One set of contract files checked by both languages | — (contract tests over existing code) | `cc98eba`: Go ok, vitest 3 passed. Renaming `pendingBooks` in the status file fails both sides |
+| C5 | Read-only diagnostic `emergency.sh` | — | `c28f3f9`: `sh -n` ok. **Not run, not copied to the Kindle** |
+| C6 | Fixes from the independent Go review (ecc:go-reviewer): (1) never touch /mnt/us unless it is mounted and out of USB drive mode, and stop without applying if the cable goes back in; (2) a pause after every event wait; (3) merged duplicates deleted after the member updates | `fcdb0f1`: compile-time, undefined `Plan.Merged`, `Watcher.MinInterval`, `Deps.DeviceReady`… | this commit: all packages ok (catalog 91.4%, syncrun 92.3%, watch 96.2%, plan 100%); `go vet` for darwin and linux/arm. Also: timeouts on sqlite3/lipc, lipc-wait-event killed with kosync (Pdeathsig, WaitDelay), shutdown no longer costs a minute, desired.json cap 32 → 8 MiB, `-init /dev/null` on the snapshot call |
+
+| # | What is guaranteed | Where | Result |
+|---|--------------------|-------|--------|
+| G1 | desired.json is applied only when desired.ready holds its sha256; anything off-schema is refused whole (paths leaving documents/, blank names, over 5000 collections) | `contract_test.go` | PASS |
+| G2 | status.json always carries `pendingBooks` (list) and `appliedDesired` (null when nothing applied); errors are capped at 1000 characters | `contract_test.go` | PASS |
+| G3 | cc.db is read from a `.backup` snapshot, every value as hex, so names with `\|`, newlines or emoji survive; the snapshot is removed; a missing database is an error, not an empty library | `library_test.go` (real sqlite3) | PASS |
+| G4 | Plan: missing collections are created but never empty; existing ones are kept with the members the app cannot see; collections the app lacks are deleted; matching ignores case and Unicode form; same-named Kindle collections merge; unindexed books are pending; collectionCount changes only where it moves | `plan_test.go` | PASS (100%) |
+| G5 | `/change`: deletes first, each insert with its members in the same request, at most BatchSize per request, AuthToken spelled exactly, 503 retried with growing waits, any other failure or `{"ok":false}` stops, nothing is sent without a token or for an empty plan | `catalog_test.go` | PASS |
+| G6 | Writes are temp + fsync + rename; a failed write leaves the previous file; desired.json is capped at 32 MiB; the device id is created once and kept | `devicefs_test.go` | PASS |
+| G7 | A run exports first (even when desired.json is bad); `hold` or no desired.json changes nothing; waits a bounded time for indexing; partial with pendingBooks; `appliedDesired` only when the plan went through | `syncrun_test.go` | PASS |
+| G8 | Sync at start only outside USB drive mode, then whenever drive mode ends; a failed event wait backs off; a failed sync never stops the loop | `watch_test.go` | PASS |
+| G9 | The app's desired.* and the component's status/export agree byte for byte | `fixtures_test.go` + `test/kindleSyncContract.test.ts` | PASS |
+
+Commands: `yarn test:component` (go vet + go test -cover), `yarn build:component`. App suite after this session: 684 passed, type-check clean.
+
+Not verified, needs the Kindle:
+- the `com.lab126.hal` event names (`usbPlugIn` / `usbPlugOut`). With a wrong name each wait ends at its 15-minute timeout, so the sync still runs, late;
+- the output of `lipc-get-prop … driveModeState`;
+- whether the catalog service accepts the insert shape on FW 5.18.3 and what its reply looks like;
+- whether the device's sqlite3 accepts `-init`, `-noheader` and `-list`;
+- which columns cc.db really has.
+
+The diagnostic script records each of these.
+
+Review findings left open, by choice:
+- **A 200 reply without `"ok"`** counts as success, as in ccsync, which never reads the body. Requiring `ok:true` before the reply is seen on the device could fail every sync.
+- **collectionCount after a partial failure.** If member updates land but the counts batch fails, the next run sees no membership change and never fixes the counts. The fix needs the stored count column, which the diagnostic will show.
+- **"App-owned" is any listed format under documents/.** A book the app does not list (hidden folder, too deep) would be dropped from a collection. The fix would be to add the app's book list to desired.json, a contract change for later.
+- **Plugging in and out within one sync** is noticed only at the next unplug.
+- **The index wait** (up to 2 minutes) repeats on every unplug while a desired book never appears.
+- **Low items:** no directory fsync after rename; `ToLower` instead of full case folding; the log is rotated non-atomically; a failed device-id write leaves no status.
+
+Not done:
+- the install channel, meaning the installer `emergency.sh` and the upstart job, and the app's install button;
+- self-update;
+- bundling the binary into the app;
+- Go in CI;
+- export.json is not capped at the app's limits (5000 collections / 100,000 members). Beyond them the app refuses the whole file.
+

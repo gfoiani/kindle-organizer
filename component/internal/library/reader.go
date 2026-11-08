@@ -56,7 +56,7 @@ func (r Reader) Read(ctx context.Context) (lib Library, err error) {
 		}
 	}()
 
-	if _, err := r.Run(ctx, r.SQLite, "-readonly", r.LiveDB, fmt.Sprintf(".backup '%s'", r.SnapshotPath)); err != nil {
+	if _, err := r.Run(ctx, r.SQLite, "-init", os.DevNull, "-batch", "-readonly", r.LiveDB, fmt.Sprintf(".backup '%s'", r.SnapshotPath)); err != nil {
 		return Library{}, fmt.Errorf("snapshot of cc.db: %w", err)
 	}
 	entries, err := r.query(ctx, entriesQuery, 5)

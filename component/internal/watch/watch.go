@@ -23,7 +23,9 @@ type Watcher struct {
 	Sleep         func(time.Duration)
 	// Settle lets the firmware remount /mnt/us and start indexing before the sync.
 	Settle time.Duration
-	Log    func(format string, args ...any)
+	// MinInterval follows every event wait, so a tool that returns at once never spins the loop.
+	MinInterval time.Duration
+	Log         func(format string, args ...any)
 }
 
 func (w Watcher) Loop(ctx context.Context) error {
@@ -41,6 +43,8 @@ func (w Watcher) Loop(ctx context.Context) error {
 		if err := w.WaitForChange(ctx); err != nil {
 			w.Log("waiting for a USB event: %v", err)
 			w.Sleep(ErrorBackoff)
+		} else {
+			w.Sleep(w.MinInterval)
 		}
 		inDriveMode := w.driveMode(ctx)
 		if err := ctx.Err(); err != nil {

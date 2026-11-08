@@ -38,10 +38,10 @@ func (s *script) watcher(cancel context.CancelFunc) Watcher {
 			s.syncs++
 			return s.syncErr
 		},
-		Sleep:  func(d time.Duration) { s.sleeps = append(s.sleeps, d) },
+		Sleep:       func(d time.Duration) { s.sleeps = append(s.sleeps, d) },
 		Settle:      5 * time.Second,
 		MinInterval: 3 * time.Second,
-		Log:    func(string, ...any) { s.logs++ },
+		Log:         func(string, ...any) { s.logs++ },
 	}
 }
 

@@ -49,6 +49,15 @@ const (
 	httpTimeout   = 2 * time.Minute
 	// eventTimeout bounds each event wait: a missed event delays a sync by at most this.
 	eventTimeout = 15 * time.Minute
+	// minInterval follows every event wait, so the loop never spins.
+	minInterval = 5 * time.Second
+	// readyWaits × readyInterval: how long a sync waits for /mnt/us to be remounted.
+	readyWaits    = 12
+	readyInterval = 5 * time.Second
+	// childTimeout bounds sqlite3 and lipc-get-prop, so a hung tool cannot stall the loop.
+	childTimeout = 2 * time.Minute
+	// usbMount is the USB partition; while it is exported over USB it is not mounted here.
+	usbMount = "/mnt/us"
 )
 
 // usbEvents are the com.lab126.hal events that announce a cable change.
@@ -92,6 +101,7 @@ func watcher() watch.Watcher {
 		Sync:          syncOnce,
 		Sleep:         time.Sleep,
 		Settle:        settle,
+		MinInterval:   minInterval,
 		Log:           logf,
 	}
 }
@@ -102,7 +112,7 @@ func syncOnce(ctx context.Context) error {
 		return fmt.Errorf("device id: %w", err)
 	}
 	dir := devicefs.Dir{Root: devicefs.DefaultRoot}
-	reader := library.Reader{SQLite: "sqlite3", LiveDB: liveDB, SnapshotPath: filepath.Join(stateDir, "cc-snapshot.db"), Run: library.ExecRunner}
+	reader := library.Reader{SQLite: "sqlite3", LiveDB: liveDB, SnapshotPath: filepath.Join(stateDir, "cc-snapshot.db"), Run: withTimeout(library.ExecRunner)}
 	client := catalog.Client{
 		URL:        catalog.DefaultURL,
 		Token:      catalog.FileToken(catalog.SessionTokenFile),
@@ -114,6 +124,7 @@ func syncOnce(ctx context.Context) error {
 	}
 
 	status, err := syncrun.Run(ctx, syncrun.Deps{
+		DeviceReady:   deviceReady,
 		ReadDesired:   dir.ReadDesired,
 		ReadLibrary:   reader.Read,
 		Apply:         client.Apply,
@@ -126,6 +137,8 @@ func syncOnce(ctx context.Context) error {
 		Version:       version,
 		IndexWaits:    indexWaits,
 		IndexInterval: indexInterval,
+		ReadyWaits:    readyWaits,
+		ReadyInterval: readyInterval,
 	})
 	logf("sync: %s, created %d, updated %d, deleted %d, pending %d %s",
 		status.Result, status.Created, status.Updated, status.Deleted, len(status.PendingBooks), status.Error)
@@ -133,19 +146,64 @@ func syncOnce(ctx context.Context) error {
 	return err
 }
 
-// waitForUSBEvent blocks on lipc-wait-event until a cable event or eventTimeout.
+// waitForUSBEvent blocks on lipc-wait-event until a cable event, eventTimeout
+// or shutdown; the last two are a normal return, not an error.
 func waitForUSBEvent(ctx context.Context) error {
 	waitCtx, cancel := context.WithTimeout(ctx, eventTimeout)
 	defer cancel()
-	err := exec.CommandContext(waitCtx, "lipc-wait-event", "com.lab126.hal", strings.Join(usbEvents, ",")).Run()
-	if errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
+	cmd := exec.CommandContext(waitCtx, "lipc-wait-event", "com.lab126.hal", strings.Join(usbEvents, ","))
+	cmd.WaitDelay = 5 * time.Second
+	killWithParent(cmd)
+	err := cmd.Run()
+	if waitCtx.Err() != nil {
 		return nil
 	}
 	return err
 }
 
+// withTimeout bounds every call of run by childTimeout.
+func withTimeout(run library.Runner) library.Runner {
+	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		callCtx, cancel := context.WithTimeout(ctx, childTimeout)
+		defer cancel()
+		return run(callCtx, name, args...)
+	}
+}
+
+// deviceReady fails unless the USB partition is mounted here and not in USB drive mode.
+func deviceReady(ctx context.Context) error {
+	mounted, err := isMounted(usbMount)
+	if err != nil {
+		return err
+	}
+	if !mounted {
+		return fmt.Errorf("%s is not mounted", usbMount)
+	}
+	plugged, err := inDriveMode(ctx)
+	if err != nil {
+		return err
+	}
+	if plugged {
+		return errors.New("the Kindle is in USB drive mode")
+	}
+	return nil
+}
+
+func isMounted(mountpoint string) (bool, error) {
+	raw, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if fields := strings.Fields(line); len(fields) > 1 && fields[1] == mountpoint {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func inDriveMode(ctx context.Context) (bool, error) {
-	out, err := library.ExecRunner(ctx, "lipc-get-prop", "com.lab126.volumd", "driveModeState")
+	out, err := withTimeout(library.ExecRunner)(ctx, "lipc-get-prop", "com.lab126.volumd", "driveModeState")
 	if err != nil {
 		return false, err
 	}
