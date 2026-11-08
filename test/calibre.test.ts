@@ -4,7 +4,6 @@ import { tmpdir } from 'os'
 import path from 'path'
 import {
   readCalibreMetadata,
-  writeCalibreMetadata,
   readCalibreIsbnMap,
   upsertCalibreEntry
 } from '../src/main/calibre'
@@ -68,159 +67,6 @@ describe('readCalibreMetadata', () => {
   test('returns null when the parsed root is not an array', () => {
     writeMetadata({ lpath: 'documents/A/Book.azw3', tags: ['X'] })
     expect(readCalibreMetadata(mountpoint)).toBeNull()
-  })
-})
-
-describe('writeCalibreMetadata — authoritative tag write (H1)', () => {
-  test('sets tags for a known book to the exact array from the map', () => {
-    // Arrange
-    writeMetadata([{ lpath: 'documents/A/Book.azw3', tags: ['Old'] }])
-    const map = new Map<string, string[]>([['A/Book.azw3', ['Sci-Fi', 'Read']]])
-
-    // Act
-    const ok = writeCalibreMetadata(mountpoint, map)
-
-    // Assert
-    expect(ok).toBe(true)
-    expect(readMetadata()[0].tags).toEqual(['Sci-Fi', 'Read'])
-  })
-
-  test('H1: a book seeded with [] (removed from all collections) has its stale tags cleared', () => {
-    // Arrange — book currently tagged on the device, now de-tagged in the app.
-    writeMetadata([{ lpath: 'documents/A/Book.azw3', tags: ['StaleTag'] }])
-    const map = new Map<string, string[]>([['A/Book.azw3', []]])
-
-    // Act
-    const ok = writeCalibreMetadata(mountpoint, map)
-
-    // Assert — the write is authoritative, so the old tag is gone.
-    expect(ok).toBe(true)
-    expect(readMetadata()[0].tags).toEqual([])
-  })
-
-  test('leaves books NOT present in the map untouched (does not blanket-clear)', () => {
-    // Arrange
-    writeMetadata([
-      { lpath: 'documents/A/Known.azw3', tags: ['Old'] },
-      { lpath: 'documents/B/Unknown.azw3', tags: ['KeepMe'] }
-    ])
-    const map = new Map<string, string[]>([['A/Known.azw3', ['New']]])
-
-    // Act
-    writeCalibreMetadata(mountpoint, map)
-
-    // Assert
-    const after = readMetadata()
-    expect(after.find((e) => e.lpath === 'documents/A/Known.azw3')?.tags).toEqual(['New'])
-    expect(after.find((e) => e.lpath === 'documents/B/Unknown.azw3')?.tags).toEqual(['KeepMe'])
-  })
-
-  test('preserves other fields on a record when updating tags', () => {
-    writeMetadata([
-      { lpath: 'documents/A/Book.azw3', tags: ['Old'], title: 'A Title', author: 'Someone' }
-    ])
-    const map = new Map<string, string[]>([['A/Book.azw3', ['New']]])
-
-    writeCalibreMetadata(mountpoint, map)
-
-    const entry = readMetadata()[0]
-    expect(entry).toMatchObject({ title: 'A Title', author: 'Someone', tags: ['New'] })
-  })
-
-  test('creates metadata.calibre for books in a collection when the device has none', () => {
-    // Arrange: a Kindle that has never seen calibre.
-    const map = new Map([['A/Book.azw3', ['Sci-Fi']]])
-    const books = [{ relpath: 'A/Book.azw3', title: 'Dune', author: 'Frank Herbert', size: 1234 }]
-
-    // Act
-    const ok = writeCalibreMetadata(mountpoint, map, books)
-
-    // Assert
-    expect(ok).toBe(true)
-    const [entry] = readMetadata()
-    expect(entry).toMatchObject({
-      lpath: 'documents/A/Book.azw3',
-      title: 'Dune',
-      authors: ['Frank Herbert'],
-      tags: ['Sci-Fi'],
-      size: 1234,
-      mime: 'application/x-mobi8-ebook'
-    })
-    expect(entry.uuid).toMatch(/^[0-9a-f-]{36}$/)
-  })
-
-  test('adds a record for a book in a collection that the existing file does not list', () => {
-    writeMetadata([{ lpath: 'documents/B.pdf', tags: ['Old'] }])
-    const map = new Map([
-      ['A.azw3', ['Nuova']],
-      ['B.pdf', ['Aggiornata']]
-    ])
-    const books = [
-      { relpath: 'A.azw3', title: 'A', size: 1 },
-      { relpath: 'B.pdf', title: 'B', size: 2 }
-    ]
-
-    expect(writeCalibreMetadata(mountpoint, map, books)).toBe(true)
-
-    const entries = readMetadata()
-    expect(entries.map((e) => [e.lpath, e.tags])).toEqual([
-      ['documents/B.pdf', ['Aggiornata']],
-      ['documents/A.azw3', ['Nuova']]
-    ])
-  })
-
-  test('never records a book whose relpath is not relative to documents/', () => {
-    // Arrange: what a Windows path that missed the documents/ prefix looks like.
-    const relpaths = ['E:\\documents\\A.azw3', 'E:/documents/B.azw3', '/Volumes/K/documents/C.azw3', '../D.azw3']
-    const map = new Map(relpaths.map((relpath) => [relpath, ['X']]))
-    const books = relpaths.map((relpath) => ({ relpath, title: relpath, size: 1 }))
-
-    // Act
-    const ok = writeCalibreMetadata(mountpoint, map, books)
-
-    // Assert
-    expect(ok).toBe(true)
-    expect(() => readFileSync(path.join(mountpoint, 'metadata.calibre'))).toThrow()
-  })
-
-  test('does not create metadata.calibre when no book is in any collection', () => {
-    const ok = writeCalibreMetadata(mountpoint, new Map([['A.azw3', []]]), [{ relpath: 'A.azw3', title: 'A', size: 1 }])
-
-    expect(ok).toBe(true)
-    expect(() => readFileSync(path.join(mountpoint, 'metadata.calibre'))).toThrow()
-  })
-
-  test('returns false on malformed metadata.calibre', () => {
-    writeFileSync(path.join(mountpoint, 'metadata.calibre'), 'not json', 'utf-8')
-    const ok = writeCalibreMetadata(mountpoint, new Map([['A/Book.azw3', ['X']]]))
-    expect(ok).toBe(false)
-  })
-
-  test('leaves no orphaned .tmp file after a successful write', () => {
-    writeMetadata([{ lpath: 'documents/A/Book.azw3', tags: ['Old'] }])
-    writeCalibreMetadata(mountpoint, new Map([['A/Book.azw3', ['New']]]))
-    expect(() => readFileSync(path.join(mountpoint, 'metadata.calibre.tmp'))).toThrow()
-  })
-})
-
-describe('writeCalibreMetadata + readCalibreMetadata round-trip', () => {
-  test('a re-org (add one book, clear another) round-trips through the device file', () => {
-    // Arrange — two books, each tagged.
-    writeMetadata([
-      { lpath: 'documents/A/One.azw3', tags: ['Initial'] },
-      { lpath: 'documents/B/Two.azw3', tags: ['Initial'] }
-    ])
-
-    // Act — One keeps a tag, Two is removed from all collections (seeded []).
-    const map = new Map<string, string[]>([
-      ['A/One.azw3', ['Fiction']],
-      ['B/Two.azw3', []]
-    ])
-    writeCalibreMetadata(mountpoint, map)
-
-    // Assert — read-back only surfaces the still-tagged book.
-    const books = readCalibreMetadata(mountpoint)
-    expect(books).toEqual([{ lpath: 'documents/A/One.azw3', tags: ['Fiction'] }])
   })
 })
 
@@ -346,6 +192,14 @@ describe('upsertCalibreEntry', () => {
     expect(ok).toBe(false)
     expect(readFileSync(path.join(mountpoint, 'metadata.calibre'), 'utf-8')).toBe(raw)
   })
+
+  test('leaves no orphaned .tmp file after a successful write', () => {
+    writeMetadata([{ lpath: 'documents/Dune.azw3', tags: ['SF'] }])
+
+    upsertCalibreEntry(mountpoint, DUNE)
+
+    expect(() => readFileSync(path.join(mountpoint, 'metadata.calibre.tmp'))).toThrow()
+  })
 })
 
 describe('calibre records survive the app', () => {
@@ -395,26 +249,16 @@ describe('calibre records survive the app', () => {
 
     expect(readMetadata().map((e) => [e.lpath, e.tags])).toEqual([['documents/Dune.azw3', ['SF']]])
   })
-
-  test('collections reach a record whose lpath differs only in case, without a duplicate', () => {
-    writeMetadata([{ lpath: 'documents/Dune.AZW3', tags: ['Old'] }])
-
-    writeCalibreMetadata(mountpoint, new Map([['Dune.azw3', ['SF']]]), [{ relpath: 'Dune.azw3', title: 'Dune', size: 1 }])
-
-    expect(readMetadata().map((e) => [e.lpath, e.tags])).toEqual([['documents/Dune.AZW3', ['SF']]])
-  })
 })
 
 describe('accented names (macOS hands back decomposed names)', () => {
-  test('a decomposed device name matches the composed calibre record: tags applied, no duplicate', () => {
+  test('re-uploading under a decomposed name updates the composed record, keeping its collections', () => {
     // Arrange
-    writeMetadata([{ lpath: 'documents/Citt\u00e0.azw3', title: 'Città', uuid: 'u-1', tags: [] }])
+    writeMetadata([{ lpath: 'documents/Citt\u00e0.azw3', title: 'Città', uuid: 'u-1', tags: ['Viaggi'] }])
     const decomposed = 'Citta\u0300.azw3'
 
     // Act
-    const ok = writeCalibreMetadata(mountpoint, new Map([[decomposed, ['Viaggi']]]), [
-      { relpath: decomposed, title: 'Città', size: 1 }
-    ])
+    const ok = upsertCalibreEntry(mountpoint, { relpath: decomposed, title: 'Città', size: 1, uuid: 'u-1' })
 
     // Assert
     expect(ok).toBe(true)

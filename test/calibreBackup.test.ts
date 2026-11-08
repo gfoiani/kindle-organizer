@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
@@ -7,8 +7,7 @@ import {
   describeCalibreBackups,
   removeCalibreEntries,
   restoreCalibreBackup,
-  upsertCalibreEntry,
-  writeCalibreMetadata
+  upsertCalibreEntry
 } from '../src/main/calibre'
 
 let mountpoint: string
@@ -30,21 +29,38 @@ function backups(): string[] {
   return existsSync(backupDir()) ? readdirSync(backupDir()).sort() : []
 }
 
+/** Past the window in which a routine write reuses the last copy (10 minutes). */
+const LATER = 11 * 60 * 1000
+
+/** A routine write: registers a sent book, here re-titling the one record so each write is distinguishable. */
+function sendBook(title: string): boolean {
+  return upsertCalibreEntry(mountpoint, { relpath: 'A.azw3', title, size: 1, uuid: 'uuid-a' })
+}
+
+/** The same write once the last copy has aged out of the window, so it takes a new one. */
+function sendBookLater(title: string): boolean {
+  vi.setSystemTime(Date.now() + LATER)
+  return sendBook(title)
+}
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-08T10:00:00.000Z'))
   mountpoint = mkdtempSync(path.join(tmpdir(), 'kindle-backup-'))
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   rmSync(mountpoint, { recursive: true, force: true })
 })
 
 describe('metadata.calibre backups', () => {
   test('keeps a copy of the previous file before overwriting it', () => {
     // Arrange
-    const before = writeMetadata([{ lpath: 'documents/A.azw3', tags: ['Old'] }])
+    const before = writeMetadata([{ lpath: 'documents/A.azw3', title: 'Old', tags: ['Keep'] }])
 
     // Act
-    writeCalibreMetadata(mountpoint, new Map([['A.azw3', ['New']]]))
+    sendBook('New')
 
     // Assert
     const [copy] = backups()
@@ -53,7 +69,7 @@ describe('metadata.calibre backups', () => {
   })
 
   test('makes no backup when there was no file to overwrite', () => {
-    writeCalibreMetadata(mountpoint, new Map([['A.azw3', ['X']]]), [{ relpath: 'A.azw3', title: 'A', size: 1 }])
+    sendBook('A')
 
     expect(existsSync(metadataPath())).toBe(true)
     expect(backups()).toEqual([])
@@ -63,7 +79,7 @@ describe('metadata.calibre backups', () => {
     writeMetadata([{ lpath: 'documents/A.azw3', tags: [] }])
 
     for (let i = 0; i < CALIBRE_BACKUP_LIMIT + 3; i++) {
-      writeCalibreMetadata(mountpoint, new Map([['A.azw3', [`T${i}`]]]))
+      sendBookLater(`T${i}`)
     }
 
     expect(backups()).toHaveLength(CALIBRE_BACKUP_LIMIT)
@@ -105,7 +121,7 @@ describe('metadata.calibre backups', () => {
     writeFileSync(path.join(mountpoint, '.kindle-organizer'), 'not a folder')
 
     // Act
-    const ok = writeCalibreMetadata(mountpoint, new Map([['A.azw3', ['New']]]))
+    const ok = sendBook('New')
 
     // Assert
     expect(ok).toBe(false)
@@ -113,7 +129,7 @@ describe('metadata.calibre backups', () => {
   })
 })
 
-const tagsIn = (id: string): unknown => JSON.parse(readFileSync(path.join(backupDir(), id), 'utf-8'))[0].tags
+const titleIn = (id: string): unknown => JSON.parse(readFileSync(path.join(backupDir(), id), 'utf-8'))[0].title
 
 describe('describeCalibreBackups', () => {
   test('lists the device backups newest first, by file name and time only', () => {
@@ -132,9 +148,9 @@ describe('describeCalibreBackups', () => {
 describe('restoreCalibreBackup', () => {
   test('restores the chosen copy, older than the latest, and keeps one of what it replaces', () => {
     // Arrange: v1 → v2 → v3, so the backups hold v2 (newest) and v1.
-    writeMetadata([{ lpath: 'documents/A.azw3', tags: ['v1'] }])
-    writeCalibreMetadata(mountpoint, new Map([['A.azw3', ['v2']]]))
-    writeCalibreMetadata(mountpoint, new Map([['A.azw3', ['v3']]]))
+    writeMetadata([{ lpath: 'documents/A.azw3', title: 'v1', tags: [] }])
+    sendBookLater('v2')
+    sendBookLater('v3')
     const [, oldest] = describeCalibreBackups(mountpoint)
 
     // Act
@@ -142,8 +158,8 @@ describe('restoreCalibreBackup', () => {
 
     // Assert
     expect(restored).toEqual({ takenAt: oldest.takenAt })
-    expect(readMetadata()[0].tags).toEqual(['v1'])
-    expect(tagsIn(describeCalibreBackups(mountpoint)[0].id)).toEqual(['v3'])
+    expect(readMetadata()[0].title).toEqual('v1')
+    expect(titleIn(describeCalibreBackups(mountpoint)[0].id)).toEqual('v3')
   })
 
   test('is null for anything that is not one of the device backups, never treating it as a path', () => {
