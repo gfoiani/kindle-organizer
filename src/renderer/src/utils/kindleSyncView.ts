@@ -28,6 +28,17 @@ export interface KindleSyncView {
  */
 export const JAILBREAK_GUIDE_URL = 'https://kindlemodding.org/'
 
+/**
+ * Whether the header offers to install the on-device component. Off until the
+ * installer (an emergency.sh jb.sh runs as root) has been verified on a real
+ * Kindle: until then a jb.sh Kindle is only told the sync is coming.
+ */
+export const KINDLE_SYNC_INSTALL_AVAILABLE = false
+
+export interface DescribeKindleSyncOptions {
+  installAvailable?: boolean
+}
+
 function view(tone: KindleSyncTone, labelKey: string, hint?: Partial<Pick<KindleSyncView, 'hintKey' | 'hintValues'>>): KindleSyncView {
   return {
     tone,
@@ -54,7 +65,10 @@ function describeActive(state: Extract<KindleSyncState, { kind: 'active' }>): Ki
   return view('ok', 'kindleSync.upToDate')
 }
 
-export function describeKindleSync(state: KindleSyncState | null): KindleSyncView | null {
+export function describeKindleSync(
+  state: KindleSyncState | null,
+  { installAvailable = KINDLE_SYNC_INSTALL_AVAILABLE }: DescribeKindleSyncOptions = {}
+): KindleSyncView | null {
   if (state === null) return null
   switch (state.kind) {
     case 'not-jailbroken':
@@ -62,11 +76,13 @@ export function describeKindleSync(state: KindleSyncState | null): KindleSyncVie
     case 'unsupported-jailbreak':
       return { ...view('muted', 'kindleSync.unsupportedJailbreak'), guideUrl: JAILBREAK_GUIDE_URL }
     case 'not-installed':
-      return { ...view('action', 'kindleSync.notInstalled'), opensInstall: true }
+      return installAvailable
+        ? { ...view('action', 'kindleSync.notInstalled'), opensInstall: true }
+        : view('muted', 'kindleSync.installComingSoon')
     case 'install-pending':
       return view('pending', 'kindleSync.installPending')
     case 'install-failed':
-      return { ...view('warning', 'kindleSync.installFailed', { hintValues: { detail: state.detail } }), opensInstall: true }
+      return { ...view('warning', 'kindleSync.installFailed', { hintValues: { detail: state.detail } }), opensInstall: installAvailable }
     case 'first-sync':
       return { ...view('action', 'kindleSync.firstSync'), opensFirstSync: true }
     case 'active':

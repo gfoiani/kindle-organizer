@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-08
+
 ### Added
 
 - **Library folders** — add one or more folders on your computer in *Settings → Library folders* and their books (subfolders included) appear in the library without being copied. The app watches the folders while it is open: a book added, renamed, moved or deleted there shows up in the grid by itself, and a renamed or moved book keeps its link to the copy on the Kindle. The files are never changed or deleted; a folder on a disk that is not plugged in keeps its books until it comes back.
@@ -14,7 +16,7 @@ All notable changes to this project will be documented in this file.
 - **Sort the grid** by title, author or recently added.
 - **Logs** — errors and warnings are written to `main.log`; *Settings → Diagnostics* opens its folder.
 - **Update notice** — a link at the bottom of the sidebar when a newer release is out.
-- **Collections on the Kindle (experimental)** — for a Kindle jailbroken with jb.sh: the header shows whether the Kindle holds the app's collections, and the first time it asks whether to import the collections already on the Kindle or let them go. A Kindle without the jailbreak gets a plain explanation and a link to the community guide; the app never jailbreaks a device. The part that runs on the Kindle and applies the collections at unplug is not included yet.
+- **Collections on the Kindle (experimental)** — for a Kindle jailbroken with jb.sh: the header shows whether the Kindle holds the app's collections, and the first time it asks whether to import the collections already on the Kindle or let them go. A Kindle without the jailbreak gets a plain explanation and a link to the community guide; the app never jailbreaks a device. The part that runs on the Kindle and applies the collections at unplug is still being tested on real devices and is not offered yet: the header tells a jailbroken Kindle that it is coming.
 
 ### Changed
 
@@ -23,7 +25,7 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
-- *Write to Kindle*. It wrote collections into `metadata.calibre` as calibre tags, which a Kindle with firmware 5.x does not read for its collections, so they never appeared on the device. Collections now reach a jailbroken Kindle through the collection sync above; `metadata.calibre` is still updated when books are sent or deleted.
+- *Write to Kindle*. It wrote collections into `metadata.calibre` as calibre tags, which a Kindle with firmware 5.x does not read for its collections, so they never appeared on the device. Collections will reach a jailbroken Kindle through the collection sync above; `metadata.calibre` is still updated when books are sent or deleted.
 - The MOBI conversion option: books are always converted to AZW3 (KF8), which every Kindle reads from the Kindle Keyboard (with its 2012 firmware update) onwards. Kindle 1, 2 and DX are not supported for converted books.
 - Embedded fonts are not carried over into converted books; the Kindle's own fonts are used.
 

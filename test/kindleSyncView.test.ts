@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   describeKindleSync,
+  KINDLE_SYNC_INSTALL_AVAILABLE,
   shouldOfferFirstSync,
   sortKindleCollections
 } from '../src/renderer/src/utils/kindleSyncView'
@@ -43,14 +44,29 @@ describe('describeKindleSync', () => {
     })
   })
 
-  test('a jb.sh Kindle without the sync offers to install it', () => {
-    expect(describeKindleSync({ kind: 'not-installed' })).toMatchObject({
+  test('a jb.sh Kindle without the sync offers to install it once installing is available', () => {
+    expect(describeKindleSync({ kind: 'not-installed' }, { installAvailable: true })).toMatchObject({
       tone: 'action',
       labelKey: 'kindleSync.notInstalled',
       opensInstall: true,
       opensFirstSync: false,
       guideUrl: null
     })
+  })
+
+  test('until installing is available, a jb.sh Kindle is told the sync is coming, with nothing to click', () => {
+    expect(describeKindleSync({ kind: 'not-installed' })).toMatchObject({
+      tone: 'muted',
+      labelKey: 'kindleSync.installComingSoon',
+      opensInstall: false,
+      opensFirstSync: false,
+      guideUrl: null
+    })
+  })
+
+  test('installing is not offered by default: the installer is not verified on a device yet', () => {
+    expect(KINDLE_SYNC_INSTALL_AVAILABLE).toBe(false)
+    expect(describeKindleSync({ kind: 'install-failed', detail: 'x' })?.opensInstall).toBe(false)
   })
 
   test('a staged install asks for the restart, and offers nothing to click', () => {
@@ -63,7 +79,7 @@ describe('describeKindleSync', () => {
   })
 
   test('a failed install says why and offers to try again', () => {
-    expect(describeKindleSync({ kind: 'install-failed', detail: 'cannot start the sync' })).toMatchObject({
+    expect(describeKindleSync({ kind: 'install-failed', detail: 'cannot start the sync' }, { installAvailable: true })).toMatchObject({
       tone: 'warning',
       labelKey: 'kindleSync.installFailed',
       hintValues: { detail: 'cannot start the sync' },
