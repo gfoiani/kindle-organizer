@@ -3,7 +3,8 @@ import { detectKindleDrives, readDocuments, rememberDetectedKindles, requireKind
 import { ejectDrive } from './eject'
 import { AppError } from './appErrors'
 import { readCalibreMetadata, readCalibreIsbnMap, restoreCalibreBackup, describeCalibreBackups } from './calibre'
-import { answerFirstSync, isCalibreImportRetired, refreshKindleSync } from './kindleSync/service'
+import { answerFirstSync, installKindleSync, isCalibreImportRetired, refreshKindleSync } from './kindleSync/service'
+import { componentBinaryPath } from './kindleSync/install'
 import type { FirstSyncAnswer } from './kindleSync/firstSyncAnswers'
 import { deleteDeviceBooks } from './deviceDelete'
 import { checkForUpdate } from './updateCheck'
@@ -209,6 +210,18 @@ export function registerIpcHandlers(folderWatching: LibraryFolderWatching): void
       assertString(mountpoint, 'mountpoint')
       await requireKindleDrive(mountpoint)
       return refreshKindleSync(mountpoint)
+    })
+  )
+
+  // Puts the component and its installer on the Kindle (it runs as root at the
+  // next boot), so the path must be a connected Kindle, and only jb.sh ones.
+  ipcMain.handle(
+    'kindle-sync:install',
+    withErrorLogging('kindle-sync:install', async (_, mountpoint: unknown) => {
+      assertString(mountpoint, 'mountpoint')
+      await requireKindleDrive(mountpoint)
+      const binary = componentBinaryPath({ isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() })
+      return installKindleSync(mountpoint, binary)
     })
   )
 

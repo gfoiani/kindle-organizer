@@ -4,6 +4,7 @@ import type { KindleSyncTone, KindleSyncView } from '../utils/kindleSyncView'
 interface KindleSyncStatusProps {
   view: KindleSyncView
   onOpenFirstSync: () => void
+  onOpenInstall: () => void
 }
 
 const TONE_CLASSES: Record<KindleSyncTone, string> = {
@@ -17,9 +18,10 @@ const TONE_CLASSES: Record<KindleSyncTone, string> = {
 /**
  * The header's collection-sync status, labelled experimental. Its explanation
  * is the tooltip for the mouse and screen-reader text for everyone else; while
- * the first-sync question is due it is a button that opens it.
+ * the first-sync question is due (or the sync can be installed) it is a
+ * button that opens that dialog.
  */
-export function KindleSyncStatus({ view, onOpenFirstSync }: KindleSyncStatusProps) {
+export function KindleSyncStatus({ view, onOpenFirstSync, onOpenInstall }: KindleSyncStatusProps) {
   const { t } = useTranslation()
   const hint = t(view.hintKey, view.hintValues)
   const className = `flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs ${TONE_CLASSES[view.tone]}`
@@ -33,9 +35,9 @@ export function KindleSyncStatus({ view, onOpenFirstSync }: KindleSyncStatusProp
     </>
   )
 
-  if (view.opensFirstSync) {
+  if (view.opensFirstSync || view.opensInstall) {
     return (
-      <button type="button" onClick={onOpenFirstSync} title={hint} className={className}>
+      <button type="button" onClick={view.opensFirstSync ? onOpenFirstSync : onOpenInstall} title={hint} className={className}>
         {content}
       </button>
     )

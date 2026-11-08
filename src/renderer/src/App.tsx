@@ -20,6 +20,7 @@ import { useCollectionActions } from './hooks/useCollectionActions'
 import { useDeviceActions } from './hooks/useDeviceActions'
 import { useKindleSync } from './hooks/useKindleSync'
 import { FirstSyncDialog } from './components/FirstSyncDialog'
+import { InstallSyncDialog } from './components/InstallSyncDialog'
 import { describeKindleSync } from './utils/kindleSyncView'
 import { useLibraryFolderSync } from './hooks/useLibraryFolderSync'
 import { toBookRelpath } from './utils/relpath'
@@ -221,6 +222,7 @@ export function App() {
                 actions={deviceActions}
                 syncView={describeKindleSync(kindleSync.state)}
                 onOpenFirstSync={kindleSync.openFirstSync}
+                onOpenInstall={kindleSync.openInstall}
               />
 
               <BooksGrid
@@ -260,6 +262,14 @@ export function App() {
           isAnswering={kindleSync.isAnswering}
           onAnswer={kindleSync.answerFirstSync}
           onPostpone={kindleSync.postponeFirstSync}
+        />
+      )}
+
+      {kindleSync.isInstallOpen && (
+        <InstallSyncDialog
+          isInstalling={kindleSync.isInstalling}
+          onInstall={kindleSync.install}
+          onCancel={kindleSync.closeInstall}
         />
       )}
 

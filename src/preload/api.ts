@@ -57,6 +57,8 @@ export interface KindleAPI {
   refreshKindleSync: (mountpoint: string) => Promise<KindleSyncState>
   /** Answers the first-sync question (import the Kindle's collections, or discard them), then mirrors. */
   answerFirstSync: (mountpoint: string, answer: FirstSyncAnswer) => Promise<KindleSyncState>
+  /** Stages the collection sync on a jb.sh Kindle; it completes at the Kindle's next restart. */
+  installKindleSync: (mountpoint: string) => Promise<KindleSyncState>
   /** Unmounts and powers down the connected Kindle so it can be safely unplugged. */
   ejectKindle: (mountpoint: string) => Promise<void>
   getLocalCollections: () => Promise<Collection[]>
@@ -185,6 +187,7 @@ export const kindleAPI: KindleAPI = {
   refreshKindleSync: (mountpoint: string) => ipcRenderer.invoke('kindle-sync:refresh', mountpoint),
   answerFirstSync: (mountpoint: string, answer: FirstSyncAnswer) =>
     ipcRenderer.invoke('kindle-sync:answer-first-sync', mountpoint, answer),
+  installKindleSync: (mountpoint: string) => ipcRenderer.invoke('kindle-sync:install', mountpoint),
   ejectKindle: (mountpoint: string) => ipcRenderer.invoke('kindle:eject', mountpoint),
 
   getLocalCollections: () => ipcRenderer.invoke('kindle:get-local-collections'),

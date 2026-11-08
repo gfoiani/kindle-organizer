@@ -16,6 +16,8 @@ export interface KindleSyncView {
   hintValues: Record<string, string | number>
   /** The status is a button that opens the first-sync question. */
   opensFirstSync: boolean
+  /** The status is a button that offers to install the sync on this Kindle. */
+  opensInstall: boolean
   /** The community jailbreak guide, linked while the jailbreak is what is missing; otherwise null. */
   guideUrl: string | null
 }
@@ -33,6 +35,7 @@ function view(tone: KindleSyncTone, labelKey: string, hint?: Partial<Pick<Kindle
     hintKey: hint?.hintKey ?? `${labelKey}Hint`,
     hintValues: hint?.hintValues ?? {},
     opensFirstSync: false,
+    opensInstall: false,
     guideUrl: null
   }
 }
@@ -59,7 +62,11 @@ export function describeKindleSync(state: KindleSyncState | null): KindleSyncVie
     case 'unsupported-jailbreak':
       return { ...view('muted', 'kindleSync.unsupportedJailbreak'), guideUrl: JAILBREAK_GUIDE_URL }
     case 'not-installed':
-      return view('muted', 'kindleSync.notInstalled')
+      return { ...view('action', 'kindleSync.notInstalled'), opensInstall: true }
+    case 'install-pending':
+      return view('pending', 'kindleSync.installPending')
+    case 'install-failed':
+      return { ...view('warning', 'kindleSync.installFailed', { hintValues: { detail: state.detail } }), opensInstall: true }
     case 'first-sync':
       return { ...view('action', 'kindleSync.firstSync'), opensFirstSync: true }
     case 'active':

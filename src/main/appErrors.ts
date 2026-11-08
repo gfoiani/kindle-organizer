@@ -28,6 +28,9 @@ export type AppErrorCode =
   | 'LIBRARY_FOLDER_BOOK'
   | 'KINDLE_SYNC_NOT_INSTALLED'
   | 'KINDLE_SYNC_EXPORT_UNREADABLE'
+  | 'KINDLE_SYNC_NOT_SUPPORTED'
+  | 'KINDLE_SYNC_COMPONENT_MISSING'
+  | 'KINDLE_SYNC_EMERGENCY_IN_USE'
 
 /** An error whose message is a stable code the renderer can translate. */
 export class AppError extends Error {

@@ -12,10 +12,10 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "dist": "electron-vite build && electron-builder",
-    "dist:mac": "electron-vite build && electron-builder --mac",
-    "dist:win": "electron-vite build && electron-builder --win",
-    "dist:linux": "electron-vite build && electron-builder --linux",
+    "dist": "yarn build:component && electron-vite build && electron-builder",
+    "dist:mac": "yarn build:component && electron-vite build && electron-builder --mac",
+    "dist:win": "yarn build:component && electron-vite build && electron-builder --win",
+    "dist:linux": "yarn build:component && electron-vite build && electron-builder --linux",
     "preview": "electron-vite preview",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "fix-electron": "node node_modules/electron/install.js",
@@ -24,7 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:component": "cd component && go vet ./... && go test -cover ./...",
-    "build:component": "cd component && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags \"-s -w\" -o dist/kosync-linux-armv7 ./cmd/kosync",
+    "build:component": "node scripts/build-component.mjs",
     "download-model": "node scripts/download-model.mjs",
     "update-homebrew": "tsx scripts/update-homebrew.mts",
     "release": "tsx scripts/release.mts"
@@ -88,7 +88,11 @@
       "!**/node_modules/better-sqlite3/bin/**"
     ],
     "extraResources": [
-      "THIRD_PARTY_NOTICES.md"
+      "THIRD_PARTY_NOTICES.md",
+      {
+        "from": "component/dist/kosync-linux-armv7",
+        "to": "kindle-sync/kosync"
+      }
     ],
     "directories": {
       "buildResources": "assets",

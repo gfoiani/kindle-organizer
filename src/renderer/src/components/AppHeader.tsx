@@ -16,6 +16,7 @@ interface AppHeaderProps {
   /** The connected Kindle's collection-sync status; null hides it. */
   syncView: KindleSyncView | null
   onOpenFirstSync: () => void
+  onOpenInstall: () => void
 }
 
 const SPIN_PATH =
@@ -33,7 +34,7 @@ const PLAIN_BUTTON =
   'flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-md text-sm text-gray-300 transition-colors disabled:opacity-50'
 
 /** The grid's header: what is shown, the collection-sync status and the device actions (eject, refresh). */
-export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions, syncView, onOpenFirstSync }: AppHeaderProps) {
+export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions, syncView, onOpenFirstSync, onOpenInstall }: AppHeaderProps) {
   const { t } = useTranslation()
   const { isEjecting } = actions
 
@@ -50,7 +51,7 @@ export function AppHeader({ title, kindle, isRefreshing, onRefresh, actions, syn
         </div>
 
         <div className="flex items-center gap-2 min-w-0">
-          {kindle && syncView && <KindleSyncStatus view={syncView} onOpenFirstSync={onOpenFirstSync} />}
+          {kindle && syncView && <KindleSyncStatus view={syncView} onOpenFirstSync={onOpenFirstSync} onOpenInstall={onOpenInstall} />}
 
           {kindle && (
             <button

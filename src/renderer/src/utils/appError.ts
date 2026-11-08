@@ -21,7 +21,10 @@ const CODE_MESSAGE_KEYS: Record<AppErrorCode, string> = {
   LIBRARY_FILE_MISSING: 'errors.libraryFileMissing',
   LIBRARY_FOLDER_BOOK: 'errors.libraryFolderBook',
   KINDLE_SYNC_NOT_INSTALLED: 'errors.kindleSyncNotInstalled',
-  KINDLE_SYNC_EXPORT_UNREADABLE: 'errors.kindleSyncExportUnreadable'
+  KINDLE_SYNC_EXPORT_UNREADABLE: 'errors.kindleSyncExportUnreadable',
+  KINDLE_SYNC_NOT_SUPPORTED: 'errors.kindleSyncNotSupported',
+  KINDLE_SYNC_COMPONENT_MISSING: 'errors.kindleSyncComponentMissing',
+  KINDLE_SYNC_EMERGENCY_IN_USE: 'errors.kindleSyncEmergencyInUse'
 }
 
 /**

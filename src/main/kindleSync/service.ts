@@ -4,6 +4,7 @@ import { ensureCollectionsContain, getCollectionBooks, getCollections } from '..
 import { readDeviceExportFile, readDeviceStatusFile, writeDesiredState } from './deviceFiles'
 import { getFirstSyncAnswer, recordFirstSyncAnswer, type FirstSyncAnswer } from './firstSyncAnswers'
 import { planKindleImport } from './importPlan'
+import { readInstallProgress, stageInstall } from './install'
 import { detectJailbreak } from './jailbreak'
 import { planKindleCollections, type AppCollectionMembers } from './plan'
 import { desiredHash, serializeDesired, type DeviceExport, type DeviceStatus, type SyncMode } from './syncFiles'
@@ -25,6 +26,10 @@ export type KindleSyncState =
   | { kind: 'not-jailbroken' }
   | { kind: 'unsupported-jailbreak' }
   | { kind: 'not-installed' }
+  /** The component and its installer are on the Kindle; a restart completes the install. */
+  | { kind: 'install-pending' }
+  /** The installer ran and stopped; `detail` is its own reason. */
+  | { kind: 'install-failed'; detail: string }
   /** `kindleCollections` is null when the device's export cannot be read. */
   | { kind: 'first-sync'; status: DeviceStatus; kindleCollections: KindleCollectionSummary[] | null }
   /** `upToDate`: the last run applied exactly the collections the app wants now. */
@@ -38,8 +43,25 @@ async function probe(mountpoint: string): Promise<Probe> {
   if (jailbreak.kind === 'none') return { kind: 'blocked', state: { kind: 'not-jailbroken' } }
   if (jailbreak.kind === 'unsupported') return { kind: 'blocked', state: { kind: 'unsupported-jailbreak' } }
   const status = await readDeviceStatusFile(mountpoint)
-  if (status === null) return { kind: 'blocked', state: { kind: 'not-installed' } }
-  return { kind: 'installed', status }
+  if (status !== null) return { kind: 'installed', status }
+  return { kind: 'blocked', state: await installState(mountpoint) }
+}
+
+async function installState(mountpoint: string): Promise<KindleSyncState> {
+  const progress = await readInstallProgress(mountpoint)
+  if (progress.kind === 'pending') return { kind: 'install-pending' }
+  if (progress.kind === 'failed') return { kind: 'install-failed', detail: progress.detail }
+  return { kind: 'not-installed' }
+}
+
+/**
+ * Stages the component on a jb.sh Kindle (see install.ts); the install
+ * completes when the Kindle restarts. Any other Kindle is refused untouched.
+ */
+export async function installKindleSync(mountpoint: string, binaryPath: string): Promise<KindleSyncState> {
+  if ((await detectJailbreak(mountpoint)).kind !== 'jbsh') throw new AppError('KINDLE_SYNC_NOT_SUPPORTED')
+  await stageInstall(mountpoint, binaryPath)
+  return refreshKindleSync(mountpoint)
 }
 
 async function deviceRelpaths(mountpoint: string): Promise<string[]> {

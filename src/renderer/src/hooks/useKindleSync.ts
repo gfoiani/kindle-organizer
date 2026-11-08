@@ -19,6 +19,12 @@ export interface KindleSync {
   /** "Later": closes the question and stops offering it by itself for this Kindle. */
   postponeFirstSync: () => void
   answerFirstSync: (answer: FirstSyncAnswer) => Promise<void>
+  isInstallOpen: boolean
+  isInstalling: boolean
+  openInstall: () => void
+  closeInstall: () => void
+  /** Stages the sync on the Kindle; the header then asks for the restart. */
+  install: () => Promise<void>
 }
 
 interface KindleSyncOptions {
@@ -49,6 +55,8 @@ export function useKindleSync({
   const [state, setState] = useState<KindleSyncState | null>(null)
   const [isAnswering, setIsAnswering] = useState(false)
   const [isFirstSyncRequested, setIsFirstSyncRequested] = useState(false)
+  const [isInstallOpen, setIsInstallOpen] = useState(false)
+  const [isInstalling, setIsInstalling] = useState(false)
   const [postponedDeviceIds, setPostponedDeviceIds] = useState<ReadonlySet<string>>(() => new Set())
   // Refreshes and answers may overlap; only the newest reply may land.
   const [gate] = useState(createLatestGate)
@@ -101,8 +109,34 @@ export function useKindleSync({
 
   const openFirstSync = useCallback(() => setIsFirstSyncRequested(true), [])
 
+  const install = useCallback(async (): Promise<void> => {
+    if (mountpoint === null) return
+    setIsInstalling(true)
+    const isLatest = gate.begin()
+    const outcome = await run('errors.kindleSyncInstall', () => window.kindleAPI.installKindleSync(mountpoint))
+    setIsInstalling(false)
+    if (!outcome.ok) return
+    if (isLatest()) setState(outcome.value)
+    setIsInstallOpen(false)
+  }, [mountpoint, gate, run])
+
+  const openInstall = useCallback(() => setIsInstallOpen(true), [])
+  const closeInstall = useCallback(() => setIsInstallOpen(false), [])
+
   const isFirstSyncOpen =
     state?.kind === 'first-sync' && (isFirstSyncRequested || shouldOfferFirstSync(state, postponedDeviceIds))
 
-  return { state, isFirstSyncOpen, isAnswering, openFirstSync, postponeFirstSync, answerFirstSync }
+  return {
+    state,
+    isFirstSyncOpen,
+    isAnswering,
+    openFirstSync,
+    postponeFirstSync,
+    answerFirstSync,
+    isInstallOpen: isInstallOpen && mountpoint !== null,
+    isInstalling,
+    openInstall,
+    closeInstall,
+    install
+  }
 }

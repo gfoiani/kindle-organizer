@@ -313,7 +313,11 @@
     "ejectBusy": "Il Kindle è ancora in uso: chiudi eventuali file aperti dal dispositivo e riprova.",
     "ejectFailed": "Impossibile espellere il Kindle. Riprova; se persiste, espellilo dal Finder.",
     "kindleSyncRefresh": "Impossibile preparare le collezioni per il Kindle.",
-    "kindleSyncAnswer": "Impossibile salvare la scelta sulle collezioni del Kindle."
+    "kindleSyncAnswer": "Impossibile salvare la scelta sulle collezioni del Kindle.",
+    "kindleSyncNotSupported": "La sincronizzazione delle collezioni funziona solo su un Kindle con il jailbreak jb.sh.",
+    "kindleSyncComponentMissing": "Il programma per il Kindle non è incluso in questa versione dell'app.",
+    "kindleSyncEmergencyInUse": "Sul Kindle c'è già un file emergency.sh di un altro programma: l'app non lo sovrascrive. Lascia che venga eseguito (riavvia il Kindle) o toglilo, poi riprova.",
+    "kindleSyncInstall": "Impossibile installare la sincronizzazione sul Kindle."
   },
   "kindleSync": {
     "experimental": "sperimentale",
@@ -324,7 +328,7 @@
     "jailbreakGuide": "Come fare il jailbreak",
     "jailbreakGuideHint": "Apre la guida della community KindleModding nel browser. Il jailbreak si fa a proprio rischio e l'app non lo esegue: si limita a riconoscerlo.",
     "notInstalled": "Collezioni Kindle: sincronizzazione non installata",
-    "notInstalledHint": "Il Kindle ha il jailbreak giusto, ma la sincronizzazione delle collezioni non è ancora installata.",
+    "notInstalledHint": "Il Kindle ha il jailbreak giusto. Clicca per installare la sincronizzazione delle collezioni.",
     "firstSync": "Collezioni Kindle: scegli come iniziare",
     "firstSyncHint": "Prima della prima sincronizzazione, scegli se importare nell'app le collezioni che sono già sul Kindle.",
     "upToDate": "Collezioni Kindle aggiornate",
@@ -353,6 +357,19 @@
       "start": "Inizia la sincronizzazione",
       "later": "Più tardi",
       "working": "Attendi..."
+    },
+    "installPending": "Collezioni Kindle: riavvia il Kindle per completare l'installazione",
+    "installPendingHint": "Espelli il Kindle e riavvialo (Impostazioni → Opzioni dispositivo → Riavvia): l'installazione si completa all'avvio.",
+    "installFailed": "Collezioni Kindle: installazione non riuscita",
+    "installFailedHint": "L'installazione sul Kindle si è fermata: {{detail}}. Clicca per riprovare.",
+    "install": {
+      "title": "Installa la sincronizzazione delle collezioni",
+      "intro": "L'app copia sul Kindle un piccolo programma che, ogni volta che stacchi il cavo, applica al Kindle le collezioni dell'app.",
+      "restart": "Dopo l'installazione espelli il Kindle e riavvialo una volta: il programma si installa da solo all'avvio.",
+      "risk": "È sperimentale e gira con i permessi di sistema del jailbreak. Non tocca i libri, ma lo installi a tuo rischio. Per ora la disinstallazione non è disponibile dall'app.",
+      "confirm": "Installa",
+      "cancel": "Annulla",
+      "working": "Copia in corso…"
     }
   }
 }

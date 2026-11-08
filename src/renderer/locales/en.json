@@ -313,7 +313,11 @@
     "ejectBusy": "The Kindle is still in use — close any files still open from the device and try again.",
     "ejectFailed": "Could not eject the Kindle. Try again; if it persists, eject it from the Finder.",
     "kindleSyncRefresh": "Could not prepare the collections for the Kindle.",
-    "kindleSyncAnswer": "Could not save your choice about the Kindle's collections."
+    "kindleSyncAnswer": "Could not save your choice about the Kindle's collections.",
+    "kindleSyncNotSupported": "Collection sync only works on a Kindle with the jb.sh jailbreak.",
+    "kindleSyncComponentMissing": "The Kindle program is not included in this version of the app.",
+    "kindleSyncEmergencyInUse": "The Kindle already has an emergency.sh from another program, and the app will not overwrite it. Let it run (restart the Kindle) or remove it, then try again.",
+    "kindleSyncInstall": "Could not install collection sync on the Kindle."
   },
   "kindleSync": {
     "experimental": "experimental",
@@ -324,7 +328,7 @@
     "jailbreakGuide": "How to jailbreak",
     "jailbreakGuideHint": "Opens the KindleModding community guide in your browser. You jailbreak at your own risk, and the app never does it for you: it only recognizes it.",
     "notInstalled": "Kindle collections: sync not installed",
-    "notInstalledHint": "This Kindle has the right jailbreak, but collection sync is not installed on it yet.",
+    "notInstalledHint": "This Kindle has the right jailbreak. Click to install collection sync.",
     "firstSync": "Kindle collections: choose how to start",
     "firstSyncHint": "Before the first sync, choose whether to import the collections already on the Kindle into the app.",
     "upToDate": "Kindle collections up to date",
@@ -353,6 +357,19 @@
       "start": "Start syncing",
       "later": "Later",
       "working": "Please wait..."
+    },
+    "installPending": "Kindle collections: restart the Kindle to finish installing",
+    "installPendingHint": "Eject the Kindle and restart it (Settings → Device Options → Restart): the install finishes as it starts up.",
+    "installFailed": "Kindle collections: install failed",
+    "installFailedHint": "The install on the Kindle stopped: {{detail}}. Click to try again.",
+    "install": {
+      "title": "Install collection sync",
+      "intro": "The app copies a small program to the Kindle that applies the app's collections to it every time you unplug the cable.",
+      "restart": "After installing, eject the Kindle and restart it once: the program installs itself as it starts up.",
+      "risk": "It is experimental and runs with the jailbreak's system rights. It never touches your books, but you install it at your own risk. Uninstalling from the app is not available yet.",
+      "confirm": "Install",
+      "cancel": "Cancel",
+      "working": "Copying…"
     }
   }
 }

@@ -47,6 +47,15 @@ jobs:
       - name: Test
         run: yarn test
 
+      - name: Setup Go (Kindle sync component)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: component/go.mod
+          cache-dependency-path: component/go.sum
+
+      - name: Test the Kindle sync component
+        run: yarn test:component
+
   build-mac:
     name: Build macOS (DMG)
     runs-on: macos-latest
@@ -74,6 +83,12 @@ jobs:
 
       - name: Download AI model
         run: yarn download-model
+
+      - name: Setup Go (Kindle sync component)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: component/go.mod
+          cache-dependency-path: component/go.sum
 
       - name: Build & package
         # --publish never: electron-builder only builds; the "release" job below is
@@ -128,6 +143,12 @@ jobs:
       - name: Download AI model
         run: yarn download-model
 
+      - name: Setup Go (Kindle sync component)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: component/go.mod
+          cache-dependency-path: component/go.sum
+
       - name: Build & package
         # --publish never: build only; the "release" job is the single publisher.
         # To sign, add Windows creds as GitHub Secrets and pass CSC_LINK / CSC_KEY_PASSWORD as env.
@@ -167,6 +188,12 @@ jobs:
 
       - name: Download AI model
         run: yarn download-model
+
+      - name: Setup Go (Kindle sync component)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: component/go.mod
+          cache-dependency-path: component/go.sum
 
       - name: Build & package
         # --publish never: build only; the "release" job is the single publisher.
