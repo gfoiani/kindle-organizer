@@ -109,7 +109,7 @@ snapshot() {
 
 # /mnt/us is mounted read-write on the device, i.e. not exported over USB.
 us_is_mine() {
-  grep -qE ' /mnt/us [a-z0-9]+ rw' /proc/mounts
+  grep -qE ' /mnt/us [a-z0-9.]+ rw' /proc/mounts
 }
 
 watch_events() {
