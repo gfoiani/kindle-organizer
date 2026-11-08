@@ -31,6 +31,9 @@
   - It opens by itself once per Kindle per session. "Later" closes it, and the header status reopens it.
   - Deleting the Kindle's collections takes two clicks. A Kindle with no collections gets a single "Start syncing" button.
 - **No install button yet:** the install channel and the component are Phase 3. The status says "not installed" and does not offer an action that cannot work.
+- **Component runtime: Go**, chosen by the user on 2026-11-08: a static `GOARCH=arm GOARM=7 CGO_ENABLED=0` binary, standard library only, reading `cc.db` through the device's own `sqlite3`. Shell only for `emergency.sh` and the upstart job.
+- **Jailbreak guide, not jailbreak**, agreed with the user on 2026-11-08: the app never jailbreaks a device. A Kindle without jb.sh, or with another jailbreak, gets a link to kindlemodding.org next to the status, described as optional and at the user's own risk.
+- **Landing page on a branch**: `../site` deploys from `main` and describes the latest release, which still has *Write to Kindle*. The new wording sits on the site's `feat/kindle-collections-sync` branch, to merge when the release ships.
 - **Import names**, as stated in the design's "Calls I made":
   - " / " becomes " - " in imported names.
   - A name that matches an existing app collection, ignoring case, joins that collection.
@@ -50,6 +53,8 @@
 | 9 | `status.json` gains `appliedDesired`; the `active` state reports `upToDate` | `52ba7b3`: 9 failed; field dropped / not required, no `upToDate` | `2250d82`: 59 passed; type-check clean |
 | 10 | Header status rules (`describeKindleSync`), auto-open of the first-sync question, Kindle collections sorted | `4ebfc58`: compile-time, `Cannot find module …/utils/kindleSyncView` | `a54901a`: 17 passed; type-check clean |
 | 11 | UI wiring: `useKindleSync`, `KindleSyncStatus`, `FirstSyncDialog`, IT/EN strings | — (no renderer component tests in this repo) | `d5c99d1`: type-check clean; suite 691 passed; `yarn dev` with the real Kindle shows "Collezioni Kindle: sincronizzazione non installata · SPERIMENTALE", and `/Volumes/Kindle/kindle-organizer` was not created |
+| 12 | The status links the jailbreak guide only for a Kindle without jb.sh or with another jailbreak (`guideUrl`) | `3aca4ce`: 4 failed, 14 passed; `guideUrl` undefined | `e160f54`: 18 passed; type-check clean |
+| 13 | `writeCalibreMetadata` removed; backup rules exercised through the writers that remain, with a fake clock | — (refactor). `367cb7a`: reworked tests 31 passed with the function still present | `146c535`: type-check clean; suite 681 passed (59 files) |
 
 ## Test specification
 
@@ -71,6 +76,8 @@
 | 14 | `appliedDesired` must be `null` or sha256 hex | `kindleSyncFiles.test.ts` | unit | PASS |
 | 15 | Header status: muted explanation without the sync; action while the first sync is due; a failed run wins, with or without the device message; books not yet indexed are counted; otherwise pending or up to date | `test/kindleSyncView.test.ts` | unit | PASS (17) |
 | 16 | The first-sync question opens by itself once per Kindle, not after "Later", and never when it is not due | `kindleSyncView.test.ts`: `shouldOfferFirstSync` | unit | PASS |
+| 17 | The jailbreak guide (kindlemodding.org) is linked only while the jailbreak is what is missing: never once installed, in the first-sync state or after a run | `kindleSyncView.test.ts` | unit | PASS |
+| 18 | `metadata.calibre` backups: a copy before every overwrite, none without a file, at most 10, a routine burst keeps the pre-burst file, no write when the copy fails, restore of an older copy is undoable — via `upsertCalibreEntry` / `removeCalibreEntries` / `restoreCalibreBackup` | `calibreBackup.test.ts` | unit (fs) | PASS |
 
 ## Coverage and known gaps
 
@@ -92,10 +99,13 @@ Not done yet:
 - **UI:** done except the install button, which waits for the install channel.
   - The first-sync dialog was not seen running: it needs a `status.json` on the device, and nothing was written to the real Kindle.
   - Likewise for the "up to date", "pending" and "failed" states.
-- **Landing page (`../site`):** the old claim "Sincronizzazione Kindle — scrivi le tue collezioni direttamente sul dispositivo" has not been replaced yet.
-- **Install channel and on-device component:** Phase 3. The runtime choice (shell or Go) is still open.
-- **Dead code:** `writeCalibreMetadata` has no callers in the app any more.
-  - Removing it means reworking the backup tests in `calibreBackup.test.ts`. They use it as a non-routine writer: the 10-copy limit and restore order.
-  - That is a separate refactor.
+- **Claims (fourth session):** fixed in About (`about.feature3`), README and CHANGELOG. The landing page change waits on the site's `feat/kindle-collections-sync` branch for the release.
+- **Install channel and on-device component:** Phase 3, in Go (decided 2026-11-08). Not started.
+- **Jailbreak guide link:** not seen running. The test Kindle has jb.sh, so it shows "not installed", where the link does not appear.
 - **Not tested:** the React components and `useKindleSync`. Vitest runs in node here, with no jsdom or Testing Library. Their rules live in `kindleSyncView.ts`, which is tested; the wiring is covered by type-check and one `yarn dev` run.
 - **On the real Kindle:** only jailbreak detection, read-only. Nothing has been written to the device yet.
+
+Fourth session (2026-11-08) coverage, `npx vitest run … --coverage`:
+- `kindleSyncView.ts`: 100% statements, branches and lines.
+- `calibre.ts`: 84.6% statements, 79.8% branches. `calibreBackup.ts`: 91.9% / 87.5%. The uncovered lines are log-only error paths.
+- Full suite: 681 passed, 59 files. 691 − 13 `writeCalibreMetadata` tests + 2 moved to `upsertCalibreEntry` + 1 for the guide link.
