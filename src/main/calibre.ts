@@ -1,7 +1,6 @@
 import * as fs from 'fs-extra'
 import path from 'path'
-import { randomUUID } from 'crypto'
-import { canonicalBookKey, foldRelpath, isDocumentsRelpath, stripDocumentsPrefix } from './paths'
+import { canonicalBookKey, foldRelpath, stripDocumentsPrefix } from './paths'
 import { backupCalibreMetadata, hasRecentCalibreBackup, listCalibreBackups } from './calibreBackup'
 
 export { CALIBRE_BACKUP_LIMIT, describeCalibreBackups, type CalibreBackupSummary } from './calibreBackup'
@@ -94,15 +93,6 @@ function writeEntryArray(metadataPath: string, entries: unknown[], routine = fal
   }
 }
 
-/** What the app knows about a book that is already in the device's `documents/`. */
-export interface DeviceBookInfo {
-  /** Path under `documents/` — the same key `bookTagMap` uses. */
-  relpath: string
-  title: string
-  author?: string
-  size: number
-}
-
 /** MIME types calibre records for the formats a Kindle reads. */
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   azw3: 'application/x-mobi8-ebook',
@@ -130,54 +120,6 @@ function entryRelpath(entry: unknown): string | undefined {
 }
 
 /**
- * Writes updated tags back to `metadata.calibre` on the Kindle.
- *
- * The write is authoritative for every book the app knows about: any book whose
- * relpath appears in `bookTagMap` has its `tags` set to that exact array — which
- * includes books removed from all collections (seeded with `[]` by the caller),
- * so de-tagging actually clears the tag on the device. Books the app does NOT
- * know about (absent from the map) keep their existing tags untouched.
- *
- * Calibre is not required: a book in a collection that the file does not list
- * (copied by hand, or on a Kindle calibre never touched — then there is no file
- * at all) gets a calibre-shaped record built from `deviceBooks`. Nothing is
- * created when no book is in any collection, and a file that exists but cannot
- * be parsed is still left untouched.
- *
- * Returns true if the device now reflects the map.
- */
-export function writeCalibreMetadata(
-  mountpoint: string,
-  bookTagMap: Map<string, string[]>,
-  deviceBooks: readonly DeviceBookInfo[] = []
-): boolean {
-  const metadataPath = getMetadataPath(mountpoint)
-  const exists = fs.existsSync(metadataPath)
-  const entries = exists ? readEntryArray(metadataPath) : []
-  if (!entries) return false
-
-  const tagsByFoldedPath = new Map([...bookTagMap].map(([relpath, tags]) => [foldRelpath(relpath), tags]))
-  const updated = entries.map((entry) => {
-    const relpath = entryRelpath(entry)
-    const tags =
-      relpath === undefined ? undefined : (bookTagMap.get(relpath) ?? tagsByFoldedPath.get(foldRelpath(relpath)))
-    return tags !== undefined ? { ...(entry as Record<string, unknown>), tags } : entry
-  })
-
-  const listed = new Set(entries.flatMap((entry) => entryRelpath(entry) ?? []).map(foldRelpath))
-  const added = deviceBooks.flatMap((book) => {
-    const relpath = toPosixRelpath(book.relpath)
-    const tags = bookTagMap.get(book.relpath)
-    if (!tags || tags.length === 0 || listed.has(foldRelpath(relpath)) || !isDocumentsRelpath(relpath)) return []
-    const input = { ...book, relpath, mime: calibreMimeType(relpath), uuid: randomUUID() }
-    return [{ ...buildEntry(input, relpath, undefined), tags }]
-  })
-
-  if (!exists && added.length === 0) return true
-  return writeEntryArray(metadataPath, [...updated, ...added])
-}
-
-/**
  * Puts back the backup of `metadata.calibre` named `id` (one of
  * `describeCalibreBackups`). The file it replaces is backed up in turn, so a
  * restore can itself be undone by choosing that copy. `id` comes from the
@@ -202,8 +144,7 @@ export function restoreCalibreBackup(mountpoint: string, id: string): { takenAt:
  * nothing to drop; a file that will not parse is left untouched (false).
  *
  * A routine write: restoring a copy cannot bring a deleted book back, so books
- * deleted one at a time must not push older copies (the ones taken before a
- * collections write) out of the backup window.
+ * deleted one at a time must not push older copies out of the backup window.
  */
 export function removeCalibreEntries(mountpoint: string, relpaths: readonly string[]): boolean {
   const metadataPath = getMetadataPath(mountpoint)
@@ -367,8 +308,9 @@ function buildEntry(
     title_sort: input.title,
     authors: [author],
     author_sort: toAuthorSort(author),
-    // Tags ARE collections for this app (see writeCalibreMetadata) — a re-upload
-    // must not silently drop the book out of every collection it belongs to.
+    // Tags are the collections calibre (and, on a Kindle without the jb.sh
+    // jailbreak, this app's import) reads — a re-upload must not silently drop
+    // the book out of every collection it belongs to.
     tags: keepStringArray(existing, 'tags'),
     device_collections: keepStringArray(existing, 'device_collections'),
     uuid: input.uuid,
