@@ -36,12 +36,55 @@ function commands(script: string): string[] {
     .filter((line) => line !== '' && !line.startsWith('#'))
 }
 
-describe('installerScript', () => {
-  test('deletes itself before doing anything else, so it can never run at every boot', () => {
-    const [first, second] = commands(installerScript())
+/** The installer as it runs from a Kindle, with its device paths moved under `root`. */
+function sandboxedInstaller(root: string): string {
+  return installerScript()
+    .replaceAll('/mnt/us/', `${root}/us/`)
+    .replaceAll('/tmp/kindle-organizer-installer.sh', `${root}/installer-copy.sh`)
+    .replaceAll('/var/local/kindle-organizer', `${root}/var-local`)
+    .replaceAll('/etc/upstart/', `${root}/upstart/`)
+}
 
-    expect(first).toMatch(/^SELF=\/mnt\/us\/emergency\.sh$/)
-    expect(second).toBe('rm -f "$SELF"')
+describe('installerScript', () => {
+  test('starts with one bootstrap block that copies it to /tmp and deletes the original before anything else', () => {
+    // busybox sh reads a script while running it: on a KT5 nothing after
+    // deleting /mnt/us/emergency.sh ran. An if-block is parsed whole before it
+    // runs, so the copy, the delete and the hand-off all happen from memory.
+    const lines = commands(installerScript())
+    const blockStart = lines.findIndex((line) => line.startsWith('if '))
+    const blockEnd = lines.indexOf('fi')
+    const beforeBlock = lines.slice(0, blockStart)
+    const block = lines.slice(blockStart, blockEnd + 1)
+
+    expect(beforeBlock.every((line) => /^[A-Z_]+=\S+$/.test(line))).toBe(true)
+    expect(block[0]).toBe('if [ "$0" != "$RUN" ]; then')
+    expect(block).toContain('cp "$SELF" "$RUN"')
+    expect(block).toContain('rm -f "$SELF"')
+    expect(block.indexOf('cp "$SELF" "$RUN"')).toBeLessThan(block.indexOf('rm -f "$SELF"'))
+    expect(block).toContain('exec /bin/sh "$RUN"')
+    expect(lines).toContain('SELF=/mnt/us/emergency.sh')
+    expect(lines).toContain('RUN=/tmp/kindle-organizer-installer.sh')
+  })
+
+  test('run as jb.sh runs it, it deletes emergency.sh, carries on from the copy, and logs the outcome', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'installer-run-'))
+    try {
+      mkdirSync(path.join(root, 'us'))
+      const self = path.join(root, 'us', 'emergency.sh')
+      writeFileSync(self, sandboxedInstaller(root))
+
+      const run = spawnSync('/bin/sh', [self], { cwd: root, encoding: 'utf8' })
+
+      expect(run.status).toBe(1)
+      expect(existsSync(self)).toBe(false)
+      expect(existsSync(path.join(root, 'installer-copy.sh'))).toBe(false)
+      // No component was staged: the copy reached the install and stopped at its first check.
+      expect(readFileSync(path.join(root, 'us', 'kindle-organizer', 'install.log'), 'utf8')).toBe(
+        'FAILED: the component is missing from kindle-organizer/component\n'
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test('is a valid shell script carrying the app’s marker', () => {
