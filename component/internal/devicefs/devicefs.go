@@ -57,6 +57,22 @@ func (d Dir) WriteExport(export any) error {
 	return d.writeJSON("export.json", export)
 }
 
+// MaxLogBytes bounds the log.txt copy users attach to a bug report.
+const MaxLogBytes = 256 << 10
+
+// WriteLog publishes the newest MaxLogBytes of the component's log as log.txt.
+// The log itself lives off the USB partition: a file kept open on /mnt/us
+// would stop the Kindle from exporting it over USB.
+func (d Dir) WriteLog(log []byte) error {
+	if len(log) > MaxLogBytes {
+		log = log[len(log)-MaxLogBytes:]
+	}
+	if err := os.MkdirAll(d.Root, 0o755); err != nil {
+		return err
+	}
+	return writeAtomically(filepath.Join(d.Root, "log.txt"), log)
+}
+
 func (d Dir) writeJSON(name string, value any) error {
 	raw, err := json.Marshal(value)
 	if err != nil {

@@ -23,6 +23,8 @@
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:component": "cd component && go vet ./... && go test -cover ./...",
+    "build:component": "cd component && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags \"-s -w\" -o dist/kosync-linux-armv7 ./cmd/kosync",
     "download-model": "node scripts/download-model.mjs",
     "update-homebrew": "tsx scripts/update-homebrew.mts",
     "release": "tsx scripts/release.mts"

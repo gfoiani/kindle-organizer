@@ -34,3 +34,6 @@ src/renderer/public/models/
 .nvmrc
 .python-version
 .env.env
+
+# Kindle sync component build output
+component/dist/
