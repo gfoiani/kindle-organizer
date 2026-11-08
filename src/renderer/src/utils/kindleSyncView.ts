@@ -16,7 +16,15 @@ export interface KindleSyncView {
   hintValues: Record<string, string | number>
   /** The status is a button that opens the first-sync question. */
   opensFirstSync: boolean
+  /** The community jailbreak guide, linked while the jailbreak is what is missing; otherwise null. */
+  guideUrl: string | null
 }
+
+/**
+ * Where jb.sh and its install steps are documented. The app only links to it:
+ * the jailbreak itself is the user's choice and is never performed by the app.
+ */
+export const JAILBREAK_GUIDE_URL = 'https://kindlemodding.org/'
 
 function view(tone: KindleSyncTone, labelKey: string, hint?: Partial<Pick<KindleSyncView, 'hintKey' | 'hintValues'>>): KindleSyncView {
   return {
@@ -24,7 +32,8 @@ function view(tone: KindleSyncTone, labelKey: string, hint?: Partial<Pick<Kindle
     labelKey,
     hintKey: hint?.hintKey ?? `${labelKey}Hint`,
     hintValues: hint?.hintValues ?? {},
-    opensFirstSync: false
+    opensFirstSync: false,
+    guideUrl: null
   }
 }
 
@@ -46,9 +55,9 @@ export function describeKindleSync(state: KindleSyncState | null): KindleSyncVie
   if (state === null) return null
   switch (state.kind) {
     case 'not-jailbroken':
-      return view('muted', 'kindleSync.needsJailbreak')
+      return { ...view('muted', 'kindleSync.needsJailbreak'), guideUrl: JAILBREAK_GUIDE_URL }
     case 'unsupported-jailbreak':
-      return view('muted', 'kindleSync.unsupportedJailbreak')
+      return { ...view('muted', 'kindleSync.unsupportedJailbreak'), guideUrl: JAILBREAK_GUIDE_URL }
     case 'not-installed':
       return view('muted', 'kindleSync.notInstalled')
     case 'first-sync':

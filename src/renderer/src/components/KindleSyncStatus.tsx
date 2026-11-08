@@ -40,9 +40,25 @@ export function KindleSyncStatus({ view, onOpenFirstSync }: KindleSyncStatusProp
       </button>
     )
   }
-  return (
+  const status = (
     <span role="status" title={hint} className={`${className} min-w-0`}>
       {content}
     </span>
+  )
+  if (!view.guideUrl) return status
+  return (
+    <>
+      {status}
+      {/* Opens in the system browser: the main window's open handler hands http(s) URLs to shell.openExternal. */}
+      <a
+        href={view.guideUrl}
+        target="_blank"
+        rel="noreferrer"
+        title={t('kindleSync.jailbreakGuideHint')}
+        className="shrink-0 text-xs text-indigo-300 hover:text-white underline underline-offset-2"
+      >
+        {t('kindleSync.jailbreakGuide')}
+      </a>
+    </>
   )
 }
