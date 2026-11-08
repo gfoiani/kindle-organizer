@@ -161,3 +161,25 @@ Not done:
 - Go in CI;
 - export.json is not capped at the app's limits (5000 collections / 100,000 members). Beyond them the app refuses the whole file.
 
+## Install channel, fifth session (2026-11-08)
+
+| # | Behavior | RED | GREEN |
+|---|----------|-----|-------|
+| I1 | Staging the component and its installer; install-pending / install-failed states; `kindle-sync:install`; install action in the header | `b4e5f39`: 9 failed and `kindleSyncInstall` fails to load (no `install.ts`, no handler, no states) | `fa0b21d`: 706 passed; install.ts 92% statements; type-check clean |
+
+| # | What is guaranteed | Where | Result |
+|---|--------------------|-------|--------|
+| G10 | The installer deletes itself before any other command; it is valid `sh` (`sh -n`); it checks the binary runs before putting it in place; it puts the system partition back read-only; it logs OK or FAILED with the step | `kindleSyncInstall.test.ts` | PASS |
+| G11 | An `emergency.sh` without the app's marker is never replaced; nothing is written when the binary is missing; the app's own pending installer can be replaced | `kindleSyncInstall.test.ts` | PASS |
+| G12 | Install only on a jb.sh Kindle that detection reports; then "restart to finish"; a failed install shows the installer's reason | `ipcKindleSync.test.ts` | PASS |
+| G13 | Header: "not installed" is a button that offers the install, "pending" offers nothing to click, "failed" offers a retry | `kindleSyncView.test.ts` | PASS |
+
+Diagnostic on the real Kindle:
+- On 2026-11-08 `component/diagnostics/emergency.sh` was copied to the Kindle with the user's OK. `metadata.calibre` was backed up first to `~/Kindle-backup-2026-11-08/`, and the copy was checked identical with `cmp`.
+- It has not run yet: it waits for the user to restart the Kindle.
+
+Not verified:
+- **Packaging:** `electron-builder --mac --dir` failed twice on a 504 downloading Electron. CI will show whether `resources/kindle-sync/kosync` is bundled.
+- **The installer on a Kindle:** `mntroot`, `start` / `stop`, and whether `framework_ready` starts the job.
+- **Uninstall:** none yet.
+
